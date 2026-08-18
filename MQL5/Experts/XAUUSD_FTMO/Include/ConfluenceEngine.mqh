@@ -56,8 +56,14 @@ private:
    double            m_rsiBullLow, m_rsiBullHigh;
    double            m_rsiBearLow, m_rsiBearHigh;
    double            m_maxExtensionAtr;     // hard gate: distance from EMA slow (trade TF)
-   double            m_minAtrPrice;         // hard gate: volatility floor
-   double            m_maxAtrPrice;         // hard gate: volatility ceiling
+   double            m_minAtrPrice;         // hard gate: volatility floor (absolute mode)
+   double            m_maxAtrPrice;         // hard gate: volatility ceiling (absolute mode)
+   ENUM_ATR_BAND_MODE m_atrBandMode;
+   double            m_atrMinRel;           // relative mode: ATR / its own average
+   double            m_atrMaxRel;
+   double            m_atrMinPct;           // percent mode: ATR as % of price
+   double            m_atrMaxPct;
+   int               m_atrAvgPeriod;        // bars in the long-run ATR average
    double            m_volumeFactor;
 
    //--- weights
@@ -70,6 +76,8 @@ private:
    double            m_lastRsi;
    double            m_vwap;
    string            m_gateReason;
+   ENUM_GATE_REASON  m_gateCode;
+   double            m_lastAtrRatio;
 
    //--- helpers
    bool              CopyOne(const int handle, const int buffer, const int shift, double &out);
@@ -97,6 +105,11 @@ public:
                                 const int bandsPeriod, const double bandsDev,
                                 const int macdFast, const int macdSlow, const int macdSignal);
 
+   void              SetAtrBand(const ENUM_ATR_BAND_MODE mode,
+                                 const double minRel, const double maxRel,
+                                 const double minPct, const double maxPct,
+                                 const int avgPeriod);
+   double            AtrAverage(const int shift);
    void              SetThresholds(const double adxMin,
                                    const double rsiBullLow, const double rsiBullHigh,
                                    const double rsiBearLow, const double rsiBearHigh,
@@ -131,6 +144,9 @@ public:
    double            Rsi(void)        const { return m_lastRsi; }
    double            Vwap(void)       const { return m_vwap; }
    string            BreakdownText(void) const;
+   ENUM_GATE_REASON  GateCode(void)   const { return m_gateCode; }
+   string            GateReason(void) const { return m_gateReason; }
+   double            AtrRatio(void)   const { return m_lastAtrRatio; }
    double            AtrHandleValue(const int shift);
   };
 
@@ -161,6 +177,14 @@ CConfluenceEngine::CConfluenceEngine(void)
    m_maxExtensionAtr = 2.2;
    m_minAtrPrice     = 0.0;
    m_maxAtrPrice     = 0.0;
+   m_atrBandMode     = ATR_BAND_RELATIVE;
+   m_atrMinRel       = 0.60;
+   m_atrMaxRel       = 2.50;
+   m_atrMinPct       = 0.020;
+   m_atrMaxPct       = 0.350;
+   m_atrAvgPeriod    = 100;
+   m_gateCode        = GATE_OK;
+   m_lastAtrRatio    = 0.0;
    m_volumeFactor    = 1.10;
 
    m_lastAtr = m_lastAdx = m_lastRsi = 0.0;
@@ -205,6 +229,45 @@ void CConfluenceEngine::SetPeriods(const int emaFastT, const int emaSlowT,
    m_stochK = stochK; m_stochD = stochD; m_stochSlow = stochSlow;
    m_bandsPeriod = bandsPeriod; m_bandsDev = bandsDev;
    m_macdFast = macdFast; m_macdSlow = macdSlow; m_macdSignal = macdSignal;
+  }
+
+//+------------------------------------------------------------------+
+void CConfluenceEngine::SetAtrBand(const ENUM_ATR_BAND_MODE mode,
+                                   const double minRel, const double maxRel,
+                                   const double minPct, const double maxPct,
+                                   const int avgPeriod)
+  {
+   m_atrBandMode  = mode;
+   m_atrMinRel    = minRel;
+   m_atrMaxRel    = maxRel;
+   m_atrMinPct    = minPct;
+   m_atrMaxPct    = maxPct;
+   m_atrAvgPeriod = MathMax(20, avgPeriod);
+  }
+
+//+------------------------------------------------------------------+
+//| Mean ATR over the long-run window, used as the reference for the |
+//| self-adjusting volatility band.                                  |
+//+------------------------------------------------------------------+
+double CConfluenceEngine::AtrAverage(const int shift)
+  {
+   double buf[];
+   ArraySetAsSeries(buf, true);
+   int got = CopyBuffer(m_hAtr, 0, shift, m_atrAvgPeriod, buf);
+   if(got < 20)
+      return 0.0;
+
+   double sum = 0.0;
+   int n = 0;
+   for(int i = 0; i < got; i++)
+     {
+      if(buf[i] > 0.0 && buf[i] != EMPTY_VALUE)
+        {
+         sum += buf[i];
+         n++;
+        }
+     }
+   return (n > 0 ? sum / n : 0.0);
   }
 
 //+------------------------------------------------------------------+
@@ -415,6 +478,7 @@ ENUM_SIGNAL_DIR CConfluenceEngine::Evaluate(const double scoreThreshold,
    snap.riskDistance = 0.0;
    snap.reason       = "";
    m_gateReason      = "";
+   m_gateCode        = GATE_OK;
 
    const int S = 1;   // last CLOSED bar - no repainting
 
@@ -424,6 +488,7 @@ ENUM_SIGNAL_DIR CConfluenceEngine::Evaluate(const double scoreThreshold,
    double atr = 0.0;
    if(!CopyOne(m_hAtr, 0, S, atr) || atr <= 0.0)
      {
+      m_gateCode   = GATE_NO_DATA;
       m_gateReason = "ATR unavailable";
       snap.reason = m_gateReason;
       return SIGNAL_NONE;
@@ -440,23 +505,23 @@ ENUM_SIGNAL_DIR CConfluenceEngine::Evaluate(const double scoreThreshold,
    double stochK, stochKPrev, stochD, stochDPrev;
    double bbUp, bbLo, bbMid;
 
-   if(!CopyTwo(m_hEmaFastT, 0, S, emaFastT, emaFastTPrev)) { m_gateReason = "EMA fast (trade TF) unavailable"; snap.reason = m_gateReason; return SIGNAL_NONE; }
-   if(!CopyTwo(m_hEmaSlowT, 0, S, emaSlowT, emaSlowTPrev)) { m_gateReason = "EMA slow (trade TF) unavailable"; snap.reason = m_gateReason; return SIGNAL_NONE; }
-   if(!CopyTwo(m_hEmaFastM, 0, S, emaFastM, emaFastMPrev)) { m_gateReason = "EMA fast (mid TF) unavailable";   snap.reason = m_gateReason; return SIGNAL_NONE; }
-   if(!CopyTwo(m_hEmaSlowM, 0, S, emaSlowM, emaSlowMPrev)) { m_gateReason = "EMA slow (mid TF) unavailable";   snap.reason = m_gateReason; return SIGNAL_NONE; }
-   if(!CopyOne(m_hEmaFastH, 0, S, emaFastH))               { m_gateReason = "EMA fast (high TF) unavailable";  snap.reason = m_gateReason; return SIGNAL_NONE; }
-   if(!CopyOne(m_hEmaSlowH, 0, S, emaSlowH))               { m_gateReason = "EMA slow (high TF) unavailable";  snap.reason = m_gateReason; return SIGNAL_NONE; }
-   if(!CopyTwo(m_hRsi, 0, S, rsi, rsiPrev))                { m_gateReason = "RSI unavailable";   snap.reason = m_gateReason; return SIGNAL_NONE; }
-   if(!CopyTwo(m_hMacd, 0, S, macdMain, macdMainPrev))     { m_gateReason = "MACD unavailable";  snap.reason = m_gateReason; return SIGNAL_NONE; }
-   if(!CopyTwo(m_hMacd, 1, S, macdSig, macdSigPrev))       { m_gateReason = "MACD signal unavailable"; snap.reason = m_gateReason; return SIGNAL_NONE; }
-   if(!CopyOne(m_hAdx, 0, S, adx))                         { m_gateReason = "ADX unavailable";   snap.reason = m_gateReason; return SIGNAL_NONE; }
-   if(!CopyOne(m_hAdx, 1, S, diPlus))                      { m_gateReason = "DI+ unavailable";   snap.reason = m_gateReason; return SIGNAL_NONE; }
-   if(!CopyOne(m_hAdx, 2, S, diMinus))                     { m_gateReason = "DI- unavailable";   snap.reason = m_gateReason; return SIGNAL_NONE; }
-   if(!CopyTwo(m_hStoch, 0, S, stochK, stochKPrev))        { m_gateReason = "Stoch K unavailable"; snap.reason = m_gateReason; return SIGNAL_NONE; }
-   if(!CopyTwo(m_hStoch, 1, S, stochD, stochDPrev))        { m_gateReason = "Stoch D unavailable"; snap.reason = m_gateReason; return SIGNAL_NONE; }
-   if(!CopyOne(m_hBands, 0, S, bbMid))                     { m_gateReason = "BB mid unavailable";  snap.reason = m_gateReason; return SIGNAL_NONE; }
-   if(!CopyOne(m_hBands, 1, S, bbUp))                      { m_gateReason = "BB upper unavailable"; snap.reason = m_gateReason; return SIGNAL_NONE; }
-   if(!CopyOne(m_hBands, 2, S, bbLo))                      { m_gateReason = "BB lower unavailable"; snap.reason = m_gateReason; return SIGNAL_NONE; }
+   if(!CopyTwo(m_hEmaFastT, 0, S, emaFastT, emaFastTPrev)) { m_gateCode = GATE_NO_DATA; m_gateReason = "EMA fast (trade TF) unavailable"; snap.reason = m_gateReason; return SIGNAL_NONE; }
+   if(!CopyTwo(m_hEmaSlowT, 0, S, emaSlowT, emaSlowTPrev)) { m_gateCode = GATE_NO_DATA; m_gateReason = "EMA slow (trade TF) unavailable"; snap.reason = m_gateReason; return SIGNAL_NONE; }
+   if(!CopyTwo(m_hEmaFastM, 0, S, emaFastM, emaFastMPrev)) { m_gateCode = GATE_NO_DATA; m_gateReason = "EMA fast (mid TF) unavailable";   snap.reason = m_gateReason; return SIGNAL_NONE; }
+   if(!CopyTwo(m_hEmaSlowM, 0, S, emaSlowM, emaSlowMPrev)) { m_gateCode = GATE_NO_DATA; m_gateReason = "EMA slow (mid TF) unavailable";   snap.reason = m_gateReason; return SIGNAL_NONE; }
+   if(!CopyOne(m_hEmaFastH, 0, S, emaFastH))               { m_gateCode = GATE_NO_DATA; m_gateReason = "EMA fast (high TF) unavailable";  snap.reason = m_gateReason; return SIGNAL_NONE; }
+   if(!CopyOne(m_hEmaSlowH, 0, S, emaSlowH))               { m_gateCode = GATE_NO_DATA; m_gateReason = "EMA slow (high TF) unavailable";  snap.reason = m_gateReason; return SIGNAL_NONE; }
+   if(!CopyTwo(m_hRsi, 0, S, rsi, rsiPrev))                { m_gateCode = GATE_NO_DATA; m_gateReason = "RSI unavailable";   snap.reason = m_gateReason; return SIGNAL_NONE; }
+   if(!CopyTwo(m_hMacd, 0, S, macdMain, macdMainPrev))     { m_gateCode = GATE_NO_DATA; m_gateReason = "MACD unavailable";  snap.reason = m_gateReason; return SIGNAL_NONE; }
+   if(!CopyTwo(m_hMacd, 1, S, macdSig, macdSigPrev))       { m_gateCode = GATE_NO_DATA; m_gateReason = "MACD signal unavailable"; snap.reason = m_gateReason; return SIGNAL_NONE; }
+   if(!CopyOne(m_hAdx, 0, S, adx))                         { m_gateCode = GATE_NO_DATA; m_gateReason = "ADX unavailable";   snap.reason = m_gateReason; return SIGNAL_NONE; }
+   if(!CopyOne(m_hAdx, 1, S, diPlus))                      { m_gateCode = GATE_NO_DATA; m_gateReason = "DI+ unavailable";   snap.reason = m_gateReason; return SIGNAL_NONE; }
+   if(!CopyOne(m_hAdx, 2, S, diMinus))                     { m_gateCode = GATE_NO_DATA; m_gateReason = "DI- unavailable";   snap.reason = m_gateReason; return SIGNAL_NONE; }
+   if(!CopyTwo(m_hStoch, 0, S, stochK, stochKPrev))        { m_gateCode = GATE_NO_DATA; m_gateReason = "Stoch K unavailable"; snap.reason = m_gateReason; return SIGNAL_NONE; }
+   if(!CopyTwo(m_hStoch, 1, S, stochD, stochDPrev))        { m_gateCode = GATE_NO_DATA; m_gateReason = "Stoch D unavailable"; snap.reason = m_gateReason; return SIGNAL_NONE; }
+   if(!CopyOne(m_hBands, 0, S, bbMid))                     { m_gateCode = GATE_NO_DATA; m_gateReason = "BB mid unavailable";  snap.reason = m_gateReason; return SIGNAL_NONE; }
+   if(!CopyOne(m_hBands, 1, S, bbUp))                      { m_gateCode = GATE_NO_DATA; m_gateReason = "BB upper unavailable"; snap.reason = m_gateReason; return SIGNAL_NONE; }
+   if(!CopyOne(m_hBands, 2, S, bbLo))                      { m_gateCode = GATE_NO_DATA; m_gateReason = "BB lower unavailable"; snap.reason = m_gateReason; return SIGNAL_NONE; }
 
    m_lastAdx = adx;
    m_lastRsi = rsi;
@@ -468,6 +533,7 @@ ENUM_SIGNAL_DIR CConfluenceEngine::Evaluate(const double scoreThreshold,
 
    if(close <= 0.0 || open <= 0.0)
      {
+      m_gateCode   = GATE_NO_DATA;
       m_gateReason = "price data unavailable";
       snap.reason = m_gateReason;
       return SIGNAL_NONE;
@@ -476,20 +542,61 @@ ENUM_SIGNAL_DIR CConfluenceEngine::Evaluate(const double scoreThreshold,
    //================================================================
    // 2. HARD GATES - tradeability, not direction
    //================================================================
-   if(m_minAtrPrice > 0.0 && atr < m_minAtrPrice)
+   double lo = 0.0, hi = 0.0, measure = 0.0;
+   string units = "";
+
+   if(m_atrBandMode == ATR_BAND_RELATIVE)
      {
-      m_gateReason = StringFormat("ATR %.2f below floor %.2f - market too quiet", atr, m_minAtrPrice);
+      double avg = AtrAverage(S);
+      if(avg > 0.0)
+        {
+         measure = atr / avg;
+         lo = m_atrMinRel;
+         hi = m_atrMaxRel;
+         units = "x avg";
+        }
+      m_lastAtrRatio = measure;
+     }
+   else
+      if(m_atrBandMode == ATR_BAND_PERCENT)
+        {
+         if(close > 0.0)
+           {
+            measure = atr / close * 100.0;
+            lo = m_atrMinPct;
+            hi = m_atrMaxPct;
+            units = "% of price";
+           }
+         m_lastAtrRatio = measure;
+        }
+      else
+        {
+         measure = atr;
+         lo = m_minAtrPrice;
+         hi = m_maxAtrPrice;
+         units = "price";
+         m_lastAtrRatio = atr;
+        }
+
+   if(measure > 0.0 && lo > 0.0 && measure < lo)
+     {
+      m_gateCode   = GATE_ATR_LOW;
+      m_gateReason = StringFormat("ATR %.3f %s below floor %.3f - market too quiet",
+                                  measure, units, lo);
       snap.reason = m_gateReason;
       return SIGNAL_NONE;
      }
-   if(m_maxAtrPrice > 0.0 && atr > m_maxAtrPrice)
+   if(measure > 0.0 && hi > 0.0 && measure > hi)
      {
-      m_gateReason = StringFormat("ATR %.2f above ceiling %.2f - conditions too wild", atr, m_maxAtrPrice);
+      m_gateCode   = GATE_ATR_HIGH;
+      m_gateReason = StringFormat("ATR %.3f %s above ceiling %.3f - conditions too wild",
+                                  measure, units, hi);
       snap.reason = m_gateReason;
       return SIGNAL_NONE;
      }
    if(adx < m_adxMin)
      {
+      m_gateCode   = GATE_ADX_WEAK;
       m_gateReason = StringFormat("ADX %.1f below %.1f - no trend to ride", adx, m_adxMin);
       snap.reason = m_gateReason;
       return SIGNAL_NONE;
@@ -498,6 +605,7 @@ ENUM_SIGNAL_DIR CConfluenceEngine::Evaluate(const double scoreThreshold,
    double extension = MathAbs(close - emaSlowT) / atr;
    if(m_maxExtensionAtr > 0.0 && extension > m_maxExtensionAtr)
      {
+      m_gateCode   = GATE_OVEREXTENDED;
       m_gateReason = StringFormat("price %.1f ATR from EMA%d - too extended to chase", extension, m_emaSlowT);
       snap.reason = m_gateReason;
       return SIGNAL_NONE;
@@ -728,6 +836,7 @@ ENUM_SIGNAL_DIR CConfluenceEngine::Evaluate(const double scoreThreshold,
       return SIGNAL_SELL;
      }
 
+   m_gateCode  = GATE_NO_EDGE;
    snap.reason = StringFormat("no edge (bull=%.1f bear=%.1f, need %.1f + %.1f margin)",
                               snap.bullScore, snap.bearScore, scoreThreshold, dominanceMargin);
    return SIGNAL_NONE;

@@ -258,6 +258,80 @@ rate. Targets worth holding it to:
 
 ---
 
+## 4b. What a real backtest showed, and what changed
+
+A 2025-2026 XAUUSD backtest of the original defaults returned **-1.79% in
+sample and -0.95% forward**. Analysing the equity export
+(`tools/analyse_tester_report.py`) found two separate problems.
+
+### The EA was switched off ~97% of the time
+
+| Run | Window | Days with a trade |
+|---|---|---|
+| In-sample | 2025.08.01 – 2026.04.10 (~253 days) | **10** |
+| Forward | 2026.04.12 – 2026.08.16 (~126 days) | **3** |
+
+Both runs traded normally for a couple of weeks and then stopped dead. A gate
+that flips once and stays flipped — sessions recur daily, news is intermittent,
+spread varies. The **absolute ATR band** was the only candidate: gold re-rated,
+M15 ATR rose past the fixed $14.00 ceiling, and the hard gate vetoed every bar
+from then on.
+
+**Fixes.** The volatility band is now **relative by default** — ATR against its
+own long-run average — which is dimensionless and cannot go stale when gold
+re-prices or the timeframe changes. And a **veto histogram** now counts every
+rejection by cause, on the console and in the journal, daily and since start. A
+silent EA now explains itself in one line instead of leaving you to guess.
+
+> 16 trades is far too small a sample to judge an entry edge. **Fixing uptime is
+> a prerequisite to evaluating anything else** — do not tune the signal on this
+> data.
+
+### The exit geometry inverted the design goal
+
+| | Design intent | Backtest |
+|---|---|---|
+| Average win | 2.00R | **0.44R** |
+| Average loss | 1.00R | **0.89R** |
+| Payoff ratio | 2.00 | **0.50** |
+| Break-even win rate | 33% | **65%** |
+| Actual win rate | — | 46% |
+
+**All six winners exited identically**: partial at 1R, runner stopped at
+breakeven. **Zero reached TP2. Zero trailed.** The "larger wins" half of the
+design never happened once.
+
+The cause is arithmetic. TP2 at 3R measured against a **1.6 × ATR** stop needs
+**4.8 ATR** of favourable excursion in a single trade, with no 2-ATR pullback
+first — close to a full day's gold range in one direction on M15. Meanwhile the
+runner sat at breakeven until 1.5R, so any ordinary retrace killed it for +0.1R.
+
+**This is a flaw in my own design, and my exit simulator did not catch it** — it
+verified the mechanics on a synthetic path that reached 3R, assuming the very
+thing the data disproves.
+
+**Fixes** (defaults changed, and the Stage 2 ranges retargeted):
+
+| Input | Was | Now | Why |
+|---|---|---|---|
+| `InpSlAtrMult` | 1.60 | **1.10** | makes 1R a smaller price move, so targets are reachable |
+| `InpTp2R` | 3.00 | **2.20** | 2.2R × 1.1 ATR = 2.4 ATR, an ordinary session move |
+| `InpTrailStartR` | 1.50 | **1.05** | trail engages right after the partial, not 0.5R later |
+| `InpTrailAtrMult` | 2.00 | **1.20** | a 2-ATR give-back never locked anything in |
+| `InpPartialPct` | 50 | **40** | leaves more on the runner |
+| `InpBreakevenLockR` | 0.10 | **0.05** | |
+
+These are **reasoned hypotheses, not validated results.** Three exit structures
+are provided as head-to-head comparison files — `Compare_Exit_A_Scaled`,
+`Compare_Exit_B_Runner` (no scale-out at all), `Compare_Exit_C_Tight` — because
+the honest way to settle this is to run them on your data, not to trust my
+arithmetic twice.
+
+**Judge them on the payoff ratio.** At a 46% win rate you need roughly **1.6**.
+The original delivered 0.50.
+
+---
+
 ## 5. Risk management — the part that actually passes challenges
 
 ### Position sizing

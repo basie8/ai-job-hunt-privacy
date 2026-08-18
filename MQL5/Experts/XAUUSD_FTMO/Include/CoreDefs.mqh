@@ -79,6 +79,47 @@ string StatusLabel(const ENUM_EA_STATUS s)
    return "UNKNOWN";
   }
 
+//--- why a bar was rejected before scoring. Counted so that "the EA has
+//--- stopped trading" is always answerable from the journal or the console.
+enum ENUM_GATE_REASON
+  {
+   GATE_OK           = 0,
+   GATE_NO_DATA      = 1,  // indicator or price history unavailable
+   GATE_ATR_LOW      = 2,  // volatility below the floor
+   GATE_ATR_HIGH     = 3,  // volatility above the ceiling
+   GATE_ADX_WEAK     = 4,  // no trend to ride
+   GATE_OVEREXTENDED = 5,  // too far from the mean to chase
+   GATE_NO_EDGE      = 6,  // scored, but neither side was dominant
+   GATE_REASON_COUNT = 7
+  };
+
+//+------------------------------------------------------------------+
+string GateLabel(const ENUM_GATE_REASON g)
+  {
+   switch(g)
+     {
+      case GATE_OK:           return "tradeable";
+      case GATE_NO_DATA:      return "no data";
+      case GATE_ATR_LOW:      return "ATR below floor";
+      case GATE_ATR_HIGH:     return "ATR above ceiling";
+      case GATE_ADX_WEAK:     return "ADX too weak";
+      case GATE_OVEREXTENDED: return "over-extended";
+      case GATE_NO_EDGE:      return "no score edge";
+     }
+   return "?";
+  }
+
+//--- how the volatility band is expressed.
+//--- An ABSOLUTE band in dollars silently switches the EA off when gold
+//--- re-rates, which is exactly what a backtest across 2025-2026 exposed.
+//--- The relative modes cannot do that.
+enum ENUM_ATR_BAND_MODE
+  {
+   ATR_BAND_RELATIVE = 0, // ATR vs its own long-run average (self-adjusting)
+   ATR_BAND_PERCENT  = 1, // ATR as a percent of price
+   ATR_BAND_ABSOLUTE = 2  // ATR in price - needs recalibration by hand
+  };
+
 //--- a single high impact calendar entry, already normalised to server time
 struct NewsEvent
   {

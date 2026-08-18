@@ -1,8 +1,8 @@
 ; XAUUSD FTMO Confluence EA - OPTIMISATION Stage2_Exits
 ;
-; Exit geometry. Sets the reward side of expectancy once entries are fixed.
+; Exit geometry, and the stage that matters most right now. A backtest showed every winner exiting at breakeven behind its partial and NO runner reaching a 3R target - a 3R target measured against a 1.6 ATR stop needs 4.8 ATR of favourable excursion, which M15 gold rarely delivers. These ranges deliberately reach into shorter stops and nearer targets.
 ;
-; Optimising 4 parameter(s), 2,205 passes.
+; Optimising 4 parameter(s), 3,969 passes.
 ; Sweeps only the lines ending ||Y. Everything else is fixed at the
 ; value shown, including every risk and compliance setting.
 ;
@@ -35,25 +35,31 @@ InpMaxTradesPerDay=3
 InpMaxConsecLosses=3
 InpLossStreakFactor=0.60
 InpMaxOpenPositions=1
-InpSlAtrMult=1.60||1||0.2||2.6||Y
+InpSlAtrMult=1.10||0.8||0.2||2||Y
 InpSwingLookback=12
 InpSwingBufferAtr=0.25
 InpMinStopAtr=1.00
 InpMaxStopAtr=3.00
 InpTp1R=1.00
-InpTp2R=3.00||2||0.5||5||Y
+InpTp2R=2.20||1.5||0.25||3.5||Y
 InpUsePartial=true
-InpPartialPct=50.0
-InpBreakevenLockR=0.10
+InpPartialPct=40.0
+InpBreakevenLockR=0.05
 InpUseTrailing=true
-InpTrailStartR=1.50||1||0.25||2.5||Y
-InpTrailAtrMult=2.00||1.5||0.5||3.5||Y
+InpTrailStartR=1.05||0.8||0.2||2||Y
+InpTrailAtrMult=1.20||0.8||0.2||2.4||Y
 InpTrailStepPrice=0.20
 InpTrailLookback=10
 InpScoreThreshold=72.0
 InpDominanceMargin=30.0
 InpAdxMin=20.0
 InpMaxExtensionAtr=2.20
+InpAtrBandMode=0
+InpAtrMinRelative=0.60
+InpAtrMaxRelative=2.50
+InpAtrAvgPeriod=100
+InpAtrMinPercent=0.020
+InpAtrMaxPercent=0.350
 InpMinAtrPrice=1.20
 InpMaxAtrPrice=14.00
 InpVolumeFactor=1.10

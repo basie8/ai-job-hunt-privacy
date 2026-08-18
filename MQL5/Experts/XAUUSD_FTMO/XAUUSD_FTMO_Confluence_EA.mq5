@@ -65,19 +65,19 @@ input double          InpLossStreakFactor    = 0.60;  // Risk multiplier per ext
 input int             InpMaxOpenPositions    = 1;     // Max simultaneous positions
 
 input group "=== Exit management (the asymmetry engine) ==="
-input double          InpSlAtrMult           = 1.60;  // Initial stop = ATR x this
+input double          InpSlAtrMult           = 1.10;  // Initial stop = ATR x this
 input int             InpSwingLookback       = 12;    // Bars scanned for the structural stop
 input double          InpSwingBufferAtr      = 0.25;  // Buffer beyond the swing, in ATR
 input double          InpMinStopAtr          = 1.00;  // Minimum stop distance, in ATR
 input double          InpMaxStopAtr          = 3.00;  // Maximum stop distance, in ATR
 input double          InpTp1R                = 1.00;  // First target, in R
-input double          InpTp2R                = 3.00;  // Runner target, in R
+input double          InpTp2R                = 2.20;  // Runner target, in R
 input bool            InpUsePartial          = true;  // Scale out at TP1
-input double          InpPartialPct          = 50.0;  // % of the position closed at TP1
-input double          InpBreakevenLockR      = 0.10;  // Stop parked this many R beyond entry
+input double          InpPartialPct          = 40.0;  // % of the position closed at TP1
+input double          InpBreakevenLockR      = 0.05;  // Stop parked this many R beyond entry
 input bool            InpUseTrailing         = true;  // Trail the runner
-input double          InpTrailStartR         = 1.50;  // Trail engages at this many R
-input double          InpTrailAtrMult        = 2.00;  // Chandelier distance, in ATR
+input double          InpTrailStartR         = 1.05;  // Trail engages at this many R
+input double          InpTrailAtrMult        = 1.20;  // Chandelier distance, in ATR
 input double          InpTrailStepPrice      = 0.20;  // Min stop improvement before a modify (USD)
 input int             InpTrailLookback       = 10;    // Bars for the chandelier extreme
 
@@ -86,8 +86,14 @@ input double          InpScoreThreshold      = 72.0;  // Minimum score (0-100) t
 input double          InpDominanceMargin     = 30.0;  // Winning side must lead by this much
 input double          InpAdxMin              = 20.0;  // Minimum ADX (hard gate)
 input double          InpMaxExtensionAtr     = 2.20;  // Max distance from the slow EMA, in ATR
-input double          InpMinAtrPrice         = 1.20;  // Volatility floor, in PRICE (0 = off)
-input double          InpMaxAtrPrice         = 14.00; // Volatility ceiling, in PRICE (0 = off)
+input ENUM_ATR_BAND_MODE InpAtrBandMode      = ATR_BAND_RELATIVE; // How the volatility band is measured
+input double          InpAtrMinRelative      = 0.60;  // RELATIVE: min ATR / its own average
+input double          InpAtrMaxRelative      = 2.50;  // RELATIVE: max ATR / its own average
+input int             InpAtrAvgPeriod        = 100;   // RELATIVE: bars in the ATR average
+input double          InpAtrMinPercent       = 0.020; // PERCENT: min ATR as % of price
+input double          InpAtrMaxPercent       = 0.350; // PERCENT: max ATR as % of price
+input double          InpMinAtrPrice         = 1.20;  // ABSOLUTE: floor in price (0 = off)
+input double          InpMaxAtrPrice         = 14.00; // ABSOLUTE: ceiling in price (0 = off)
 input double          InpVolumeFactor        = 1.10;  // Signal-bar volume vs 20-bar average
 
 input group "=== Indicator periods ==="
@@ -203,6 +209,16 @@ ENUM_EA_STATUS g_status       = EA_STATUS_ACTIVE;
 string   g_statusDetail       = "";
 bool     g_showParams         = false;
 bool     g_showMetrics        = true;
+
+//--- "why am I not trading" histogram. Counted since start and for today,
+//--- so a silent EA always explains itself instead of just sitting there.
+long     g_vetoStatus[9];
+long     g_vetoStatusDay[9];
+long     g_vetoGate[GATE_REASON_COUNT];
+long     g_vetoGateDay[GATE_REASON_COUNT];
+long     g_barsSeen      = 0;
+long     g_barsSeenDay   = 0;
+datetime g_vetoDayStamp  = 0;
 datetime g_lastBarTime  = 0;
 datetime g_lastEntryTime = 0;
 datetime g_lastNewsRefresh = 0;
@@ -738,12 +754,39 @@ bool ValidateInputs(void)
                   InpTrailStartR, InpTp1R);
 
    //--- volatility band
-   if(InpMaxAtrPrice > 0.0 && InpMinAtrPrice > 0.0 && InpMaxAtrPrice <= InpMinAtrPrice)
+   if(InpAtrBandMode == ATR_BAND_ABSOLUTE)
      {
-      PrintFormat("INPUT ERROR: InpMaxAtrPrice (%.2f) must exceed InpMinAtrPrice (%.2f).",
-                  InpMaxAtrPrice, InpMinAtrPrice);
-      errors++;
+      if(InpMaxAtrPrice > 0.0 && InpMinAtrPrice > 0.0 && InpMaxAtrPrice <= InpMinAtrPrice)
+        {
+         PrintFormat("INPUT ERROR: InpMaxAtrPrice (%.2f) must exceed InpMinAtrPrice (%.2f).",
+                     InpMaxAtrPrice, InpMinAtrPrice);
+         errors++;
+        }
+      Print("INPUT WARNING: the ABSOLUTE volatility band is fixed in dollars and will "
+            "silently stop the EA when gold re-rates. RELATIVE mode is recommended.");
      }
+   else
+      if(InpAtrBandMode == ATR_BAND_RELATIVE)
+        {
+         if(InpAtrMaxRelative <= InpAtrMinRelative)
+           {
+            PrintFormat("INPUT ERROR: InpAtrMaxRelative (%.2f) must exceed InpAtrMinRelative (%.2f).",
+                        InpAtrMaxRelative, InpAtrMinRelative);
+            errors++;
+           }
+         if(InpAtrAvgPeriod < 20)
+           {
+            Print("INPUT ERROR: InpAtrAvgPeriod must be at least 20.");
+            errors++;
+           }
+        }
+      else
+         if(InpAtrMaxPercent <= InpAtrMinPercent)
+           {
+            PrintFormat("INPUT ERROR: InpAtrMaxPercent (%.3f) must exceed InpAtrMinPercent (%.3f).",
+                        InpAtrMaxPercent, InpAtrMinPercent);
+            errors++;
+           }
 
    //--- risk
    if(InpRiskMode != RISK_FIXED_LOT && InpRiskPercent <= 0.0)
@@ -956,6 +999,11 @@ int OnInit(void)
                      InpBandsPeriod, InpBandsDev,
                      InpMacdFast, InpMacdSlow, InpMacdSignal);
 
+   g_conf.SetAtrBand(InpAtrBandMode,
+                     InpAtrMinRelative, InpAtrMaxRelative,
+                     InpAtrMinPercent, InpAtrMaxPercent,
+                     InpAtrAvgPeriod);
+
    g_conf.SetThresholds(InpAdxMin,
                         InpRsiBullLow, InpRsiBullHigh,
                         InpRsiBearLow, InpRsiBearHigh,
@@ -1044,6 +1092,7 @@ int OnInit(void)
 void OnDeinit(const int reason)
   {
    EventKillTimer();
+   LogVetoSummary(false);
    g_dash.Destroy();
    PrintFormat("=== EA stopped (reason %d) ===", reason);
   }
@@ -1063,12 +1112,108 @@ void OnTimer(void)
   }
 
 //+------------------------------------------------------------------+
+//| Veto accounting.                                                 |
+//|                                                                  |
+//| A backtest that traded on 13 days out of 379 gave no clue why.   |
+//| Counting every rejection by cause turns that into a one-line     |
+//| answer, on the console and in the journal.                       |
+//+------------------------------------------------------------------+
+void VetoRollDayIfNeeded(const datetime now)
+  {
+   datetime d = DayStart(now);
+   if(d == g_vetoDayStamp)
+      return;
+
+   if(g_vetoDayStamp > 0 && g_barsSeenDay > 0)
+      LogVetoSummary(true);
+
+   g_vetoDayStamp = d;
+   g_barsSeenDay  = 0;
+   ArrayInitialize(g_vetoStatusDay, 0);
+   ArrayInitialize(g_vetoGateDay, 0);
+  }
+
+//+------------------------------------------------------------------+
+void CountVeto(const ENUM_EA_STATUS st)
+  {
+   int i = (int)st;
+   if(i >= 0 && i < 9)
+     {
+      g_vetoStatus[i]++;
+      g_vetoStatusDay[i]++;
+     }
+  }
+
+//+------------------------------------------------------------------+
+void CountGate(const ENUM_GATE_REASON g)
+  {
+   int i = (int)g;
+   if(i >= 0 && i < GATE_REASON_COUNT)
+     {
+      g_vetoGate[i]++;
+      g_vetoGateDay[i]++;
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| Ranks the reasons and prints them. 'daily' selects today's counts.|
+//+------------------------------------------------------------------+
+void LogVetoSummary(const bool daily)
+  {
+   long bars = (daily ? g_barsSeenDay : g_barsSeen);
+   if(bars <= 0)
+      return;
+
+   PrintFormat("[Why] %s: %d evaluated bars, %d trades taken.",
+               (daily ? "today" : "since start"), (int)bars,
+               (daily ? g_risk.TradesToday() : (long)g_stats.Trades()));
+
+   for(int i = 0; i < 9; i++)
+     {
+      long c = (daily ? g_vetoStatusDay[i] : g_vetoStatus[i]);
+      if(c > 0 && (ENUM_EA_STATUS)i != EA_STATUS_ACTIVE)
+         PrintFormat("        %-22s %6d  (%.0f%%)", StatusLabel((ENUM_EA_STATUS)i),
+                     (int)c, 100.0 * c / bars);
+     }
+   for(int g = 1; g < GATE_REASON_COUNT; g++)
+     {
+      long c = (daily ? g_vetoGateDay[g] : g_vetoGate[g]);
+      if(c > 0)
+         PrintFormat("        gate: %-16s %6d  (%.0f%%)", GateLabel((ENUM_GATE_REASON)g),
+                     (int)c, 100.0 * c / bars);
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| The single dominant reason, for the console.                     |
+//+------------------------------------------------------------------+
+string TopVetoReason(void)
+  {
+   long best = 0;
+   string label = "none";
+
+   for(int i = 0; i < 9; i++)
+     {
+      if((ENUM_EA_STATUS)i == EA_STATUS_ACTIVE) continue;
+      if(g_vetoStatus[i] > best) { best = g_vetoStatus[i]; label = StatusLabel((ENUM_EA_STATUS)i); }
+     }
+   for(int g = 1; g < GATE_REASON_COUNT; g++)
+      if(g_vetoGate[g] > best) { best = g_vetoGate[g]; label = GateLabel((ENUM_GATE_REASON)g); }
+
+   if(best <= 0 || g_barsSeen <= 0)
+      return "nothing blocking";
+   return StringFormat("%s (%.0f%% of bars)", label, 100.0 * best / g_barsSeen);
+  }
+
+//+------------------------------------------------------------------+
 //| Records what the EA is doing, for the console banner. Called at  |
 //| every decision point in OnTick so the panel and the trade logic  |
 //| can never disagree about why nothing is happening.               |
 //+------------------------------------------------------------------+
 void SetStatus(const ENUM_EA_STATUS st, const string detail)
   {
+   if(st != g_status || st != EA_STATUS_ACTIVE)
+      CountVeto(st);
    g_status          = st;
    g_statusDetail    = detail;
    g_lastBlockReason = detail;
@@ -1187,6 +1332,10 @@ void OnTick(void)
       return;
    g_lastBarTime = barTime;
 
+   VetoRollDayIfNeeded(now);
+   g_barsSeen++;
+   g_barsSeenDay++;
+
    //--- 10. quota mode: relax the bar late in the day if nothing has traded
    double threshold = InpScoreThreshold;
    double margin    = InpDominanceMargin;
@@ -1208,6 +1357,8 @@ void OnTick(void)
    //--- 11. evaluate the confluence stack
    SignalSnapshot snap;
    ENUM_SIGNAL_DIR dir = g_conf.Evaluate(threshold, margin, snap);
+
+   CountGate(g_conf.GateCode());
 
    if(dir == SIGNAL_NONE)
      {
@@ -1632,6 +1783,18 @@ void UpdateDashboard(void)
          if(StringLen(g_news.LastError()) > 0)
             g_dash.Row("Feed warning", g_news.LastError(), AURUM_WARN);
         }
+
+   //================= why not trading =============================
+   g_dash.Section("WHY NOT TRADING");
+   g_dash.Row("Bars evaluated",
+              StringFormat("%d total, %d today", (int)g_barsSeen, (int)g_barsSeenDay));
+   g_dash.Row("Dominant blocker", TopVetoReason(),
+              (g_barsSeen > 200 && g_stats.Trades() == 0 ? AURUM_BAD : AURUM_TEXT));
+   g_dash.Row("ATR band",
+              StringFormat("%s, now %.3f",
+                           (InpAtrBandMode == ATR_BAND_RELATIVE ? "relative" :
+                            InpAtrBandMode == ATR_BAND_PERCENT  ? "percent"  : "absolute"),
+                           g_conf.AtrRatio()));
 
    //================= positions ===================================
    g_dash.Section("POSITIONS");

@@ -4,8 +4,10 @@
 ; step-based sweep would iterate thousands of invalid values. Timeframes
 ; are therefore compared as discrete single runs, not optimised.
 ;
-; ATR bounds are scaled by sqrt(period) from the M15 baseline and are a
-; STARTING POINT only - re-run Stage3 per timeframe to calibrate them.
+; No ATR bounds are set here. In RELATIVE mode the band is ATR against
+; its own average, which is dimensionless - it needs no rescaling when
+; the timeframe changes, and none when the gold price changes either.
+; That is the whole reason relative mode is the default.
 ;
 InpSymbolOverride=
 InpMagic=20260818
@@ -33,27 +35,33 @@ InpMaxTradesPerDay=3
 InpMaxConsecLosses=3
 InpLossStreakFactor=0.60
 InpMaxOpenPositions=1
-InpSlAtrMult=1.60
+InpSlAtrMult=1.10
 InpSwingLookback=12
 InpSwingBufferAtr=0.25
 InpMinStopAtr=1.00
 InpMaxStopAtr=3.00
 InpTp1R=1.00
-InpTp2R=3.00
+InpTp2R=2.20
 InpUsePartial=true
-InpPartialPct=50.0
-InpBreakevenLockR=0.10
+InpPartialPct=40.0
+InpBreakevenLockR=0.05
 InpUseTrailing=true
-InpTrailStartR=1.50
-InpTrailAtrMult=2.00
+InpTrailStartR=1.05
+InpTrailAtrMult=1.20
 InpTrailStepPrice=0.20
 InpTrailLookback=10
 InpScoreThreshold=72.0
 InpDominanceMargin=30.0
 InpAdxMin=20.0
 InpMaxExtensionAtr=2.20
-InpMinAtrPrice=1.7
-InpMaxAtrPrice=20
+InpAtrBandMode=0
+InpAtrMinRelative=0.60
+InpAtrMaxRelative=2.50
+InpAtrAvgPeriod=100
+InpAtrMinPercent=0.020
+InpAtrMaxPercent=0.350
+InpMinAtrPrice=1.20
+InpMaxAtrPrice=14.00
 InpVolumeFactor=1.10
 InpEmaFastTrade=8
 InpEmaSlowTrade=21

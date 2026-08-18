@@ -1,13 +1,12 @@
-; XAUUSD FTMO Confluence EA - OPTIMISATION Stage3_Volatility
+; XAUUSD FTMO Confluence EA - EXIT STRUCTURE Exit_C_Tight
 ;
-; The volatility regime filter, in RELATIVE mode - ATR against its own long-run average. The old absolute dollar band is what silently switched the EA off for eight months of a backtest when gold re-rated; a relative band cannot do that. Widen these only if the veto histogram shows ATR rejections dominating.
+; Tight and fast. Nearer targets and a shorter stop, betting that a higher hit rate beats a larger but rarely-reached target.
 ;
-; Optimising 3 parameter(s), 616 passes.
-; Sweeps only the lines ending ||Y. Everything else is fixed at the
-; value shown, including every risk and compliance setting.
-;
-; Run order matters: freeze this stage's winner into the next stage's
-; file before running it.
+; Single run, not an optimisation. Run all three Exit_* files over the
+; same period and compare profit factor and the payoff ratio (avg win
+; divided by avg loss). The payoff is the number that was broken:
+; the backtest delivered 0.50 where roughly 1.6 is needed at a 46%
+; win rate.
 ;
 InpSymbolOverride=
 InpMagic=20260818
@@ -35,28 +34,28 @@ InpMaxTradesPerDay=3
 InpMaxConsecLosses=3
 InpLossStreakFactor=0.60
 InpMaxOpenPositions=1
-InpSlAtrMult=1.10
+InpSlAtrMult=0.90
 InpSwingLookback=12
 InpSwingBufferAtr=0.25
 InpMinStopAtr=1.00
 InpMaxStopAtr=3.00
-InpTp1R=1.00
-InpTp2R=2.20
+InpTp1R=0.8
+InpTp2R=1.8
 InpUsePartial=true
-InpPartialPct=40.0
+InpPartialPct=50
 InpBreakevenLockR=0.05
 InpUseTrailing=true
-InpTrailStartR=1.05
-InpTrailAtrMult=1.20
+InpTrailStartR=0.85
+InpTrailAtrMult=1.0
 InpTrailStepPrice=0.20
 InpTrailLookback=10
 InpScoreThreshold=72.0
 InpDominanceMargin=30.0
 InpAdxMin=20.0
-InpMaxExtensionAtr=2.20||1.4||0.3||3.2||Y
+InpMaxExtensionAtr=2.20
 InpAtrBandMode=0
-InpAtrMinRelative=0.60||0.3||0.1||1||Y
-InpAtrMaxRelative=2.50||1.5||0.25||4||Y
+InpAtrMinRelative=0.60
+InpAtrMaxRelative=2.50
 InpAtrAvgPeriod=100
 InpAtrMinPercent=0.020
 InpAtrMaxPercent=0.350

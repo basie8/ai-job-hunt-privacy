@@ -73,3 +73,18 @@ what a static read cannot: is the threshold reachable at all, can both sides
 score highly at once, and how much more often does an aligned state fire than
 noise. The separation figure it reports is what drove the 66/22 -> 72/30 default
 change; re-run it after changing any weight or threshold.
+
+## analyse_tester_report.py
+
+    python3 tools/analyse_tester_report.py <testergraph.report.csv>
+
+Reconstructs closed trades from a Strategy Tester equity export and reports the
+numbers that decide whether the exit design can work: win rate, payoff ratio,
+profit factor, and the win rate that payoff would need in order to break even.
+Splits multiple runs in one file, and folds MT5's per-open commission rows into
+the following trade — counting those as trades inflates the loss count several
+times over.
+
+It was written to diagnose a losing backtest and immediately found two things a
+glance at the equity curve did not: the EA had traded on only 13 days out of
+379, and every winner was exiting at breakeven behind its partial.
