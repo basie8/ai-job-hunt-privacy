@@ -125,37 +125,56 @@ double NormalizePriceToTick(const string symbol, const double price)
   }
 
 //+------------------------------------------------------------------+
+//| Number of decimals implied by the broker's lot step.             |
+//+------------------------------------------------------------------+
+int LotStepDigits(const double lotStep)
+  {
+   if(lotStep >= 1.0)   return 0;
+   if(lotStep >= 0.1)   return 1;
+   if(lotStep >= 0.01)  return 2;
+   return 3;
+  }
+
+//+------------------------------------------------------------------+
 //| Clamps a volume to the symbol's min / max / step constraints.    |
+//|                                                                  |
+//| The epsilon matters. volume/lotStep is a binary float, so 0.29   |
+//| over a 0.01 step evaluates to 28.999999999999996 and a bare      |
+//| MathFloor silently drops a whole lot step. Three of six ordinary |
+//| gold volumes are affected. Nudging by a fraction of a step       |
+//| before flooring removes the error without ever rounding up past  |
+//| a real step boundary.                                            |
+//|                                                                  |
+//| Returns 0.0 when the result is below the broker minimum; the     |
+//| caller must treat that as "cannot trade", never as "trade min".  |
 //+------------------------------------------------------------------+
 double NormalizeVolume(const string symbol, double volume)
   {
    double minLot  = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
    double maxLot  = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MAX);
    double lotStep = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
+   double volLimit = SymbolInfoDouble(symbol, SYMBOL_VOLUME_LIMIT);
 
    if(lotStep <= 0.0)
       lotStep = 0.01;
 
-   volume = MathFloor(volume / lotStep) * lotStep;
+   if(volume <= 0.0)
+      return 0.0;
 
-   if(volume < minLot)
-      volume = 0.0;              // caller decides whether to skip or floor
+   volume = MathFloor(volume / lotStep + 1e-8) * lotStep;
+
+   // SYMBOL_VOLUME_LIMIT caps the total volume allowed on the symbol and is
+   // stricter than VOLUME_MAX on some brokers. Zero means "no limit".
+   if(volLimit > 0.0 && volume > volLimit)
+      volume = MathFloor(volLimit / lotStep + 1e-8) * lotStep;
+
    if(maxLot > 0.0 && volume > maxLot)
-      volume = maxLot;
+      volume = MathFloor(maxLot / lotStep + 1e-8) * lotStep;
 
-   int stepDigits = 2;
-   if(lotStep >= 1.0)
-      stepDigits = 0;
-   else
-      if(lotStep >= 0.1)
-         stepDigits = 1;
-      else
-         if(lotStep >= 0.01)
-            stepDigits = 2;
-         else
-            stepDigits = 3;
+   if(minLot > 0.0 && volume < minLot - 1e-8)
+      return 0.0;                // caller decides whether to skip
 
-   return NormalizeDouble(volume, stepDigits);
+   return NormalizeDouble(volume, LotStepDigits(lotStep));
   }
 
 //+------------------------------------------------------------------+
@@ -190,6 +209,99 @@ double MoneyForDistance(const string symbol, const double priceDistance, const d
       return 0.0;
    double points = priceDistance / point;
    return points * PointValuePerLot(symbol) * lots;
+  }
+
+//+------------------------------------------------------------------+
+//| Broker contract pre-flight.                                      |
+//|                                                                  |
+//| Prints every symbol constraint the EA depends on and fails when  |
+//| one of them makes trading impossible. Run once at init, this is  |
+//| what turns "the EA is attached but nothing happens" into a named |
+//| reason in the journal.                                           |
+//+------------------------------------------------------------------+
+bool DescribeAndValidateSymbol(const string symbol)
+  {
+   int    digits   = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+   double point    = SymbolInfoDouble(symbol, SYMBOL_POINT);
+   double tickSize = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
+   double tickVal  = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE);
+   double contract = SymbolInfoDouble(symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+   double minLot   = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
+   double maxLot   = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MAX);
+   double lotStep  = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
+   double volLimit = SymbolInfoDouble(symbol, SYMBOL_VOLUME_LIMIT);
+   long   stopsLvl = SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   long   freezeLvl= SymbolInfoInteger(symbol, SYMBOL_TRADE_FREEZE_LEVEL);
+   long   tradeMode= SymbolInfoInteger(symbol, SYMBOL_TRADE_MODE);
+   long   exeMode  = SymbolInfoInteger(symbol, SYMBOL_TRADE_EXEMODE);
+   long   fillMode = SymbolInfoInteger(symbol, SYMBOL_FILLING_MODE);
+   long   spreadPts= SymbolInfoInteger(symbol, SYMBOL_SPREAD);
+
+   string curBase  = SymbolInfoString(symbol, SYMBOL_CURRENCY_BASE);
+   string curProf  = SymbolInfoString(symbol, SYMBOL_CURRENCY_PROFIT);
+   string curAcct  = AccountInfoString(ACCOUNT_CURRENCY);
+
+   PrintFormat("[Broker] %s contract specification:", symbol);
+   PrintFormat("   digits %d, point %.5f, tick size %.5f, tick value %.5f %s",
+               digits, point, tickSize, tickVal, curAcct);
+   PrintFormat("   contract size %.2f, base %s, profit %s, account %s",
+               contract, curBase, curProf, curAcct);
+   PrintFormat("   volume  min %.2f  max %.2f  step %.2f  limit %.2f",
+               minLot, maxLot, lotStep, volLimit);
+   PrintFormat("   stops level %d pts (%.2f price), freeze level %d pts (%.2f price)",
+               (int)stopsLvl, stopsLvl * point, (int)freezeLvl, freezeLvl * point);
+   PrintFormat("   current spread %d pts (%.2f price)", (int)spreadPts, spreadPts * point);
+
+   string fills = "";
+   if((fillMode & SYMBOL_FILLING_FOK) != 0) fills += "FOK ";
+   if((fillMode & SYMBOL_FILLING_IOC) != 0) fills += "IOC ";
+   if(StringLen(fills) == 0) fills = "RETURN only";
+   PrintFormat("   filling modes: %s | execution mode %d", fills, (int)exeMode);
+
+   int errors = 0;
+
+   if(tradeMode == SYMBOL_TRADE_MODE_DISABLED)
+     {
+      PrintFormat("[Broker] FATAL: trading is DISABLED for %s.", symbol);
+      errors++;
+     }
+   else
+      if(tradeMode == SYMBOL_TRADE_MODE_CLOSEONLY)
+        {
+         PrintFormat("[Broker] FATAL: %s is CLOSE-ONLY - no new positions can be opened.", symbol);
+         errors++;
+        }
+      else
+         if(tradeMode == SYMBOL_TRADE_MODE_LONGONLY)
+            PrintFormat("[Broker] WARNING: %s is LONG-ONLY - every short signal will be rejected.", symbol);
+         else
+            if(tradeMode == SYMBOL_TRADE_MODE_SHORTONLY)
+               PrintFormat("[Broker] WARNING: %s is SHORT-ONLY - every long signal will be rejected.", symbol);
+
+   if(point <= 0.0)
+     {
+      Print("[Broker] FATAL: SYMBOL_POINT is zero - price maths is impossible.");
+      errors++;
+     }
+   if(minLot <= 0.0 || lotStep <= 0.0)
+     {
+      Print("[Broker] FATAL: the broker reports no usable volume min/step.");
+      errors++;
+     }
+   if(PointValuePerLot(symbol) <= 0.0)
+     {
+      Print("[Broker] FATAL: the money value of a point could not be derived - "
+            "position sizing would be guesswork. Check that the symbol is fully "
+            "subscribed in Market Watch.");
+      errors++;
+     }
+
+   if(digits != 2)
+      PrintFormat("[Broker] NOTE: %s is quoted to %d decimals. Every price-based input "
+                  "(ATR bounds, spread limit) is in QUOTE CURRENCY, so it is unaffected, "
+                  "but check your expectations.", symbol, digits);
+
+   return (errors == 0);
   }
 
 //+------------------------------------------------------------------+

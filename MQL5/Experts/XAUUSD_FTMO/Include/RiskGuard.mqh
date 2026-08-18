@@ -89,7 +89,8 @@ public:
    double            LotsForRisk(const double riskPercent,
                                  const double stopDistancePrice,
                                  const ENUM_RISK_MODE mode,
-                                 const double fixedLot);
+                                 const double fixedLot,
+                                 string &reason);
 
    //--- how much money a single trade is allowed to lose right now, so
    //--- that even a full stop-out cannot breach the daily soft limit
@@ -384,13 +385,26 @@ double CRiskGuard::RiskFactor(void) const
 double CRiskGuard::LotsForRisk(const double riskPercent,
                                const double stopDistancePrice,
                                const ENUM_RISK_MODE mode,
-                               const double fixedLot)
+                               const double fixedLot,
+                               string &reason)
   {
+   reason = "";
+
+   double minLot = SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_MIN);
+
    if(mode == RISK_FIXED_LOT)
-      return NormalizeVolume(m_symbol, fixedLot);
+     {
+      double fl = NormalizeVolume(m_symbol, fixedLot);
+      if(fl <= 0.0)
+         reason = StringFormat("fixed lot %.2f is below the broker minimum %.2f", fixedLot, minLot);
+      return fl;
+     }
 
    if(stopDistancePrice <= 0.0)
+     {
+      reason = "stop distance is zero";
       return 0.0;
+     }
 
    double base = m_initialCapital;
    if(mode == RISK_PERCENT_BALANCE)
@@ -399,30 +413,57 @@ double CRiskGuard::LotsForRisk(const double riskPercent,
       if(mode == RISK_PERCENT_EQUITY)
          base = AccountInfoDouble(ACCOUNT_EQUITY);
 
-   double riskMoney = base * riskPercent / 100.0 * RiskFactor();
+   double wanted = base * riskPercent / 100.0 * RiskFactor();
 
    // never risk more than the remaining room under either guard, with a
    // 30% cushion so slippage on the stop cannot push us through
    double dailyRoom = RemainingDailyRiskMoney() * 0.70;
    double totalRoom = RemainingTotalRiskMoney() * 0.70;
 
-   riskMoney = MathMin(riskMoney, dailyRoom);
-   riskMoney = MathMin(riskMoney, totalRoom);
+   double riskMoney = MathMin(wanted, MathMin(dailyRoom, totalRoom));
 
    if(riskMoney <= 0.0)
+     {
+      if(dailyRoom <= 0.0)
+         reason = StringFormat("no daily risk budget left (soft guard at %.2f%%)", m_softDailyLossPct);
+      else
+         if(totalRoom <= 0.0)
+            reason = StringFormat("no total risk budget left (soft guard at %.2f%%)", m_softTotalLossPct);
+         else
+            reason = "risk budget is zero";
       return 0.0;
+     }
+
+   if(riskMoney < wanted)
+      PrintFormat("[Risk] sizing throttled: wanted %.2f, room allows %.2f (daily %.2f / total %.2f).",
+                  wanted, riskMoney, dailyRoom, totalRoom);
 
    double moneyPerLot = MoneyForDistance(m_symbol, stopDistancePrice, 1.0);
    if(moneyPerLot <= 0.0)
+     {
+      reason = "the broker's tick value could not be converted to money";
       return 0.0;
+    }
 
-   double lots = riskMoney / moneyPerLot;
-   lots = NormalizeVolume(m_symbol, lots);
+   double raw  = riskMoney / moneyPerLot;
+   double lots = NormalizeVolume(m_symbol, raw);
 
    if(lots <= 0.0)
+     {
+      // The single most common reason a trade is skipped on a small account:
+      // one minimum lot would risk more than the rules allow. Say so exactly,
+      // with the numbers, rather than reporting a generic failure.
+      double minLotRisk = MoneyForDistance(m_symbol, stopDistancePrice, minLot);
+      double minLotPct  = (m_initialCapital > 0.0 ? minLotRisk / m_initialCapital * 100.0 : 0.0);
+      reason = StringFormat("min lot %.2f would risk %.2f (%.2f%% of initial) but only %.2f "
+                            "(%.2f%%) is allowed - raise InpRiskPercent, tighten the stop, "
+                            "or trade a smaller account tier",
+                            minLot, minLotRisk, minLotPct, riskMoney,
+                            (m_initialCapital > 0.0 ? riskMoney / m_initialCapital * 100.0 : 0.0));
       return 0.0;
+     }
 
-   // margin sanity check
+   //--- margin sanity check
    double marginRequired = 0.0;
    double ask = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
    if(OrderCalcMargin(ORDER_TYPE_BUY, m_symbol, lots, ask, marginRequired))
@@ -430,11 +471,14 @@ double CRiskGuard::LotsForRisk(const double riskPercent,
       double freeMargin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
       if(marginRequired > freeMargin * 0.5)
         {
-         PrintFormat("[Risk] lot %.2f needs %.2f margin, free %.2f - trade skipped",
-                     lots, marginRequired, freeMargin);
+         reason = StringFormat("lot %.2f needs %.2f margin, only %.2f free (50%% cap)",
+                               lots, marginRequired, freeMargin);
          return 0.0;
         }
      }
+   else
+      PrintFormat("[Risk] WARNING: OrderCalcMargin failed (error %d) - margin not verified.",
+                  GetLastError());
 
    return lots;
   }

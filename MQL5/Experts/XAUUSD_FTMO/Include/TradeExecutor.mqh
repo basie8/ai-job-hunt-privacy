@@ -355,9 +355,13 @@ void CTradeExecutor::Manage(const double atr)
          Untrack(i);
      }
 
-   long   stopLevelPts = SymbolInfoInteger(m_symbol, SYMBOL_TRADE_STOPS_LEVEL);
-   double point        = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
-   double minDistance  = (double)stopLevelPts * point;
+   // A modify must clear BOTH the stops level and the freeze level. Ignoring
+   // the freeze level is a classic source of modifications that fail on some
+   // brokers with no obvious reason.
+   long   stopLevelPts   = SymbolInfoInteger(m_symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   long   freezeLevelPts = SymbolInfoInteger(m_symbol, SYMBOL_TRADE_FREEZE_LEVEL);
+   double point          = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+   double minDistance    = (double)MathMax(stopLevelPts, freezeLevelPts) * point;
 
    for(int i = m_count - 1; i >= 0; i--)
      {
@@ -395,8 +399,12 @@ void CTradeExecutor::Manage(const double atr)
                PrintFormat("[Exec] #%I64u TP1 (%.2fR target) hit at %.2fR - banked %.2f lots, %.2f runs on",
                            ticket, m_tp1R, rMultiple, closeVol, remain);
             else
-               PrintFormat("[Exec] #%I64u partial close failed: %s", ticket, m_trade.ResultRetcodeDescription());
+               PrintFormat("[Exec] #%I64u partial close FAILED: %s", ticket, m_trade.ResultRetcodeDescription());
            }
+         else
+            PrintFormat("[Exec] #%I64u no partial taken at %.2fR: %.2f lots cannot be split into "
+                        "two parts of at least %.2f. The whole position runs to TP2 instead.",
+                        ticket, rMultiple, volume, minLot);
 
          // breakeven + lock, applied whether or not the partial fitted
          double lock = risk * m_beLockR;
@@ -405,13 +413,31 @@ void CTradeExecutor::Manage(const double atr)
 
          bool distanceOk = (type == POSITION_TYPE_BUY ? (bid - newSl) > minDistance
                                                       : (newSl - ask) > minDistance);
+
+         bool beDone = false;
          if(distanceOk)
            {
             if(m_trade.PositionModify(ticket, newSl, curTp))
+              {
+               beDone = true;
                PrintFormat("[Exec] #%I64u stop moved to breakeven+%.2f (%.2f)", ticket, lock, newSl);
+              }
+            else
+               PrintFormat("[Exec] #%I64u breakeven move FAILED (%s) - will retry next tick.",
+                           ticket, m_trade.ResultRetcodeDescription());
            }
+         else
+            PrintFormat("[Exec] #%I64u breakeven deferred: target %.2f is inside the broker's "
+                        "%.2f stop/freeze distance from %.2f - will retry next tick.",
+                        ticket, newSl, minDistance, (type == POSITION_TYPE_BUY ? bid : ask));
 
-         m_stage[i] = 1;
+         // The stage only advances once the stop is actually protected. Advancing
+         // unconditionally would abandon a failed breakeven for the life of the
+         // trade, leaving a position that is supposed to be risk-free still
+         // exposed to a full stop-out.
+         if(beDone)
+            m_stage[i] = 1;
+
          continue;
         }
 
@@ -446,6 +472,9 @@ void CTradeExecutor::Manage(const double atr)
                   if(m_verbose)
                      PrintFormat("[Exec] #%I64u trail -> %.2f (at %.2fR)", ticket, trail, rMultiple);
                  }
+               else
+                  PrintFormat("[Exec] #%I64u trail update to %.2f FAILED: %s",
+                              ticket, trail, m_trade.ResultRetcodeDescription());
               }
            }
         }

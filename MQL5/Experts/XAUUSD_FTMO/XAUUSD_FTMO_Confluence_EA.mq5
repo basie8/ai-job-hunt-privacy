@@ -148,7 +148,7 @@ input bool            InpTradeFriday         = true;      // Trade Friday
 input string          InpFridayCutoff        = "15:00";   // Friday: no new trades after (GMT)
 input bool            InpFlatBeforeWeekend   = true;      // Close everything before the weekend
 input string          InpWeekendFlatTime     = "19:00";   // Friday flatten time (GMT)
-input int             InpMaxSpreadPoints     = 45;        // Max spread to trade (points)
+input double          InpMaxSpreadPrice      = 0.50;      // Max spread to trade, in QUOTE CURRENCY (USD)
 input int             InpMinMinutesBetween   = 45;        // Minimum minutes between entries
 
 input group "=== Daily quota (the 'at least one trade a day' rule) ==="
@@ -483,14 +483,31 @@ bool ShouldFlattenForWeekend(const datetime serverNow)
   }
 
 //+------------------------------------------------------------------+
-double CurrentSpreadPoints(void)
+//+------------------------------------------------------------------+
+//| Spread in QUOTE CURRENCY, not points.                            |
+//|                                                                  |
+//| A points-based limit is a trap on gold: brokers quote XAUUSD to  |
+//| either 2 or 3 decimals, so the same 30-cent spread reads as 30   |
+//| points on one feed and 300 on another. A limit tuned on a 2-digit|
+//| feed silently blocks every trade on a 3-digit one. Measuring in  |
+//| price makes the setting mean the same thing everywhere.          |
+//+------------------------------------------------------------------+
+double CurrentSpreadPrice(void)
   {
    double ask = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(g_symbol, SYMBOL_BID);
-   double pt  = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
+   if(ask <= 0.0 || bid <= 0.0)
+      return 0.0;
+   return (ask - bid);
+  }
+
+//+------------------------------------------------------------------+
+double CurrentSpreadPoints(void)
+  {
+   double pt = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
    if(pt <= 0.0)
       return 0.0;
-   return (ask - bid) / pt;
+   return CurrentSpreadPrice() / pt;
   }
 
 //+------------------------------------------------------------------+
@@ -787,6 +804,12 @@ bool ValidateInputs(void)
       errors++;
      }
 
+   if(InpMaxSpreadPrice < 0.0)
+     {
+      Print("INPUT ERROR: InpMaxSpreadPrice cannot be negative (0 disables the filter).");
+      errors++;
+     }
+
    //--- news
    if(InpNewsSource != NEWS_SRC_OFF && InpNewsMinutesBefore + InpNewsMinutesAfter <= 0)
      {
@@ -897,6 +920,20 @@ int OnInit(void)
    StringToUpper(upper);
    if(StringFind(upper, "XAU") < 0 && StringFind(upper, "GOLD") < 0)
       PrintFormat("WARNING: %s does not look like gold. Every default in this EA is tuned for XAUUSD.", g_symbol);
+
+   //--- broker contract pre-flight: fails init rather than trading blind
+   if(!DescribeAndValidateSymbol(g_symbol))
+     {
+      Print("FATAL: the broker's contract specification will not support this EA. See above.");
+      return INIT_FAILED;
+     }
+
+   //--- sanity-check the spread limit against what this broker actually quotes
+   double liveSpread = CurrentSpreadPrice();
+   if(InpMaxSpreadPrice > 0.0 && liveSpread > 0.0 && liveSpread > InpMaxSpreadPrice * 3.0)
+      PrintFormat("[Broker] WARNING: the live spread is %.2f but InpMaxSpreadPrice is %.2f. "
+                  "If this persists the EA will never trade - check the quote and the setting.",
+                  liveSpread, InpMaxSpreadPrice);
 
    // resolved after the news filter is constructed but before it initialises,
    // because the FF parser needs the offset to convert its timestamps
@@ -1130,11 +1167,11 @@ void OnTick(void)
      }
 
    //--- 8. spread
-   double spread = CurrentSpreadPoints();
-   if(InpMaxSpreadPoints > 0 && spread > InpMaxSpreadPoints)
+   double spread = CurrentSpreadPrice();
+   if(InpMaxSpreadPrice > 0.0 && spread > InpMaxSpreadPrice)
      {
       SetStatus(EA_STATUS_PAUSED_LIMIT,
-                StringFormat("spread %.0f pts > %d limit", spread, InpMaxSpreadPoints));
+                StringFormat("spread %.2f > %.2f limit", spread, InpMaxSpreadPrice));
       return;
      }
 
@@ -1184,12 +1221,16 @@ void OnTick(void)
      }
 
    //--- 13. size it
+   string sizeReason = "";
    double lots = g_risk.LotsForRisk(InpRiskPercent * riskMult, snap.riskDistance,
-                                    InpRiskMode, InpFixedLot);
+                                    InpRiskMode, InpFixedLot, sizeReason);
    if(lots <= 0.0)
      {
-      SetStatus(EA_STATUS_PAUSED_RISK, "risk budget exhausted or lot below the broker minimum");
-      PrintFormat("[Trade] skipped: %s", g_statusDetail);
+      // A valid signal that cannot be sized is the most dangerous kind of
+      // silent skip, so it is always logged with the specific cause.
+      SetStatus(EA_STATUS_PAUSED_RISK, sizeReason);
+      PrintFormat("[Trade] SIGNAL SKIPPED (%s %s at %.2f): %s",
+                  (dir == SIGNAL_BUY ? "BUY" : "SELL"), g_symbol, snap.entry, sizeReason);
       return;
      }
 
@@ -1555,10 +1596,10 @@ void UpdateDashboard(void)
                            (TZ_IsUsSummerTime(UtcNow()) ? "DST" : "std")),
               (g_offsetPlausible ? AURUM_TEXT : AURUM_BAD));
 
-   double spread = CurrentSpreadPoints();
+   double spread = CurrentSpreadPrice();
    g_dash.Row("Spread",
-              StringFormat("%.0f pts   (limit %d)", spread, InpMaxSpreadPoints),
-              (InpMaxSpreadPoints > 0 && spread > InpMaxSpreadPoints ? AURUM_BAD : AURUM_TEXT));
+              StringFormat("%.2f  (%.0f pts, limit %.2f)", spread, CurrentSpreadPoints(), InpMaxSpreadPrice),
+              (InpMaxSpreadPrice > 0.0 && spread > InpMaxSpreadPrice ? AURUM_BAD : AURUM_TEXT));
    g_dash.Row("Indicators",
               StringFormat("ATR %.2f  ADX %.1f  RSI %.1f", g_conf.Atr(), g_conf.Adx(), g_conf.Rsi()));
    g_dash.Row("VWAP", StringFormat("%.2f", g_conf.Vwap()));

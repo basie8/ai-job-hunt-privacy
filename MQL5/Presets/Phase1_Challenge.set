@@ -67,4 +67,4 @@ InpNewsMinutesBefore=30
 InpNewsMinutesAfter=30
 InpNewsIncludeMedium=false
 InpNewsFlattenBefore=true
-InpMaxSpreadPoints=45
+InpMaxSpreadPrice=0.50

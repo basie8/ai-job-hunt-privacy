@@ -225,6 +225,73 @@ trading the wrong hour in both gap periods.
 
 ---
 
+## Broker compatibility
+
+The EA validates the broker's contract specification at startup and **refuses to
+initialise** rather than trading blind. The journal prints:
+
+```
+[Broker] XAUUSD contract specification:
+   digits 2, point 0.01000, tick size 0.01000, tick value 1.00000 USD
+   contract size 100.00, base XAU, profit USD, account USD
+   volume  min 0.01  max 50.00  step 0.01  limit 0.00
+   stops level 0 pts (0.00 price), freeze level 0 pts (0.00 price)
+   current spread 18 pts (0.18 price)
+   filling modes: FOK IOC  | execution mode 2
+```
+
+Init **fails** on: trading disabled, close-only, zero point, no usable volume
+min/step, or a point value that cannot be converted to money (usually an
+unsubscribed symbol). It **warns** on long-only or short-only symbols, and on a
+live spread more than 3x the configured limit — the condition that would
+otherwise block every trade forever.
+
+### Decimal places
+
+Gold is quoted to **2 decimals** by most brokers and **3** by some. The EA is
+digit-independent:
+
+- Prices are rounded with `SYMBOL_TRADE_TICK_SIZE`, not a hardcoded digit count.
+- Stop and target distances are derived from ATR in **price**, never in pips.
+- `InpMaxSpreadPrice`, `InpMinAtrPrice`, `InpMaxAtrPrice` are all in **quote
+  currency (USD)**, so they mean the same thing on a 2- and a 3-digit feed.
+
+> A points-based spread limit is a trap here. The same 30-cent spread reads as 30
+> points on a 2-digit feed and 300 on a 3-digit one, so a limit tuned on one
+> silently blocks every trade on the other. That is why this setting is in price.
+
+### Lot sizing
+
+Volume is normalised against `VOLUME_MIN`, `VOLUME_MAX`, `VOLUME_STEP` **and**
+`VOLUME_LIMIT` (stricter than max on some brokers), with an epsilon before the
+floor. Without that epsilon, `0.29 / 0.01` evaluates to `28.999999999999996` in
+binary floating point and a bare `MathFloor` silently drops a whole lot step —
+it affects roughly half of ordinary gold volumes.
+
+### No silent skips
+
+Every path that declines to trade names its cause in the journal **and** on the
+console status line. The most important is the one small accounts hit constantly:
+
+```
+[Trade] SIGNAL SKIPPED (BUY XAUUSD at 3287.40): min lot 0.01 would risk 48.20
+(0.48% of initial) but only 21.00 (0.21%) is allowed - raise InpRiskPercent,
+tighten the stop, or trade a smaller account tier
+```
+
+That is a **correct** refusal — taking it would breach your risk rule — but it
+must be visible, because on a small account with a wide ATR stop it can silence
+the EA for days.
+
+Trade management is equally explicit. A partial that cannot be split, a breakeven
+blocked by the broker's stop or freeze level, and a failed trail update are all
+logged. **A failed breakeven does not advance the trade's stage**, so it is
+retried on the next tick rather than abandoning a position that is supposed to be
+risk-free.
+
+
+---
+
 ## Presets
 
 | File | Use |
@@ -319,6 +386,9 @@ weights is more free parameters than a year of M15 data can honestly support.
 | `Clock` row is red | Offset detection failed. Set `InpUseManualGmtOffset = true`. |
 | Session windows shift by an hour in March/October | Expected — that is the EU/US DST gap being handled correctly. |
 | `order REJECTED: Invalid stops` | Broker stop level exceeds the ATR stop. Raise `InpMinStopAtr`. |
+| `SIGNAL SKIPPED ... min lot would risk` | One minimum lot exceeds your risk rule. Raise `InpRiskPercent`, tighten the stop, or use a larger account. |
+| Init fails with `[Broker] FATAL` | The symbol cannot support the EA — read the printed spec. Usually an unsubscribed symbol or a close-only contract. |
+| `breakeven deferred` repeatedly | Price is sitting inside the broker's stop/freeze distance. It retries; if it persists the broker's stop level is unusually wide. |
 | Partial close never fires | Position too small to split. Either raise risk or set `InpUsePartial = false`. |
 | Console buttons do nothing | `OnChartEvent` does not fire in the Strategy Tester. Live and demo charts only. |
 | Metrics show 0 after restart | `InpRebuildStatsOnInit` off, or the trades are older than `InpStatsHistoryDays`. |
