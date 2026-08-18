@@ -15,6 +15,10 @@
 #ifndef __XAUUSD_FTMO_NEWSFILTER_MQH__
 #define __XAUUSD_FTMO_NEWSFILTER_MQH__
 
+//--- version stamp. The EA checks for this, so copying a new .mq5
+//--- next to a stale .mqh fails with one named error instead of forty.
+#define XFC_V_NEWSFILTER_1
+
 #include "CoreDefs.mqh"
 
 #define FF_FEED_URL       "https://nfs.faireconomy.media/ff_calendar_thisweek.json"

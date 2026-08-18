@@ -105,3 +105,19 @@ times over.
 It was written to diagnose a losing backtest and immediately found two things a
 glance at the equity curve did not: the EA had traded on only 13 days out of
 379, and every winner was exiting at breakeven behind its partial.
+
+## verify_manifest.py
+
+    python3 tools/verify_manifest.py "<Terminal Data Folder>/MQL5/Experts/XAUUSD_FTMO"
+
+Compares a deployed copy against `MANIFEST.txt` and names any file that is
+missing or stale. Written after a compile produced 40 `undeclared identifier`
+errors that were entirely caused by a new `.mq5` sitting next to old `.mqh`
+files — none of the errors pointed at the real problem.
+
+Regenerate the manifest whenever a source file changes:
+
+    python3 - <<'EOF'
+    import hashlib,glob,os
+    # see the block in the commit that introduced MANIFEST.txt
+    EOF

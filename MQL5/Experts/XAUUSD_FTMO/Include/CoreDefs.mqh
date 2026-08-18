@@ -7,6 +7,10 @@
 #ifndef __XAUUSD_FTMO_COREDEFS_MQH__
 #define __XAUUSD_FTMO_COREDEFS_MQH__
 
+//--- version stamp. The EA checks for this, so copying a new .mq5
+//--- next to a stale .mqh fails with one named error instead of forty.
+#define XFC_V_COREDEFS_3
+
 //--- news impact levels (mapped from both ForexFactory and the MT5 calendar)
 #define NEWS_IMPACT_NONE     0
 #define NEWS_IMPACT_LOW      1

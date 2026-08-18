@@ -26,6 +26,10 @@
 #ifndef __XAUUSD_FTMO_TRADEEXECUTOR_MQH__
 #define __XAUUSD_FTMO_TRADEEXECUTOR_MQH__
 
+//--- version stamp. The EA checks for this, so copying a new .mq5
+//--- next to a stale .mqh fails with one named error instead of forty.
+#define XFC_V_TRADEEXEC_3
+
 #include <Trade\Trade.mqh>
 #include <Trade\PositionInfo.mqh>
 #include "CoreDefs.mqh"

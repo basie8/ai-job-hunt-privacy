@@ -14,6 +14,10 @@
 #ifndef __XAUUSD_FTMO_DASHBOARD_MQH__
 #define __XAUUSD_FTMO_DASHBOARD_MQH__
 
+//--- version stamp. The EA checks for this, so copying a new .mq5
+//--- next to a stale .mqh fails with one named error instead of forty.
+#define XFC_V_DASHBOARD_2
+
 #define DASH_PREFIX  "XFC_"
 #define DASH_BTN_PARAMS  DASH_PREFIX "btn_params"
 #define DASH_BTN_METRICS DASH_PREFIX "btn_metrics"

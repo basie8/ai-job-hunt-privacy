@@ -19,6 +19,20 @@ Copy the EA folder into your terminal's data directory (MetaTrader 5 →
 
 Keep the `Include/` sub-folder where it is — the EA includes by relative path.
 
+> **Copy the whole folder, every time.** Dropping in a new `.mq5` next to stale
+> `.mqh` files is the most common cause of a wall of `undeclared identifier`
+> errors, and the errors point at the *wrong* file. Each header now carries a
+> version stamp that the EA checks, so a mismatch fails with a single named
+> error such as
+> `undeclared identifier 'XFC_V_COREDEFS_3_IS_MISSING'` on a line reading
+> `STALE_INCLUDE__CoreDefs_mqh__RECOPY_THE_WHOLE_Include_FOLDER`.
+>
+> To check a deployed copy:
+>
+> ```
+> python3 tools/verify_manifest.py "<Terminal Data Folder>/MQL5/Experts/XAUUSD_FTMO"
+> ```
+
 Open `XAUUSD_FTMO_Confluence_EA.mq5` in MetaEditor and press **F7**. It should
 compile with zero errors.
 

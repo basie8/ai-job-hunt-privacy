@@ -174,6 +174,43 @@ for f,s in SRC.items():
     if f.endswith('.mqh') and not guards:
         flag('includes',f"{f}: no include guard")
 
+# ---------- 8b. cross-file identifiers must resolve ----------
+_hdrs={f:open(f).read() for f in glob.glob(ROOT+'/Include/*.mqh')}
+_ea=open(MAIN).read()
+def _strip(x):
+    x=re.sub(r'//[^\n]*','',x); return re.sub(r'/\*.*?\*/','',x,flags=re.S)
+_exported=set()
+for _f,_s in _hdrs.items():
+    _s=_strip(_s)
+    for _m in re.finditer(r'enum\s+(\w+)\s*\{(.*?)\}',_s,re.S):
+        _exported.add(_m.group(1))
+        for _it in _m.group(2).split(','):
+            _it=_it.strip()
+            if _it: _exported.add(_it.split('=')[0].strip().split()[0])
+    _exported|=set(re.findall(r'#define\s+(\w+)',_s))
+    _exported|=set(re.findall(r'^(?:class|struct)\s+(\w+)',_s,re.M))
+    _exported|=set(re.findall(r'^[A-Za-z_][\w:]*[\s&*]+([A-Za-z_]\w*)\s*\(',_s,re.M))
+    for _cm in re.finditer(r'^class\s+(\w+)',_s,re.M):
+        _body=_s[_cm.end():].split('\n  };',1)[0]
+        _exported|=set(re.findall(r'[\w:]+[\s&*]+(\w+)\s*\(',_body))
+_used=set(re.findall(r'\b(ENUM_[A-Z_]+|GATE_[A-Z_]+|ATR_BAND_[A-Z_]+|EA_STATUS_[A-Z_]+|SIGNAL_[A-Z]+|GUARD_[A-Z_]+|RISK_[A-Z_]+|NEWS_[A-Z_]+|SESSION_TB_[A-Z_]+|MARKET_TZ_[A-Z_]+|AURUM_[A-Z_]+)\b', _strip(_ea)))
+_used|=set(re.findall(r'g_(?:conf|risk|exec|news|stats|dash)\.(\w+)\s*\(', _strip(_ea)))
+_BUILTIN={'ENUM_TIMEFRAMES','ENUM_DEAL_ENTRY','ENUM_POSITION_TYPE','ENUM_LOG_LEVELS','ENUM_ORDER_TYPE'}
+for _u in sorted(_used-_exported-_BUILTIN):
+    flag('methods', f"EA uses '{_u}' but no Include/ header declares it")
+
+# ---------- 8c. every header must carry its version stamp ----------
+_TOK={'CoreDefs.mqh':'XFC_V_COREDEFS_3','TimeZones.mqh':'XFC_V_TIMEZONES_1',
+      'NewsFilter.mqh':'XFC_V_NEWSFILTER_1','RiskGuard.mqh':'XFC_V_RISKGUARD_2',
+      'ConfluenceEngine.mqh':'XFC_V_CONFLUENCE_3','TradeExecutor.mqh':'XFC_V_TRADEEXEC_3',
+      'Statistics.mqh':'XFC_V_STATISTICS_2','Dashboard.mqh':'XFC_V_DASHBOARD_2'}
+for _fn,_tok in _TOK.items():
+    _p=ROOT+'/Include/'+_fn
+    if not os.path.exists(_p) or f'#define {_tok}' not in open(_p).read():
+        flag('includes', f"{_fn} is missing its version stamp {_tok}")
+    if f'#ifndef {_tok}' not in _ea:
+        flag('includes', f"the EA does not check for {_tok}")
+
 # ---------- 9. generated .set files must not have drifted ----------
 import subprocess
 _r=subprocess.run(['python3','tools/make_optimisation_sets.py','--check'],

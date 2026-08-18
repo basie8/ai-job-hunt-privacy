@@ -18,6 +18,10 @@
 #ifndef __XAUUSD_FTMO_STATISTICS_MQH__
 #define __XAUUSD_FTMO_STATISTICS_MQH__
 
+//--- version stamp. The EA checks for this, so copying a new .mq5
+//--- next to a stale .mqh fails with one named error instead of forty.
+#define XFC_V_STATISTICS_2
+
 #include "CoreDefs.mqh"
 
 //+------------------------------------------------------------------+

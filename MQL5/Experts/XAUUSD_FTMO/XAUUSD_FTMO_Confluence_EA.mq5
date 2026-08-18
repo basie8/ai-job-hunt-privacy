@@ -28,6 +28,42 @@
 #include "Include/Dashboard.mqh"
 
 //+------------------------------------------------------------------+
+//| INCLUDE VERSION CHECK                                            |
+//|                                                                  |
+//| Every header stamps a version token. If one is missing, the      |
+//| Include folder is older than this .mq5 - the usual cause being a |
+//| partial copy into MQL5/Experts/. Without this check that shows   |
+//| up as dozens of "undeclared identifier" errors pointing at the   |
+//| wrong file. With it, the FIRST error names the stale header.     |
+//|                                                                  |
+//| Fix: copy the ENTIRE XAUUSD_FTMO folder, Include/ included.      |
+//+------------------------------------------------------------------+
+#ifndef XFC_V_COREDEFS_3
+   int STALE_INCLUDE__CoreDefs_mqh__RECOPY_THE_WHOLE_Include_FOLDER = XFC_V_COREDEFS_3_IS_MISSING;
+#endif
+#ifndef XFC_V_TIMEZONES_1
+   int STALE_INCLUDE__TimeZones_mqh__RECOPY_THE_WHOLE_Include_FOLDER = XFC_V_TIMEZONES_1_IS_MISSING;
+#endif
+#ifndef XFC_V_NEWSFILTER_1
+   int STALE_INCLUDE__NewsFilter_mqh__RECOPY_THE_WHOLE_Include_FOLDER = XFC_V_NEWSFILTER_1_IS_MISSING;
+#endif
+#ifndef XFC_V_RISKGUARD_2
+   int STALE_INCLUDE__RiskGuard_mqh__RECOPY_THE_WHOLE_Include_FOLDER = XFC_V_RISKGUARD_2_IS_MISSING;
+#endif
+#ifndef XFC_V_CONFLUENCE_3
+   int STALE_INCLUDE__ConfluenceEngine_mqh__RECOPY_THE_WHOLE_Include_FOLDER = XFC_V_CONFLUENCE_3_IS_MISSING;
+#endif
+#ifndef XFC_V_TRADEEXEC_3
+   int STALE_INCLUDE__TradeExecutor_mqh__RECOPY_THE_WHOLE_Include_FOLDER = XFC_V_TRADEEXEC_3_IS_MISSING;
+#endif
+#ifndef XFC_V_STATISTICS_2
+   int STALE_INCLUDE__Statistics_mqh__RECOPY_THE_WHOLE_Include_FOLDER = XFC_V_STATISTICS_2_IS_MISSING;
+#endif
+#ifndef XFC_V_DASHBOARD_2
+   int STALE_INCLUDE__Dashboard_mqh__RECOPY_THE_WHOLE_Include_FOLDER = XFC_V_DASHBOARD_2_IS_MISSING;
+#endif
+
+//+------------------------------------------------------------------+
 //| INPUTS                                                           |
 //+------------------------------------------------------------------+
 input group "=== General ==="

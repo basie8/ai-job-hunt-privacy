@@ -17,6 +17,10 @@
 #ifndef __XAUUSD_FTMO_RISKGUARD_MQH__
 #define __XAUUSD_FTMO_RISKGUARD_MQH__
 
+//--- version stamp. The EA checks for this, so copying a new .mq5
+//--- next to a stale .mqh fails with one named error instead of forty.
+#define XFC_V_RISKGUARD_2
+
 #include "CoreDefs.mqh"
 
 //+------------------------------------------------------------------+
