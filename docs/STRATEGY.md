@@ -11,6 +11,7 @@
 | Requirement | How it is implemented |
 |---|---|
 | Trades XAUUSD | M15 execution with H1/H4 context; every default is tuned to gold's volatility |
+| Session control | Named London / New York / Asia sessions, DST-aware, Asia off by default |
 | At least one trade a day | Daily-quota mode relaxes the score threshold after 14:30 GMT if nothing has traded, at reduced size |
 | Meets FTMO 2-step rules | Layered soft/hard guards that trip at 2%/3% daily and 5%/7% total — well inside the 5%/10% limits |
 | Strong confluence | 11 weighted components across 3 timeframes |
@@ -21,7 +22,7 @@
 
 ---
 
-## 2. Why M15, and why the London / NY overlap
+## 2. Timeframe, sessions, and time alignment
 
 Gold's intraday behaviour drove both choices.
 
@@ -32,19 +33,89 @@ for a daily trade: it filters most of the noise, its ATR is large enough that a
 1.6×ATR stop clears the spread comfortably, and H1/H4 provide the trend context
 that a single timeframe cannot.
 
-**Sessions.** Gold's volatility is heavily concentrated:
+**Sessions.** Gold's volatility is heavily concentrated, so the EA has three
+named, independently switchable sessions:
 
-- **Asian session** — thin, range-bound, prone to fake breakouts. *Excluded.*
-- **London (07:00–11:00 GMT)** — European institutional flow arrives; first real
-  directional push of the day. *Traded.*
-- **London/NY overlap (12:30–17:00 GMT)** — highest liquidity and volatility of
-  the day, tightest spreads (typically 10–25 cents on a good broker), and the
-  cleanest directional conviction around the 13:30 GMT US data window.
-  *Traded.*
-- **Late NY** — liquidity drains, trends decay. *Excluded.*
+| Session | Default window (market local) | Default | Why |
+|---|---|---|---|
+| **Asia** (Tokyo) | 09:00–15:00 JST | **off** | Thin, range-bound, prone to fake breakouts. Available if you want the Shanghai/Tokyo gold fix, but it is the weakest window. |
+| **London** | 08:00–12:00 London | **on** | European institutional flow arrives; the first real directional push of the day. |
+| **New York** | 08:00–12:00 New York | **on** | Covers the 08:30 ET data window and the whole London/NY overlap — the highest liquidity and volatility of the day, and the tightest spreads. |
+
+Late NY (after 12:00 ET) is excluded by default: liquidity drains and trends decay.
 
 Trading only these windows is itself a risk control: it removes the hours where
 gold's stop-hunting behaviour is worst.
+
+### Time alignment and DST
+
+Session windows are expressed in **each market's own local time and converted at
+runtime**, because three clocks move independently:
+
+- The **broker server** (FTMO runs on CE(S)T) switches on the last Sunday in
+  March and October.
+- **London** switches on the same EU dates.
+- **New York** switches on the *second* Sunday in March and the *first* Sunday in
+  November.
+
+The EU and US dates are about two weeks apart, so for roughly three weeks a year
+the London/NY relationship is an hour different from the rest of the year. A
+window pinned to fixed GMT is therefore wrong for part of every year. Worked
+example, on a CE(S)T broker with the defaults above:
+
+| Date | Server | London (server) | New York (server) | Asia (server) |
+|---|---|---|---|---|
+| mid-January (both standard) | GMT+1 | 09:00–13:00 | 14:00–18:00 | 01:00–07:00 |
+| **12 March (US on DST, EU not)** | GMT+1 | 09:00–13:00 | **13:00–17:00** | 01:00–07:00 |
+| mid-July (both on DST) | GMT+2 | 09:00–13:00 | 14:00–18:00 | 02:00–08:00 |
+| **28 October (EU off DST, US still on)** | GMT+1 | 09:00–13:00 | **13:00–17:00** | 01:00–07:00 |
+
+London stays fixed in server terms because the London and CE(S)T clocks move
+together. New York shifts by an hour during the two gap periods. Asia shifts
+because Tokyo has no DST while the server does.
+
+The same conversion drives three other things:
+
+1. **The ForexFactory feed.** Its timestamps are ISO-8601 with a US-Eastern
+   offset; the parser reads the offset, converts to UTC, then applies the
+   detected broker offset. (The MT5 built-in calendar already returns server
+   time and needs no conversion.)
+2. **The FTMO daily-loss boundary.** The 00:00 CE(S)T reset is derived from the
+   detected server offset and the EU DST state, not hand-entered. Because moving
+   the boundary mid-session would reset the day's loss counter, a shift is
+   deferred until no position is open and no trade has been taken that day.
+3. **The Friday cutoff, weekend flatten, and daily-quota trigger**, which are
+   deliberately anchored to **fixed GMT** — they are risk controls, not market
+   sessions, so they should not drift with a market clock.
+
+The broker offset is detected from `TimeTradeServer() - TimeGMT()`, rounded to
+the nearest half hour, range-checked, and **re-checked on every timer tick** — so
+a DST transition is picked up while the EA is running rather than silently
+shifting every window by an hour until the next restart. When the offset changes,
+the news table is rebuilt, because the stored event times were converted under
+the old offset.
+
+If detection fails (no connection, or the tester's simulated GMT), the EA logs a
+warning, falls back to the manual value, and turns the dashboard clock row red
+rather than trading on a guess.
+
+On startup the journal prints every window as it will actually be applied:
+
+```
+[Time] broker server clock is GMT+2 (offset +2.0 h).
+[Time] FTMO day boundary: server time minus CE(S)T = +0.0 h (auto).
+[Time] resolved session windows:
+   Asia      disabled
+   London    09:00-13:00 server   (London local 08:00-12:00, currently GMT+1)
+   New York  14:00-18:00 server   (New York local 08:00-12:00, currently GMT-5)
+   Fri stop  16:00 server   (GMT 15:00)
+   Fri flat  20:00 server   (GMT 19:00)
+   Quota     15:30 server   (GMT 14:30)
+[Time] DST state: Europe standard, US standard.
+```
+
+That block is the first thing to check if trades appear at the wrong hour.
+
 
 ---
 
@@ -259,6 +330,11 @@ a fixed pip stop is unusable on this instrument.
   component 11 degrades; lower `InpWVolume` if so.
 - **VWAP is anchored to broker midnight**, not the CME session. On a GMT+2/+3
   server this is close enough for intraday work; on an exotic offset, verify it.
+- **DST detection assumes current EU and US rules.** If either region abolishes
+  seasonal clock changes, `TimeZones.mqh` needs updating — the transition dates
+  are computed from the rules, not from a lookup table, so the fix is one edit.
+- **`TimeGMT()` is simulated in the Strategy Tester.** Offset detection may be
+  unreliable there; set `InpUseManualGmtOffset = true` for backtests.
 - **The MT5 calendar is not available on every broker.** Check the journal on
   startup — the EA logs which sources initialised.
 - **Backtest quality.** MT5's "Open prices only" mode will not model the partial

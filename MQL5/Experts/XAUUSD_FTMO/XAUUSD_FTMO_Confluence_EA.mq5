@@ -19,6 +19,7 @@
 #property description "XAUUSD confluence EA with FTMO 2-step risk guards and a high-impact news blackout."
 
 #include "Include/CoreDefs.mqh"
+#include "Include/TimeZones.mqh"
 #include "Include/NewsFilter.mqh"
 #include "Include/RiskGuard.mqh"
 #include "Include/ConfluenceEngine.mqh"
@@ -46,7 +47,8 @@ input double          InpFtmoDailyLossPct    = 5.0;   // FTMO max DAILY loss %  
 input double          InpFtmoMaxLossPct      = 10.0;  // FTMO max TOTAL loss %  (rule)
 input double          InpProfitTargetPct     = 10.0;  // Phase target % (10 = Challenge, 5 = Verification)
 input bool            InpStopAtTarget        = true;  // Stop trading once the target is hit
-input int             InpCetOffsetHours      = 0;     // Server time minus CE(S)T, in hours
+input bool            InpAutoCetOffset       = true;  // Derive the CE(S)T day boundary automatically
+input int             InpCetOffsetHours      = 0;     // Manual: server time minus CE(S)T, in hours
 
 input group "=== Risk guards (kept well inside the FTMO limits) ==="
 input ENUM_RISK_MODE  InpRiskMode            = RISK_PERCENT_INITIAL; // Position sizing basis
@@ -124,27 +126,33 @@ input double          InpRsiBullHigh         = 78.0;  // Bullish RSI zone, upper
 input double          InpRsiBearLow          = 22.0;  // Bearish RSI zone, lower bound
 input double          InpRsiBearHigh         = 55.0;  // Bearish RSI zone, upper bound
 
-input group "=== Sessions ==="
-input bool            InpSessionTimesAreGmt  = true;      // Session times below are GMT
+input group "=== Time alignment ==="
+input bool            InpUseManualGmtOffset  = false;     // Override the auto-detected server offset
 input int             InpGmtOffsetHours      = 0;         // Manual server-GMT offset (hours)
-input bool            InpUseManualGmtOffset  = false;     // Use the manual offset instead of auto-detect
-input bool            InpUseSession1         = true;      // Trade the London session
-input string          InpSession1Start       = "07:00";   // London start
-input string          InpSession1End         = "11:00";   // London end
-input bool            InpUseSession2         = true;      // Trade the London/NY overlap
-input string          InpSession2Start       = "12:30";   // Overlap start
-input string          InpSession2End         = "17:00";   // Overlap end
+input bool            InpReDetectOffset      = true;      // Re-check the offset while running (catches DST)
+
+input group "=== Trading sessions ==="
+input ENUM_SESSION_TIMEBASE InpSessionTimeBase = SESSION_TB_MARKET_LOCAL; // How the times below are read
+input bool            InpUseAsiaSession      = false;     // Trade the Asian session
+input string          InpAsiaStart           = "09:00";   // Asia start  (Tokyo local)
+input string          InpAsiaEnd             = "15:00";   // Asia end    (Tokyo local)
+input bool            InpUseLondonSession    = true;      // Trade the London session
+input string          InpLondonStart         = "08:00";   // London start (London local)
+input string          InpLondonEnd           = "12:00";   // London end   (London local)
+input bool            InpUseNewYorkSession   = true;      // Trade the New York session
+input string          InpNewYorkStart        = "08:00";   // New York start (New York local)
+input string          InpNewYorkEnd          = "12:00";   // New York end   (New York local)
 input bool            InpTradeMonday         = true;      // Trade Monday
 input bool            InpTradeFriday         = true;      // Trade Friday
-input string          InpFridayCutoff        = "15:00";   // Friday: no new trades after
+input string          InpFridayCutoff        = "15:00";   // Friday: no new trades after (GMT)
 input bool            InpFlatBeforeWeekend   = true;      // Close everything before the weekend
-input string          InpWeekendFlatTime     = "19:00";   // Friday flatten time
+input string          InpWeekendFlatTime     = "19:00";   // Friday flatten time (GMT)
 input int             InpMaxSpreadPoints     = 45;        // Max spread to trade (points)
 input int             InpMinMinutesBetween   = 45;        // Minimum minutes between entries
 
 input group "=== Daily quota (the 'at least one trade a day' rule) ==="
 input bool            InpUseDailyQuota       = true;      // Relax the threshold late in the day
-input string          InpQuotaFromTime       = "14:30";   // Quota mode starts at
+input string          InpQuotaFromTime       = "14:30";   // Quota mode starts at (GMT)
 input double          InpQuotaScoreThreshold = 58.0;      // Relaxed score threshold
 input double          InpQuotaDominance      = 15.0;      // Relaxed dominance margin
 input double          InpQuotaRiskFactor     = 0.60;      // Risk multiplier for quota trades
@@ -176,7 +184,13 @@ CTradeExecutor    g_exec;
 CDashboard        g_dash;
 
 string   g_symbol       = "";
-int      g_gmtOffsetSec = 0;
+int      g_gmtOffsetSec = 0;      // server time = GMT + this
+int      g_cetOffsetSec = 0;      // server time = CE(S)T + this (FTMO day boundary)
+int      g_cetPendingSec = 0;     // CET offset waiting for a safe moment to apply
+bool     g_cetPending   = false;
+bool     g_offsetPlausible = true;
+bool     g_offsetWarned = false;
+string   g_activeSession = "";
 datetime g_lastBarTime  = 0;
 datetime g_lastEntryTime = 0;
 datetime g_lastNewsRefresh = 0;
@@ -232,22 +246,98 @@ void AccRemove(const int idx)
 //+------------------------------------------------------------------+
 //| Session helpers                                                  |
 //+------------------------------------------------------------------+
-int ToServerMinutes(const string hhmm)
+datetime UtcNow(void)
+  {
+   return TimeTradeServer() - (datetime)g_gmtOffsetSec;
+  }
+
+//+------------------------------------------------------------------+
+//| A session boundary converted to broker-server minutes, using the |
+//| DST state in force right now.                                    |
+//+------------------------------------------------------------------+
+int SessionMinute(const string hhmm, const ENUM_MARKET_TZ tz)
+  {
+   return TZ_SessionMinuteToServer(hhmm, InpSessionTimeBase, tz, g_gmtOffsetSec, UtcNow());
+  }
+
+//+------------------------------------------------------------------+
+//| Times that are always interpreted as GMT regardless of the       |
+//| session time base: the Friday cutoff, the weekend flatten, and   |
+//| the daily-quota trigger. A fixed reference keeps these stable    |
+//| across DST rather than drifting with a market clock.             |
+//+------------------------------------------------------------------+
+int GmtMinuteToServer(const string hhmm)
   {
    int m = ParseHHMM(hhmm);
    if(m < 0)
       return -1;
-   if(InpSessionTimesAreGmt)
-     {
-      m += g_gmtOffsetSec / 60;
-      m = ((m % 1440) + 1440) % 1440;
-     }
-   return m;
+   m += g_gmtOffsetSec / 60;
+   return ((m % 1440) + 1440) % 1440;
+  }
+
+//+------------------------------------------------------------------+
+//| True when 'now' sits inside the named session.                   |
+//+------------------------------------------------------------------+
+bool InNamedSession(const datetime serverNow,
+                    const bool enabled,
+                    const string startTime,
+                    const string endTime,
+                    const ENUM_MARKET_TZ tz)
+  {
+   if(!enabled)
+      return false;
+
+   int a = SessionMinute(startTime, tz);
+   int b = SessionMinute(endTime, tz);
+   if(a < 0 || b < 0)
+      return false;
+
+   return InMinuteWindow(MinutesOfDay(serverNow), a, b);
+  }
+
+//+------------------------------------------------------------------+
+//| Minutes until a session opens, or -1 when it is disabled.        |
+//+------------------------------------------------------------------+
+int MinutesUntilSession(const datetime serverNow,
+                        const bool enabled,
+                        const string startTime,
+                        const ENUM_MARKET_TZ tz)
+  {
+   if(!enabled)
+      return -1;
+
+   int a = SessionMinute(startTime, tz);
+   if(a < 0)
+      return -1;
+
+   int now = MinutesOfDay(serverNow);
+   int diff = a - now;
+   if(diff < 0)
+      diff += 1440;
+   return diff;
+  }
+
+//+------------------------------------------------------------------+
+//| Name of the session that is open right now, or "" when none is.  |
+//| Stateless, so the dashboard and the trade logic can never        |
+//| disagree about which session it is.                              |
+//+------------------------------------------------------------------+
+string CurrentSessionName(const datetime serverNow)
+  {
+   if(InNamedSession(serverNow, InpUseLondonSession, InpLondonStart, InpLondonEnd, MARKET_TZ_LONDON))
+      return "London";
+   if(InNamedSession(serverNow, InpUseNewYorkSession, InpNewYorkStart, InpNewYorkEnd, MARKET_TZ_NEWYORK))
+      return "New York";
+   if(InNamedSession(serverNow, InpUseAsiaSession, InpAsiaStart, InpAsiaEnd, MARKET_TZ_TOKYO))
+      return "Asia";
+   return "";
   }
 
 //+------------------------------------------------------------------+
 bool InTradingSession(const datetime serverNow, string &why)
   {
+   g_activeSession = "";
+
    MqlDateTime st;
    TimeToStruct(serverNow, st);
 
@@ -267,35 +357,19 @@ bool InTradingSession(const datetime serverNow, string &why)
       return false;
      }
 
-   int nowMin = MinutesOfDay(serverNow);
-
    if(st.day_of_week == 5)
      {
-      int cutoff = ToServerMinutes(InpFridayCutoff);
-      if(cutoff >= 0 && nowMin >= cutoff)
+      int cutoff = GmtMinuteToServer(InpFridayCutoff);
+      if(cutoff >= 0 && MinutesOfDay(serverNow) >= cutoff)
         {
          why = "past the Friday cutoff";
          return false;
         }
      }
 
-   bool inWindow = false;
-   if(InpUseSession1)
-     {
-      int a = ToServerMinutes(InpSession1Start);
-      int b = ToServerMinutes(InpSession1End);
-      if(a >= 0 && b >= 0 && InMinuteWindow(nowMin, a, b))
-         inWindow = true;
-     }
-   if(!inWindow && InpUseSession2)
-     {
-      int a = ToServerMinutes(InpSession2Start);
-      int b = ToServerMinutes(InpSession2End);
-      if(a >= 0 && b >= 0 && InMinuteWindow(nowMin, a, b))
-         inWindow = true;
-     }
+   g_activeSession = CurrentSessionName(serverNow);
 
-   if(!inWindow)
+   if(StringLen(g_activeSession) == 0)
      {
       why = "outside the trading sessions";
       return false;
@@ -303,6 +377,33 @@ bool InTradingSession(const datetime serverNow, string &why)
 
    why = "";
    return true;
+  }
+
+//+------------------------------------------------------------------+
+//| Dashboard text: the open session, or the next one due.           |
+//+------------------------------------------------------------------+
+string SessionStatusText(const datetime serverNow)
+  {
+   string open = CurrentSessionName(serverNow);
+   if(StringLen(open) > 0)
+      return open + " (open)";
+
+   int best = 100000;
+   string bestName = "";
+
+   int m = MinutesUntilSession(serverNow, InpUseLondonSession, InpLondonStart, MARKET_TZ_LONDON);
+   if(m >= 0 && m < best) { best = m; bestName = "London"; }
+
+   m = MinutesUntilSession(serverNow, InpUseNewYorkSession, InpNewYorkStart, MARKET_TZ_NEWYORK);
+   if(m >= 0 && m < best) { best = m; bestName = "New York"; }
+
+   m = MinutesUntilSession(serverNow, InpUseAsiaSession, InpAsiaStart, MARKET_TZ_TOKYO);
+   if(m >= 0 && m < best) { best = m; bestName = "Asia"; }
+
+   if(StringLen(bestName) == 0)
+      return "no session enabled";
+
+   return StringFormat("closed - %s in %dh%02dm", bestName, best / 60, best % 60);
   }
 
 //+------------------------------------------------------------------+
@@ -314,7 +415,7 @@ bool ShouldFlattenForWeekend(const datetime serverNow)
    TimeToStruct(serverNow, st);
    if(st.day_of_week != 5)
       return false;
-   int flat = ToServerMinutes(InpWeekendFlatTime);
+   int flat = GmtMinuteToServer(InpWeekendFlatTime);
    if(flat < 0)
       return false;
    return (MinutesOfDay(serverNow) >= flat);
@@ -329,6 +430,156 @@ double CurrentSpreadPoints(void)
    if(pt <= 0.0)
       return 0.0;
    return (ask - bid) / pt;
+  }
+
+//+------------------------------------------------------------------+
+//| Prints every session window as it will actually be applied, in   |
+//| broker server time. This is the line to check when trades appear |
+//| at the wrong hour - it makes a bad offset obvious immediately.   |
+//+------------------------------------------------------------------+
+string SessionWindowText(const string label,
+                         const bool enabled,
+                         const string startTime,
+                         const string endTime,
+                         const ENUM_MARKET_TZ tz)
+  {
+   if(!enabled)
+      return StringFormat("   %-9s disabled", label);
+
+   int a = SessionMinute(startTime, tz);
+   int b = SessionMinute(endTime, tz);
+   if(a < 0 || b < 0)
+      return StringFormat("   %-9s INVALID TIME FORMAT (%s - %s), expected HH:MM", label, startTime, endTime);
+
+   string basis;
+   if(InpSessionTimeBase == SESSION_TB_MARKET_LOCAL)
+      basis = StringFormat("%s local %s-%s, currently %s",
+                           TZ_MarketName(tz), startTime, endTime,
+                           TZ_OffsetText(TZ_MarketUtcOffsetSeconds(tz, UtcNow())));
+   else
+      if(InpSessionTimeBase == SESSION_TB_GMT)
+         basis = StringFormat("GMT %s-%s", startTime, endTime);
+      else
+         basis = StringFormat("server %s-%s", startTime, endTime);
+
+   return StringFormat("   %-9s %02d:%02d-%02d:%02d server   (%s)",
+                       label, a / 60, a % 60, b / 60, b % 60, basis);
+  }
+
+//+------------------------------------------------------------------+
+void LogSessionAlignment(void)
+  {
+   Print("[Time] resolved session windows:");
+   Print(SessionWindowText("Asia",     InpUseAsiaSession,    InpAsiaStart,    InpAsiaEnd,    MARKET_TZ_TOKYO));
+   Print(SessionWindowText("London",   InpUseLondonSession,  InpLondonStart,  InpLondonEnd,  MARKET_TZ_LONDON));
+   Print(SessionWindowText("New York", InpUseNewYorkSession, InpNewYorkStart, InpNewYorkEnd, MARKET_TZ_NEWYORK));
+
+   int cutoff = GmtMinuteToServer(InpFridayCutoff);
+   int flat   = GmtMinuteToServer(InpWeekendFlatTime);
+   int quota  = GmtMinuteToServer(InpQuotaFromTime);
+
+   if(cutoff >= 0)
+      PrintFormat("   %-9s %02d:%02d server   (GMT %s)", "Fri stop", cutoff / 60, cutoff % 60, InpFridayCutoff);
+   if(flat >= 0)
+      PrintFormat("   %-9s %02d:%02d server   (GMT %s)", "Fri flat", flat / 60, flat % 60, InpWeekendFlatTime);
+   if(quota >= 0 && InpUseDailyQuota)
+      PrintFormat("   %-9s %02d:%02d server   (GMT %s)", "Quota",  quota / 60, quota % 60, InpQuotaFromTime);
+
+   datetime utc = UtcNow();
+   PrintFormat("[Time] DST state: Europe %s, US %s.",
+               (TZ_IsEuSummerTime(utc) ? "SUMMER" : "standard"),
+               (TZ_IsUsSummerTime(utc) ? "SUMMER" : "standard"));
+  }
+
+//+------------------------------------------------------------------+
+//| TIME ALIGNMENT                                                   |
+//|                                                                  |
+//| Re-detects the broker's GMT offset and re-derives the CE(S)T day |
+//| boundary. Called on init and from the timer, so a DST transition |
+//| on the broker's clock is picked up while the EA is running       |
+//| instead of silently shifting every session and news window by an |
+//| hour until the next restart.                                     |
+//+------------------------------------------------------------------+
+void RefreshTimeAlignment(const bool firstRun)
+  {
+   bool plausible = true;
+   int detected = TZ_DetectServerGmtOffset(InpGmtOffsetHours, InpUseManualGmtOffset, plausible);
+
+   g_offsetPlausible = plausible;
+
+   if(!plausible && !g_offsetWarned)
+     {
+      PrintFormat("[Time] WARNING: the server-GMT offset could not be detected reliably. "
+                  "Falling back to the manual value (%+d h). Set InpUseManualGmtOffset=true "
+                  "and InpGmtOffsetHours to your broker's real offset.", InpGmtOffsetHours);
+      g_offsetWarned = true;
+     }
+
+   //--- GMT offset changed (DST transition, or a corrected clock)
+   if(firstRun || detected != g_gmtOffsetSec)
+     {
+      int previous = g_gmtOffsetSec;
+      g_gmtOffsetSec = detected;
+
+      if(firstRun)
+         PrintFormat("[Time] broker server clock is %s (offset %+.1f h).",
+                     TZ_OffsetText(g_gmtOffsetSec), g_gmtOffsetSec / 3600.0);
+      else
+         PrintFormat("[Time] server-GMT offset changed %+.1f h -> %+.1f h. "
+                     "Re-aligning sessions and re-parsing the news calendar.",
+                     previous / 3600.0, g_gmtOffsetSec / 3600.0);
+
+      // ForexFactory timestamps were converted to server time under the OLD
+      // offset, so the table has to be rebuilt, not merely re-read
+      g_news.SetGmtOffset(g_gmtOffsetSec);
+      if(!firstRun)
+         g_news.Refresh(true);
+     }
+
+   //--- CE(S)T day boundary used by the FTMO daily-loss rule
+   int cetTarget;
+   if(InpAutoCetOffset)
+     {
+      int cetFromUtc = TZ_MarketUtcOffsetSeconds(MARKET_TZ_CET, UtcNow());
+      cetTarget = g_gmtOffsetSec - cetFromUtc;      // server time minus CE(S)T
+     }
+   else
+      cetTarget = InpCetOffsetHours * 3600;
+
+   if(firstRun)
+     {
+      g_cetOffsetSec = cetTarget;
+      g_cetPending   = false;
+      PrintFormat("[Time] FTMO day boundary: server time minus CE(S)T = %+.1f h%s.",
+                  g_cetOffsetSec / 3600.0, (InpAutoCetOffset ? " (auto)" : " (manual)"));
+      return;
+     }
+
+   if(cetTarget != g_cetOffsetSec)
+     {
+      // Moving the day boundary mid-session would reset today's loss counter
+      // and trade count, so it only happens when nothing is at stake.
+      bool safe = (g_risk.TradesToday() == 0 && !g_exec.HasOpenPosition());
+
+      if(safe)
+        {
+         PrintFormat("[Time] CE(S)T day boundary shifted %+.1f h -> %+.1f h (applied).",
+                     g_cetOffsetSec / 3600.0, cetTarget / 3600.0);
+         g_cetOffsetSec = cetTarget;
+         g_risk.SetCetOffset(g_cetOffsetSec);
+         g_cetPending = false;
+        }
+      else
+        {
+         if(!g_cetPending || g_cetPendingSec != cetTarget)
+            PrintFormat("[Time] CE(S)T day boundary shift to %+.1f h deferred - "
+                        "a position or today's trade count is still open.", cetTarget / 3600.0);
+         g_cetPendingSec = cetTarget;
+         g_cetPending    = true;
+        }
+     }
+   else
+      g_cetPending = false;
   }
 
 //+------------------------------------------------------------------+
@@ -349,8 +600,11 @@ int OnInit(void)
    if(StringFind(upper, "XAU") < 0 && StringFind(upper, "GOLD") < 0)
       PrintFormat("WARNING: %s does not look like gold. Every default in this EA is tuned for XAUUSD.", g_symbol);
 
-   g_gmtOffsetSec = ServerGmtOffsetSeconds(InpGmtOffsetHours, InpUseManualGmtOffset);
-   PrintFormat("[Init] server-GMT offset resolved to %+d hours.", g_gmtOffsetSec / 3600);
+   // resolved after the news filter is constructed but before it initialises,
+   // because the FF parser needs the offset to convert its timestamps
+   bool plausible = true;
+   g_gmtOffsetSec = TZ_DetectServerGmtOffset(InpGmtOffsetHours, InpUseManualGmtOffset, plausible);
+   g_offsetPlausible = plausible;
 
    //--- confluence engine
    g_conf.SetPeriods(InpEmaFastTrade, InpEmaSlowTrade,
@@ -375,6 +629,12 @@ int OnInit(void)
    if(!g_conf.Init(g_symbol, InpTfTrade, InpTfMid, InpTfHigh))
       return INIT_FAILED;
 
+   //--- CE(S)T day boundary, derived from the server offset unless overridden
+   if(InpAutoCetOffset)
+      g_cetOffsetSec = g_gmtOffsetSec - TZ_MarketUtcOffsetSeconds(MARKET_TZ_CET, UtcNow());
+   else
+      g_cetOffsetSec = InpCetOffsetHours * 3600;
+
    //--- risk guard
    if(!g_risk.Init(g_symbol, InpMagic, InpInitialCapital,
                    InpFtmoDailyLossPct, InpFtmoMaxLossPct,
@@ -382,7 +642,7 @@ int OnInit(void)
                    InpSoftTotalLossPct, InpHardTotalLossPct,
                    InpProfitTargetPct, InpStopAtTarget,
                    InpMaxTradesPerDay, InpMaxConsecLosses,
-                   InpLossStreakFactor, InpCetOffsetHours * 3600))
+                   InpLossStreakFactor, g_cetOffsetSec))
       return INIT_FAILED;
 
    //--- execution
@@ -401,6 +661,10 @@ int OnInit(void)
 
    if(InpNewsSource == NEWS_SRC_OFF)
       Print("WARNING: the news filter is OFF. FTMO forbids opening or closing trades around high-impact news.");
+
+   //--- report the resolved alignment and prime the re-detection state
+   RefreshTimeAlignment(true);
+   LogSessionAlignment();
 
    //--- dashboard
    g_dash.Init(InpShowDashboard, InpDashX, InpDashY, InpDashFontSize);
@@ -424,6 +688,9 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTimer(void)
   {
+   if(InpReDetectOffset || g_cetPending)
+      RefreshTimeAlignment(false);
+
    g_news.Refresh(false);
    UpdateDashboard();
   }
@@ -541,7 +808,7 @@ void OnTick(void)
 
    if(InpUseDailyQuota && g_risk.TradesToday() == 0)
      {
-      int quotaFrom = ToServerMinutes(InpQuotaFromTime);
+      int quotaFrom = GmtMinuteToServer(InpQuotaFromTime);
       if(quotaFrom >= 0 && MinutesOfDay(now) >= quotaFrom)
         {
          threshold = InpQuotaScoreThreshold;
@@ -703,6 +970,17 @@ void UpdateDashboard(void)
                            g_conf.Atr(), g_conf.Adx(), g_conf.Rsi(), g_conf.Vwap()), clrGainsboro);
    g_dash.Row(StringFormat("Spread %.0f pts   Positions %d",
                            CurrentSpreadPoints(), g_exec.OpenPositions()), clrGainsboro);
+   g_dash.Separator();
+
+   string dstText = StringFormat("EU %s / US %s",
+                                 (TZ_IsEuSummerTime(UtcNow()) ? "DST" : "std"),
+                                 (TZ_IsUsSummerTime(UtcNow()) ? "DST" : "std"));
+   g_dash.Row(StringFormat("Clock      server %s | CET %+.0fh | %s",
+                           TZ_OffsetText(g_gmtOffsetSec),
+                           g_cetOffsetSec / 3600.0, dstText),
+              (g_offsetPlausible ? clrGainsboro : clrTomato));
+   g_dash.Row("Session    " + SessionStatusText(now),
+              (StringLen(CurrentSessionName(now)) > 0 ? clrLimeGreen : clrGainsboro));
    g_dash.Separator();
 
    bool blackout = g_news.IsBlackout(now);

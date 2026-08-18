@@ -55,7 +55,88 @@ Check the on-chart dashboard reads sensibly:
 
 If the GMT offset is wrong, set `InpUseManualGmtOffset = true` and
 `InpGmtOffsetHours` to the correct value. **Everything — sessions, news, quota
-timing — depends on this being right.**
+timing, and the FTMO daily reset — depends on this being right.**
+
+---
+
+## Time alignment and sessions
+
+### How the offset is resolved
+
+The EA detects the broker's GMT offset from `TimeTradeServer() - TimeGMT()`,
+rounds to the nearest half hour, range-checks it, and **re-checks it on every
+timer tick** so a DST transition is picked up while running. On startup it prints
+every resolved window to the journal:
+
+```
+[Time] broker server clock is GMT+2 (offset +2.0 h).
+[Time] FTMO day boundary: server time minus CE(S)T = +0.0 h (auto).
+[Time] resolved session windows:
+   Asia      disabled
+   London    09:00-13:00 server   (London local 08:00-12:00, currently GMT+1)
+   New York  14:00-18:00 server   (New York local 08:00-12:00, currently GMT-5)
+   Fri stop  16:00 server   (GMT 15:00)
+   Fri flat  20:00 server   (GMT 19:00)
+   Quota     15:30 server   (GMT 14:30)
+[Time] DST state: Europe standard, US standard.
+```
+
+**Check this block against your broker before trading.** It is the fastest way to
+catch a wrong offset. The dashboard `Clock` row shows the same information live
+and turns red if detection failed.
+
+### The three sessions
+
+| Input | Default | Meaning |
+|---|---|---|
+| `InpUseAsiaSession` | `false` | Tokyo 09:00–15:00 JST. Thin and choppy — off by default. |
+| `InpUseLondonSession` | `true` | London 08:00–12:00 local. |
+| `InpUseNewYorkSession` | `true` | New York 08:00–12:00 local — includes the 08:30 ET data window and the whole London/NY overlap. |
+
+Each has its own start/end input. A trade is allowed if **any** enabled session is
+open.
+
+### `InpSessionTimeBase`
+
+| Value | Meaning |
+|---|---|
+| `SESSION_TB_MARKET_LOCAL` | **Default.** Times are in each session's own market clock and converted with live DST. Set and forget. |
+| `SESSION_TB_GMT` | Times are fixed GMT. Ignores market DST — your windows drift an hour twice a year. |
+| `SESSION_TB_SERVER` | Times are literal broker server time. No conversion at all. |
+
+**If you change the time base away from `MARKET_LOCAL`, re-enter the session
+times** — the defaults are market-local values and will be wrong read as anything
+else.
+
+The Friday cutoff, weekend flatten and quota trigger are **always GMT**,
+regardless of this setting. They are risk controls, not market sessions, so they
+should not move with a market clock.
+
+### The FTMO daily reset
+
+`InpAutoCetOffset` (default `true`) derives the 00:00 CE(S)T boundary from the
+detected server offset and the EU DST state — on an FTMO server this resolves to
+`+0h` year-round. Set it to `false` and use `InpCetOffsetHours` only if your
+broker's clock is not CE(S)T.
+
+A boundary shift is **deferred** until no position is open and no trade has been
+taken that day, because moving it mid-session would reset the daily loss counter.
+The journal says so when it defers.
+
+### Why this matters — the DST gap
+
+EU and US clocks change on dates about two weeks apart, so for ~3 weeks a year the
+London/NY relationship is an hour different. On a CE(S)T broker with the defaults:
+
+| Date | Server | London (server) | New York (server) |
+|---|---|---|---|
+| mid-January | GMT+1 | 09:00–13:00 | 14:00–18:00 |
+| **12 March** (US on DST, EU not) | GMT+1 | 09:00–13:00 | **13:00–17:00** |
+| mid-July | GMT+2 | 09:00–13:00 | 14:00–18:00 |
+| **28 October** (EU off DST, US still on) | GMT+1 | 09:00–13:00 | **13:00–17:00** |
+
+With `MARKET_LOCAL` this is handled automatically. With fixed GMT you would be
+trading the wrong hour in both gap periods.
 
 ---
 
@@ -107,6 +188,10 @@ Strategy Tester settings that matter:
   gold regime.
 - **Deposit:** the challenge size, in the challenge currency.
 - **Leverage:** match FTMO (1:100 on the standard XAUUSD offering).
+- **Time:** `TimeGMT()` is simulated in the tester, so set
+  `InpUseManualGmtOffset = true` and `InpGmtOffsetHours` to your broker's offset.
+  Note this pins one offset for the whole run, so backtests spanning a DST change
+  will have session windows an hour off for part of the period.
 
 WebRequest does not work in the tester, so the FF feed is unavailable there. The
 EA falls back to the MT5 calendar (which *does* work in the tester) or the cached
@@ -145,6 +230,8 @@ weights is more free parameters than a year of M15 data can honestly support.
 | `News 0 events` | FF URL not whitelisted **and** broker calendar empty. Use `InpNewsManualCsv`. |
 | No trades at all | Check the dashboard `State` line — it always names the blocking condition. |
 | "risk budget exhausted or lot below the broker minimum" | Risk % too small for the account size, or a drawdown guard is throttling size. |
-| Trades at the wrong hours | GMT offset wrong. See step 5. |
+| Trades at the wrong hours | GMT offset wrong, or the time base does not match the times you entered. Read the `[Time] resolved session windows` block in the journal. |
+| `Clock` row is red | Offset detection failed. Set `InpUseManualGmtOffset = true`. |
+| Session windows shift by an hour in March/October | Expected — that is the EU/US DST gap being handled correctly. |
 | `order REJECTED: Invalid stops` | Broker stop level exceeds the ATR stop. Raise `InpMinStopAtr`. |
 | Partial close never fires | Position too small to split. Either raise risk or set `InpUsePartial = false`. |

@@ -9,6 +9,7 @@ by the ForexFactory feed plus the MT5 economic calendar.
 MQL5/Experts/XAUUSD_FTMO/
     XAUUSD_FTMO_Confluence_EA.mq5   main EA
     Include/CoreDefs.mqh            shared types and math helpers
+    Include/TimeZones.mqh           DST-aware clock alignment
     Include/ConfluenceEngine.mqh    11-component weighted signal engine
     Include/RiskGuard.mqh           FTMO compliance and position sizing
     Include/TradeExecutor.mqh       entries, partials, breakeven, trailing
@@ -45,6 +46,16 @@ trip at 2%/3% daily and 5%/7% total, against FTMO's 5%/10% limits.
 ForexFactory weekly JSON feed and the MT5 built-in calendar together, with a
 manual CSV fallback. Positions are flattened 5 minutes *before* a window opens,
 because FTMO forbids closing inside it too.
+
+**Sessions and time alignment.** Three named sessions — **London** and **New
+York** on by default, **Asia** optional and off. Times are entered in each
+market's own local clock and converted at runtime, so the windows stay correct
+through DST: the broker (CE(S)T), London, and New York all switch on *different*
+dates, and for ~3 weeks a year the London/NY relationship is an hour off from the
+rest of the year. The broker's GMT offset is auto-detected, range-checked, and
+re-checked while running, and the FTMO 00:00 CE(S)T daily-loss boundary is
+derived from it rather than hand-entered. Every resolved window is printed to the
+journal at startup.
 
 **One trade a day.** If nothing has triggered by 14:30 GMT, quota mode lowers the
 threshold at 60% size. Switch it off (`InpUseDailyQuota = false`) if you would

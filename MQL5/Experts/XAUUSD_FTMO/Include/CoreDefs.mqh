@@ -161,26 +161,6 @@ double MoneyForDistance(const string symbol, const double priceDistance, const d
   }
 
 //+------------------------------------------------------------------+
-//| Broker server time offset from GMT, in seconds.                  |
-//| Auto-detected when possible, otherwise the manual override wins. |
-//+------------------------------------------------------------------+
-int ServerGmtOffsetSeconds(const int manualOverrideHours, const bool useManual)
-  {
-   if(useManual)
-      return manualOverrideHours * 3600;
-
-   datetime srv = TimeTradeServer();
-   datetime gmt = TimeGMT();
-   if(srv <= 0 || gmt <= 0)
-      return manualOverrideHours * 3600;
-
-   // round to the nearest half hour to absorb clock jitter
-   double diff = (double)(srv - gmt);
-   double halfHours = MathRound(diff / 1800.0);
-   return (int)(halfHours * 1800.0);
-  }
-
-//+------------------------------------------------------------------+
 //| Start of the calendar day (00:00) that contains 't'.             |
 //+------------------------------------------------------------------+
 datetime DayStart(const datetime t)
