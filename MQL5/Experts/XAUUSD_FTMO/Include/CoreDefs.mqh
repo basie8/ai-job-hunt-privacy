@@ -47,6 +47,38 @@ enum ENUM_GUARD_ACTION
    GUARD_HARD_FLAT   = 2   // close everything and stop for the day/phase
   };
 
+//--- what the EA is doing right now, as shown on the console banner
+enum ENUM_EA_STATUS
+  {
+   EA_STATUS_ACTIVE          = 0,  // in session, guards clear, hunting for a setup
+   EA_STATUS_IN_TRADE        = 1,  // position open and being managed
+   EA_STATUS_PAUSED_NEWS     = 2,  // high-impact news blackout
+   EA_STATUS_PAUSED_SESSION  = 3,  // outside the trading sessions
+   EA_STATUS_PAUSED_RISK     = 4,  // a soft drawdown guard is holding trading
+   EA_STATUS_PAUSED_LIMIT    = 5,  // trade cap, entry spacing, spread or streak
+   EA_STATUS_CLOSED_WEEKEND  = 6,  // weekend / Friday cutoff
+   EA_STATUS_TARGET_REACHED  = 7,  // phase target hit, standing down
+   EA_STATUS_HALTED          = 8   // hard guard tripped - flat and stopped
+  };
+
+//+------------------------------------------------------------------+
+string StatusLabel(const ENUM_EA_STATUS s)
+  {
+   switch(s)
+     {
+      case EA_STATUS_ACTIVE:         return "ACTIVE";
+      case EA_STATUS_IN_TRADE:       return "IN TRADE";
+      case EA_STATUS_PAUSED_NEWS:    return "PAUSED - NEWS";
+      case EA_STATUS_PAUSED_SESSION: return "CLOSED - SESSION";
+      case EA_STATUS_PAUSED_RISK:    return "PAUSED - RISK GUARD";
+      case EA_STATUS_PAUSED_LIMIT:   return "PAUSED - LIMIT";
+      case EA_STATUS_CLOSED_WEEKEND: return "CLOSED - WEEKEND";
+      case EA_STATUS_TARGET_REACHED: return "TARGET REACHED";
+      case EA_STATUS_HALTED:         return "HALTED";
+     }
+   return "UNKNOWN";
+  }
+
 //--- a single high impact calendar entry, already normalised to server time
 struct NewsEvent
   {

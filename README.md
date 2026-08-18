@@ -10,11 +10,12 @@ MQL5/Experts/XAUUSD_FTMO/
     XAUUSD_FTMO_Confluence_EA.mq5   main EA
     Include/CoreDefs.mqh            shared types and math helpers
     Include/TimeZones.mqh           DST-aware clock alignment
+    Include/Statistics.mqh          win rate, profit factor, R expectancy
+    Include/Dashboard.mqh           the Aurum console
     Include/ConfluenceEngine.mqh    11-component weighted signal engine
     Include/RiskGuard.mqh           FTMO compliance and position sizing
     Include/TradeExecutor.mqh       entries, partials, breakeven, trailing
     Include/NewsFilter.mqh          ForexFactory + MT5 calendar blackout
-    Include/Dashboard.mqh           on-chart status panel
 MQL5/Presets/                       Phase 1 / Phase 2 / Funded .set files
 docs/STRATEGY.md                    full strategy specification and rationale
 docs/SETUP.md                       installation, configuration, backtesting
@@ -60,6 +61,15 @@ journal at startup.
 **One trade a day.** If nothing has triggered by 14:30 GMT, quota mode lowers the
 threshold at 60% size. Switch it off (`InpUseDailyQuota = false`) if you would
 rather be selective.
+
+**The Aurum console.** A framed gold-on-black on-chart panel carrying a single
+authoritative status banner — `ACTIVE`, `IN TRADE`, `PAUSED - NEWS`,
+`CLOSED - SESSION`, `PAUSED - RISK GUARD`, `PAUSED - LIMIT`, `CLOSED - WEEKEND`,
+`TARGET REACHED`, `HALTED` — each with the specific reason underneath. Sections
+for FTMO progress, market state, news, and positions, plus two toggle buttons: a
+**STATS** block (win rate, profit factor, avg win/loss, expectancy in R, streaks,
+closed-equity drawdown) and a **PARAMS** block that prints the loaded strategy
+configuration so a wrong preset is visible without opening the Inputs tab.
 
 ## Start here
 

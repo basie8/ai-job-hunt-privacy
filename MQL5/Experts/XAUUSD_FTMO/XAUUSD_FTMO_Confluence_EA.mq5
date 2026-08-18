@@ -24,6 +24,7 @@
 #include "Include/RiskGuard.mqh"
 #include "Include/ConfluenceEngine.mqh"
 #include "Include/TradeExecutor.mqh"
+#include "Include/Statistics.mqh"
 #include "Include/Dashboard.mqh"
 
 //+------------------------------------------------------------------+
@@ -168,11 +169,16 @@ input int             InpNewsFlattenLeadMin  = 5;        // Flatten this many mi
 input int             InpNewsRefreshMinutes  = 240;      // Feed refresh interval
 input string          InpNewsManualCsv       = "";       // Optional manual CSV in MQL5\Files
 
-input group "=== Dashboard ==="
-input bool            InpShowDashboard       = true;     // Show the on-chart panel
-input int             InpDashX               = 12;       // Panel X
-input int             InpDashY               = 24;       // Panel Y
-input int             InpDashFontSize        = 9;        // Panel font size
+input group "=== Aurum console ==="
+input bool            InpShowDashboard       = true;     // Show the on-chart console
+input int             InpDashX               = 14;       // Console X
+input int             InpDashY               = 24;       // Console Y
+input int             InpDashWidth           = 360;      // Console width (pixels)
+input int             InpDashFontSize        = 8;        // Console font size
+input bool            InpShowParamsBlock     = false;    // Start with the parameter block open
+input bool            InpShowMetricsBlock    = true;     // Start with the metrics block open
+input bool            InpRebuildStatsOnInit  = true;     // Rebuild metrics from account history
+input int             InpStatsHistoryDays    = 90;       // How far back to rebuild (days)
 
 //+------------------------------------------------------------------+
 //| GLOBALS                                                          |
@@ -181,6 +187,7 @@ CNewsFilter       g_news;
 CRiskGuard        g_risk;
 CConfluenceEngine g_conf;
 CTradeExecutor    g_exec;
+CStatistics       g_stats;
 CDashboard        g_dash;
 
 string   g_symbol       = "";
@@ -191,6 +198,10 @@ bool     g_cetPending   = false;
 bool     g_offsetPlausible = true;
 bool     g_offsetWarned = false;
 string   g_activeSession = "";
+ENUM_EA_STATUS g_status       = EA_STATUS_ACTIVE;
+string   g_statusDetail       = "";
+bool     g_showParams         = false;
+bool     g_showMetrics        = true;
 datetime g_lastBarTime  = 0;
 datetime g_lastEntryTime = 0;
 datetime g_lastNewsRefresh = 0;
@@ -201,6 +212,7 @@ bool     g_hardStopped  = false;
 //--- corrupt the win / loss streak accounting
 ulong    g_accPosId[];
 double   g_accProfit[];
+double   g_accRisk[];          // risk money at entry, for R-multiple stats
 int      g_accCount = 0;
 
 //+------------------------------------------------------------------+
@@ -220,8 +232,10 @@ void AccAdd(const ulong posId, const double profit)
      {
       ArrayResize(g_accPosId, g_accCount + 1);
       ArrayResize(g_accProfit, g_accCount + 1);
+      ArrayResize(g_accRisk, g_accCount + 1);
       g_accPosId[g_accCount]  = posId;
       g_accProfit[g_accCount] = 0.0;
+      g_accRisk[g_accCount]   = 0.0;
       idx = g_accCount;
       g_accCount++;
      }
@@ -237,10 +251,24 @@ void AccRemove(const int idx)
      {
       g_accPosId[i]  = g_accPosId[i + 1];
       g_accProfit[i] = g_accProfit[i + 1];
+      g_accRisk[i]   = g_accRisk[i + 1];
      }
    g_accCount--;
    ArrayResize(g_accPosId, g_accCount);
    ArrayResize(g_accProfit, g_accCount);
+   ArrayResize(g_accRisk, g_accCount);
+  }
+
+//+------------------------------------------------------------------+
+//| Records the money at risk when a position is opened, so the      |
+//| console can report expectancy in R once the trade closes.        |
+//+------------------------------------------------------------------+
+void AccSetRisk(const ulong posId, const double riskMoney)
+  {
+   AccAdd(posId, 0.0);
+   int idx = AccIndex(posId);
+   if(idx >= 0)
+      g_accRisk[idx] = riskMoney;
   }
 
 //+------------------------------------------------------------------+
@@ -667,9 +695,25 @@ int OnInit(void)
    LogSessionAlignment();
 
    //--- dashboard
-   g_dash.Init(InpShowDashboard, InpDashX, InpDashY, InpDashFontSize);
+   g_showParams  = InpShowParamsBlock;
+   g_showMetrics = InpShowMetricsBlock;
+   g_dash.Init(InpShowDashboard, InpDashX, InpDashY, InpDashWidth, InpDashFontSize);
+
+   //--- rebuild the metrics so a restart mid-challenge does not zero the console
+   if(InpRebuildStatsOnInit)
+     {
+      datetime since = TimeCurrent() - (datetime)(MathMax(1, InpStatsHistoryDays) * 86400);
+      int rebuilt = g_stats.RebuildFromHistory(g_symbol, InpMagic, since);
+      if(rebuilt > 0)
+         PrintFormat("[Stats] rebuilt %d closed trades from history: "
+                     "win rate %.1f%%, PF %.2f, net %+.2f. "
+                     "R metrics start fresh - the entry risk of historical trades is not recoverable.",
+                     rebuilt, g_stats.WinRate(), g_stats.ProfitFactor(), g_stats.NetProfit());
+     }
 
    EventSetTimer(20);
+
+   UpdateDashboard();
 
    Print("=== XAUUSD FTMO Confluence EA initialised ===");
    return INIT_SUCCEEDED;
@@ -692,7 +736,20 @@ void OnTimer(void)
       RefreshTimeAlignment(false);
 
    g_news.Refresh(false);
+   RefreshIdleStatus(TimeTradeServer());
    UpdateDashboard();
+  }
+
+//+------------------------------------------------------------------+
+//| Records what the EA is doing, for the console banner. Called at  |
+//| every decision point in OnTick so the panel and the trade logic  |
+//| can never disagree about why nothing is happening.               |
+//+------------------------------------------------------------------+
+void SetStatus(const ENUM_EA_STATUS st, const string detail)
+  {
+   g_status          = st;
+   g_statusDetail    = detail;
+   g_lastBlockReason = detail;
   }
 
 //+------------------------------------------------------------------+
@@ -721,7 +778,7 @@ void OnTick(void)
          PrintFormat("[GUARD] %s", g_risk.LastReason());
          g_hardStopped = true;
         }
-      g_lastBlockReason = g_risk.LastReason();
+      SetStatus(EA_STATUS_HALTED, g_risk.LastReason());
       return;
      }
    g_hardStopped = false;
@@ -731,7 +788,7 @@ void OnTick(void)
      {
       if(g_exec.HasOpenPosition())
          g_exec.CloseAll("weekend flat");
-      g_lastBlockReason = "weekend flat";
+      SetStatus(EA_STATUS_CLOSED_WEEKEND, "flat for the weekend");
       return;
      }
 
@@ -744,20 +801,26 @@ void OnTick(void)
       if(!blackout && g_news.BlackoutStartsWithin(now, InpNewsFlattenLeadMin))
         {
          g_exec.CloseAll("flattening ahead of a high-impact release");
-         g_lastBlockReason = "pre-news flat";
+         SetStatus(EA_STATUS_PAUSED_NEWS, "flattened ahead of a release");
          return;
         }
      }
 
    if(blackout)
      {
-      g_lastBlockReason = "news blackout: " + g_news.BlackoutTitle();
+      SetStatus(EA_STATUS_PAUSED_NEWS, g_news.BlackoutTitle());
       return;
      }
 
    if(action == GUARD_SOFT_HALT)
      {
-      g_lastBlockReason = g_risk.LastReason();
+      if(g_risk.TargetReached())
+         SetStatus(EA_STATUS_TARGET_REACHED, g_risk.LastReason());
+      else
+         if(g_risk.TradesToday() >= InpMaxTradesPerDay && InpMaxTradesPerDay > 0)
+            SetStatus(EA_STATUS_PAUSED_LIMIT, g_risk.LastReason());
+         else
+            SetStatus(EA_STATUS_PAUSED_RISK, g_risk.LastReason());
       return;
      }
 
@@ -765,14 +828,14 @@ void OnTick(void)
    string why = "";
    if(!InTradingSession(now, why))
      {
-      g_lastBlockReason = why;
+      SetStatus(EA_STATUS_PAUSED_SESSION, why);
       return;
      }
 
    //--- 6. one position at a time
    if(g_exec.OpenPositions() >= InpMaxOpenPositions)
      {
-      g_lastBlockReason = "position already open";
+      SetStatus(EA_STATUS_IN_TRADE, "managing an open position");
       return;
      }
 
@@ -781,7 +844,8 @@ void OnTick(void)
      {
       if((now - g_lastEntryTime) < InpMinMinutesBetween * 60)
         {
-         g_lastBlockReason = "entry spacing";
+         int waitMin = InpMinMinutesBetween - (int)((now - g_lastEntryTime) / 60);
+         SetStatus(EA_STATUS_PAUSED_LIMIT, StringFormat("entry spacing, %dm left", waitMin));
          return;
         }
      }
@@ -790,7 +854,8 @@ void OnTick(void)
    double spread = CurrentSpreadPoints();
    if(InpMaxSpreadPoints > 0 && spread > InpMaxSpreadPoints)
      {
-      g_lastBlockReason = StringFormat("spread %.0f > %d", spread, InpMaxSpreadPoints);
+      SetStatus(EA_STATUS_PAUSED_LIMIT,
+                StringFormat("spread %.0f pts > %d limit", spread, InpMaxSpreadPoints));
       return;
      }
 
@@ -824,7 +889,7 @@ void OnTick(void)
 
    if(dir == SIGNAL_NONE)
      {
-      g_lastBlockReason = snap.reason;
+      SetStatus(EA_STATUS_ACTIVE, snap.reason);
       if(InpVerboseLog)
          PrintFormat("[Signal] %s", snap.reason);
       return;
@@ -835,7 +900,7 @@ void OnTick(void)
                           InpSwingBufferAtr, InpMinStopAtr, InpMaxStopAtr,
                           InpTp1R, InpTp2R, snap))
      {
-      g_lastBlockReason = "stop construction failed";
+      SetStatus(EA_STATUS_ACTIVE, "stop construction failed");
       return;
      }
 
@@ -844,8 +909,8 @@ void OnTick(void)
                                     InpRiskMode, InpFixedLot);
    if(lots <= 0.0)
      {
-      g_lastBlockReason = "risk budget exhausted or lot below the broker minimum";
-      PrintFormat("[Trade] skipped: %s", g_lastBlockReason);
+      SetStatus(EA_STATUS_PAUSED_RISK, "risk budget exhausted or lot below the broker minimum");
+      PrintFormat("[Trade] skipped: %s", g_statusDetail);
       return;
      }
 
@@ -862,7 +927,13 @@ void OnTick(void)
      {
       g_risk.RegisterOpen();
       g_lastEntryTime = now;
-      g_lastBlockReason = "";
+
+      // remember what this trade stands to lose, so the console can report
+      // its outcome as an R multiple once it closes
+      AccSetRisk(ticket, MoneyForDistance(g_symbol, snap.riskDistance, lots));
+      SetStatus(EA_STATUS_IN_TRADE, StringFormat("%s opened in %s",
+                (dir == SIGNAL_BUY ? "long" : "short"),
+                (StringLen(g_activeSession) > 0 ? g_activeSession : "session")));
 
       PrintFormat("[Trade] %s | %s | ATR=%.2f risk=%.2f lots=%.2f %s",
                   (dir == SIGNAL_BUY ? "BUY" : "SELL"),
@@ -914,18 +985,220 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       int idx = AccIndex(posId);
       if(idx >= 0)
         {
-         double total = g_accProfit[idx];
+         double total    = g_accProfit[idx];
+         double riskUsed = g_accRisk[idx];
+
          g_risk.RegisterClosedTrade(total);
-         PrintFormat("[Result] position #%I64u closed for %.2f | today W/L %d/%d | streak %d",
-                     posId, total, g_risk.WinsToday(), g_risk.LossesToday(),
-                     g_risk.ConsecutiveLosses());
+         g_stats.Register(total, riskUsed);
+
+         string rText = (riskUsed > 0.0 ? StringFormat("%+.2fR", total / riskUsed) : "R n/a");
+         PrintFormat("[Result] position #%I64u closed %+.2f (%s) | today W/L %d/%d | "
+                     "streak %d | win rate %.0f%% PF %.2f exp %+.2fR",
+                     posId, total, rText, g_risk.WinsToday(), g_risk.LossesToday(),
+                     g_risk.ConsecutiveLosses(), g_stats.WinRate(),
+                     g_stats.ProfitFactor(), g_stats.ExpectancyR());
          AccRemove(idx);
         }
      }
   }
 
 //+------------------------------------------------------------------+
-//| Dashboard                                                        |
+//| AURUM CONSOLE                                                    |
+//+------------------------------------------------------------------+
+color StatusColor(const ENUM_EA_STATUS st)
+  {
+   switch(st)
+     {
+      case EA_STATUS_ACTIVE:         return AURUM_GOLD_BRIGHT;
+      case EA_STATUS_IN_TRADE:       return AURUM_GOOD;
+      case EA_STATUS_TARGET_REACHED: return AURUM_GOOD;
+      case EA_STATUS_PAUSED_NEWS:    return AURUM_BAD;
+      case EA_STATUS_HALTED:         return AURUM_BAD;
+      case EA_STATUS_PAUSED_RISK:    return AURUM_WARN;
+      case EA_STATUS_PAUSED_LIMIT:   return AURUM_WARN;
+      default:                       return AURUM_LABEL;
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| Keeps the banner honest when no ticks are arriving - over a      |
+//| weekend or a long news blackout OnTick never runs, so the timer  |
+//| refreshes the states that change on the clock alone.             |
+//+------------------------------------------------------------------+
+void RefreshIdleStatus(const datetime now)
+  {
+   if(g_status == EA_STATUS_HALTED || g_status == EA_STATUS_TARGET_REACHED)
+      return;
+
+   if(g_exec.HasOpenPosition())
+      return;                                  // OnTick owns the in-trade state
+
+   if(ShouldFlattenForWeekend(now))
+     {
+      SetStatus(EA_STATUS_CLOSED_WEEKEND, "flat for the weekend");
+      return;
+     }
+
+   if(g_news.IsBlackout(now))
+     {
+      SetStatus(EA_STATUS_PAUSED_NEWS, g_news.BlackoutTitle());
+      return;
+     }
+
+   string why = "";
+   if(!InTradingSession(now, why))
+      SetStatus(EA_STATUS_PAUSED_SESSION, why);
+  }
+
+//+------------------------------------------------------------------+
+string SessionSummary(void)
+  {
+   string parts = "";
+   if(InpUseAsiaSession)    parts += "Asia ";
+   if(InpUseLondonSession)  parts += "London ";
+   if(InpUseNewYorkSession) parts += "NY";
+   StringTrimRight(parts);
+   return (StringLen(parts) > 0 ? parts : "NONE ENABLED");
+  }
+
+//+------------------------------------------------------------------+
+//| The strategy parameter block - what is actually loaded, so a     |
+//| wrong preset is visible without opening the Inputs tab.          |
+//+------------------------------------------------------------------+
+void DrawParameters(void)
+  {
+   g_dash.Section("STRATEGY PARAMETERS");
+
+   g_dash.Row("Timeframes",
+              StringFormat("%s / %s / %s",
+                           StringSubstr(EnumToString(InpTfTrade), 7),
+                           StringSubstr(EnumToString(InpTfMid), 7),
+                           StringSubstr(EnumToString(InpTfHigh), 7)));
+
+   g_dash.Row("Confluence gate",
+              StringFormat("score %.0f, margin %.0f", InpScoreThreshold, InpDominanceMargin));
+
+   g_dash.Row("Hard gates",
+              StringFormat("ADX>%.0f  ATR %.1f-%.1f  ext<%.1f",
+                           InpAdxMin, InpMinAtrPrice, InpMaxAtrPrice, InpMaxExtensionAtr));
+
+   g_dash.Row("Risk / trade",
+              StringFormat("%.2f%% %s", InpRiskPercent,
+                           (InpRiskMode == RISK_PERCENT_INITIAL ? "of initial" :
+                            InpRiskMode == RISK_PERCENT_BALANCE ? "of balance" :
+                            InpRiskMode == RISK_PERCENT_EQUITY  ? "of equity"  : "fixed lot")));
+
+   g_dash.Row("Stop",
+              StringFormat("%.2f x ATR, %.1f-%.1f ATR clamp",
+                           InpSlAtrMult, InpMinStopAtr, InpMaxStopAtr));
+
+   g_dash.Row("Targets",
+              StringFormat("TP1 %.1fR (%.0f%%)  TP2 %.1fR",
+                           InpTp1R, (InpUsePartial ? InpPartialPct : 0.0), InpTp2R));
+
+   g_dash.Row("Trail",
+              (InpUseTrailing ? StringFormat("from %.1fR, %.1f x ATR", InpTrailStartR, InpTrailAtrMult)
+                              : "off"));
+
+   g_dash.Row("Guards daily",
+              StringFormat("soft %.1f%% / hard %.1f%% (FTMO %.0f%%)",
+                           InpSoftDailyLossPct, InpHardDailyLossPct, InpFtmoDailyLossPct),
+              AURUM_TEXT);
+
+   g_dash.Row("Guards total",
+              StringFormat("soft %.1f%% / hard %.1f%% (FTMO %.0f%%)",
+                           InpSoftTotalLossPct, InpHardTotalLossPct, InpFtmoMaxLossPct),
+              AURUM_TEXT);
+
+   g_dash.Row("Limits",
+              StringFormat("%d/day, %d open, %dm apart, %d loss streak",
+                           InpMaxTradesPerDay, InpMaxOpenPositions,
+                           InpMinMinutesBetween, InpMaxConsecLosses));
+
+   g_dash.Row("Sessions", SessionSummary(),
+              (StringLen(SessionSummary()) > 0 && SessionSummary() != "NONE ENABLED"
+               ? AURUM_TEXT : AURUM_BAD));
+
+   g_dash.Row("Daily quota",
+              (InpUseDailyQuota ? StringFormat("from %s GMT, score %.0f, %.0f%% size",
+                                               InpQuotaFromTime, InpQuotaScoreThreshold,
+                                               InpQuotaRiskFactor * 100.0)
+                                : "off"));
+
+   string newsCfg;
+   switch(InpNewsSource)
+     {
+      case NEWS_SRC_OFF:           newsCfg = "OFF";                    break;
+      case NEWS_SRC_MT5:           newsCfg = "MT5 calendar";           break;
+      case NEWS_SRC_FOREXFACTORY:  newsCfg = "ForexFactory";           break;
+      default:                     newsCfg = "ForexFactory + MT5";     break;
+     }
+   g_dash.Row("News filter",
+              StringFormat("%s, -%d/+%dm", newsCfg, InpNewsMinutesBefore, InpNewsMinutesAfter),
+              (InpNewsSource == NEWS_SRC_OFF ? AURUM_BAD : AURUM_TEXT));
+  }
+
+//+------------------------------------------------------------------+
+//| Performance metrics for this strategy on this account.           |
+//+------------------------------------------------------------------+
+void DrawMetrics(void)
+  {
+   g_dash.Section("METRICS");
+
+   if(g_stats.Trades() == 0)
+     {
+      g_dash.Row("Closed trades", "none yet", AURUM_LABEL);
+      return;
+     }
+
+   double wr = g_stats.WinRate();
+   color wrColor = (wr >= 60.0 ? AURUM_GOOD : (wr >= 45.0 ? AURUM_WARN : AURUM_BAD));
+
+   double pf = g_stats.ProfitFactor();
+   color pfColor = (pf >= 1.35 ? AURUM_GOOD : (pf >= 1.0 ? AURUM_WARN : AURUM_BAD));
+
+   double payoff = g_stats.PayoffRatio();
+   color payColor = (payoff >= 1.3 ? AURUM_GOOD : (payoff >= 1.0 ? AURUM_WARN : AURUM_BAD));
+
+   g_dash.Row("Closed trades",
+              StringFormat("%d  (%dW / %dL / %dBE)",
+                           g_stats.Trades(), g_stats.Wins(), g_stats.Losses(), g_stats.Breakeven()));
+
+   g_dash.Row("Win rate", StringFormat("%.1f%%", wr), wrColor);
+   g_dash.Row("Profit factor", StringFormat("%.2f", pf), pfColor);
+   g_dash.Row("Avg win / loss",
+              StringFormat("%.2f / %.2f  = %.2f", g_stats.AvgWin(), g_stats.AvgLoss(), payoff),
+              payColor);
+
+   if(g_stats.RSample() > 0)
+     {
+      double expR = g_stats.ExpectancyR();
+      g_dash.Row("Expectancy",
+                 StringFormat("%+.2fR per trade  (n=%d)", expR, g_stats.RSample()),
+                 (expR > 0.0 ? AURUM_GOOD : AURUM_BAD));
+      g_dash.Row("Avg R win / loss",
+                 StringFormat("%+.2fR / -%.2fR", g_stats.AvgWinR(), g_stats.AvgLossR()));
+      g_dash.Row("Total R", StringFormat("%+.2fR", g_stats.TotalR()),
+                 (g_stats.TotalR() > 0.0 ? AURUM_GOOD : AURUM_BAD));
+     }
+   else
+      g_dash.Row("Expectancy",
+                 StringFormat("%+.2f per trade", g_stats.Expectancy()),
+                 (g_stats.Expectancy() > 0.0 ? AURUM_GOOD : AURUM_BAD));
+
+   g_dash.Row("Best / worst",
+              StringFormat("%+.2f / -%.2f", g_stats.LargestWin(), g_stats.LargestLoss()));
+
+   g_dash.Row("Streaks",
+              StringFormat("now %d,  max %dW / %dL",
+                           g_stats.CurrentStreak(), g_stats.MaxWinStreak(), g_stats.MaxLossStreak()),
+              (g_stats.CurrentStreak() < 0 ? AURUM_WARN : AURUM_TEXT));
+
+   g_dash.Row("Closed-equity DD",
+              StringFormat("%.2f", g_stats.MaxDrawdown()),
+              (g_stats.MaxDrawdown() > 0.0 ? AURUM_WARN : AURUM_TEXT));
+  }
+
 //+------------------------------------------------------------------+
 void UpdateDashboard(void)
   {
@@ -938,65 +1211,126 @@ void UpdateDashboard(void)
    double totalDd = g_risk.TotalDrawdownPct();
    double profit  = g_risk.ProfitPct();
 
-   color ddColor = clrLimeGreen;
-   if(dailyDd > InpSoftDailyLossPct * 0.5)
-      ddColor = clrGold;
-   if(dailyDd >= InpSoftDailyLossPct)
-      ddColor = clrTomato;
+   color ddColor = AURUM_GOOD;
+   if(dailyDd > InpSoftDailyLossPct * 0.5) ddColor = AURUM_WARN;
+   if(dailyDd >= InpSoftDailyLossPct)      ddColor = AURUM_BAD;
 
-   color profitColor = (profit >= 0.0 ? clrLimeGreen : clrTomato);
+   color tdColor = AURUM_GOOD;
+   if(totalDd > InpSoftTotalLossPct * 0.5) tdColor = AURUM_WARN;
+   if(totalDd >= InpSoftTotalLossPct)      tdColor = AURUM_BAD;
 
    g_dash.Begin();
-   g_dash.Row("XAUUSD FTMO CONFLUENCE EA", clrDeepSkyBlue);
-   g_dash.Row(StringFormat("%s  %s  server %s", g_symbol,
-                           EnumToString(InpTfTrade),
-                           TimeToString(now, TIME_MINUTES)), clrGainsboro);
-   g_dash.Separator();
 
-   g_dash.Row(StringFormat("Progress   %+.2f%%  of %.2f%% target", profit, InpProfitTargetPct), profitColor);
-   g_dash.Row(StringFormat("Daily DD   %.2f%%  (soft %.2f / hard %.2f)", dailyDd,
+   //================= header ======================================
+   g_dash.Header("AURUM  |  XAUUSD FTMO CONFLUENCE",
+                 StringFormat("%s  %s   server %s   %s",
+                              g_symbol,
+                              StringSubstr(EnumToString(InpTfTrade), 7),
+                              TimeToString(now, TIME_MINUTES),
+                              TZ_OffsetText(g_gmtOffsetSec)));
+
+   //================= status banner ===============================
+   g_dash.Banner("> " + StatusLabel(g_status), StatusColor(g_status));
+   g_dash.Row("", (StringLen(g_statusDetail) > 0 ? g_statusDetail : "-"), AURUM_LABEL);
+
+   //================= challenge progress ==========================
+   g_dash.Section("FTMO PROGRESS");
+
+   g_dash.Row("Target",
+              StringFormat("%+.2f%%  of  %.2f%%", profit, InpProfitTargetPct),
+              (profit >= 0.0 ? AURUM_GOOD : AURUM_BAD));
+   g_dash.Row("Daily drawdown",
+              StringFormat("%.2f%%   soft %.1f / hard %.1f", dailyDd,
                            InpSoftDailyLossPct, InpHardDailyLossPct), ddColor);
-   g_dash.Row(StringFormat("Total DD   %.2f%%  (soft %.2f / hard %.2f)", totalDd,
-                           InpSoftTotalLossPct, InpHardTotalLossPct),
-              (totalDd >= InpSoftTotalLossPct ? clrTomato : clrGainsboro));
-   g_dash.Row(StringFormat("Trades     %d today, %d/%d W/L, streak %d, %d trading days",
-                           g_risk.TradesToday(), g_risk.WinsToday(), g_risk.LossesToday(),
-                           g_risk.ConsecutiveLosses(), g_risk.TradingDays()), clrGainsboro);
-   g_dash.Row(StringFormat("Risk       %.2f%% x %.2f streak factor",
-                           InpRiskPercent, g_risk.RiskFactor()), clrGainsboro);
-   g_dash.Separator();
+   g_dash.Row("Total drawdown",
+              StringFormat("%.2f%%   soft %.1f / hard %.1f", totalDd,
+                           InpSoftTotalLossPct, InpHardTotalLossPct), tdColor);
+   g_dash.Row("Trading days",
+              StringFormat("%d   (FTMO minimum 4)", g_risk.TradingDays()),
+              (g_risk.TradingDays() >= 4 ? AURUM_GOOD : AURUM_WARN));
+   g_dash.Row("Today",
+              StringFormat("%d trades, %dW/%dL, realised %+.2f",
+                           g_risk.TradesToday(), g_risk.WinsToday(),
+                           g_risk.LossesToday(), g_risk.RealisedToday()));
+   g_dash.Row("Risk next trade",
+              StringFormat("%.2f%%  x%.2f streak factor",
+                           InpRiskPercent, g_risk.RiskFactor()),
+              (g_risk.RiskFactor() < 1.0 ? AURUM_WARN : AURUM_TEXT));
 
-   g_dash.Row(StringFormat("ATR %.2f   ADX %.1f   RSI %.1f   VWAP %.2f",
-                           g_conf.Atr(), g_conf.Adx(), g_conf.Rsi(), g_conf.Vwap()), clrGainsboro);
-   g_dash.Row(StringFormat("Spread %.0f pts   Positions %d",
-                           CurrentSpreadPoints(), g_exec.OpenPositions()), clrGainsboro);
-   g_dash.Separator();
+   //================= market ======================================
+   g_dash.Section("MARKET");
 
-   string dstText = StringFormat("EU %s / US %s",
-                                 (TZ_IsEuSummerTime(UtcNow()) ? "DST" : "std"),
-                                 (TZ_IsUsSummerTime(UtcNow()) ? "DST" : "std"));
-   g_dash.Row(StringFormat("Clock      server %s | CET %+.0fh | %s",
-                           TZ_OffsetText(g_gmtOffsetSec),
-                           g_cetOffsetSec / 3600.0, dstText),
-              (g_offsetPlausible ? clrGainsboro : clrTomato));
-   g_dash.Row("Session    " + SessionStatusText(now),
-              (StringLen(CurrentSessionName(now)) > 0 ? clrLimeGreen : clrGainsboro));
-   g_dash.Separator();
+   g_dash.Row("Session", SessionStatusText(now),
+              (StringLen(CurrentSessionName(now)) > 0 ? AURUM_GOOD : AURUM_LABEL));
+   g_dash.Row("Clock",
+              StringFormat("CET %+.0fh   EU %s / US %s",
+                           g_cetOffsetSec / 3600.0,
+                           (TZ_IsEuSummerTime(UtcNow()) ? "DST" : "std"),
+                           (TZ_IsUsSummerTime(UtcNow()) ? "DST" : "std")),
+              (g_offsetPlausible ? AURUM_TEXT : AURUM_BAD));
 
-   bool blackout = g_news.IsBlackout(now);
+   double spread = CurrentSpreadPoints();
+   g_dash.Row("Spread",
+              StringFormat("%.0f pts   (limit %d)", spread, InpMaxSpreadPoints),
+              (InpMaxSpreadPoints > 0 && spread > InpMaxSpreadPoints ? AURUM_BAD : AURUM_TEXT));
+   g_dash.Row("Indicators",
+              StringFormat("ATR %.2f  ADX %.1f  RSI %.1f", g_conf.Atr(), g_conf.Adx(), g_conf.Rsi()));
+   g_dash.Row("VWAP", StringFormat("%.2f", g_conf.Vwap()));
+
+   //================= news ========================================
+   g_dash.Section("NEWS");
+
    if(InpNewsSource == NEWS_SRC_OFF)
-      g_dash.Row("News       FILTER OFF - not FTMO compliant", clrRed);
+      g_dash.Row("Filter", "OFF - not FTMO compliant", AURUM_BAD);
    else
-      if(blackout)
-         g_dash.Row("News       BLACKOUT: " + g_news.BlackoutTitle(), clrRed);
+      if(g_status == EA_STATUS_PAUSED_NEWS)
+        {
+         g_dash.Row("BLACKOUT", g_news.BlackoutTitle(), AURUM_BAD);
+         g_dash.Row("Clears at",
+                    TimeToString(g_news.BlackoutEnds(), TIME_MINUTES), AURUM_BAD);
+        }
       else
-         g_dash.Row(StringFormat("News       %d events | next: %s",
-                                 g_news.EventCount(), g_news.NextEventText(now)), clrGainsboro);
+        {
+         g_dash.Row("Events loaded",
+                    StringFormat("%d", g_news.EventCount()),
+                    (g_news.EventCount() > 0 ? AURUM_TEXT : AURUM_WARN));
+         g_dash.Row("Next", g_news.NextEventText(now));
+        }
 
-   string state = (StringLen(g_lastBlockReason) > 0 ? g_lastBlockReason : "hunting for a setup");
-   g_dash.Row("State      " + state, (g_hardStopped ? clrRed : clrGold));
-   g_dash.Row("Positions  " + g_exec.StateText(), clrGainsboro);
+   //================= positions ===================================
+   g_dash.Section("POSITIONS");
+   g_dash.Row("Open",
+              StringFormat("%d   %s", g_exec.OpenPositions(), g_exec.StateText()),
+              (g_exec.OpenPositions() > 0 ? AURUM_GOOD : AURUM_LABEL));
 
-   ChartRedraw();
+   //================= optional blocks =============================
+   if(g_showMetrics)
+      DrawMetrics();
+   if(g_showParams)
+      DrawParameters();
+
+   g_dash.BuildButtons(g_showParams, g_showMetrics);
+   g_dash.End();
+  }
+
+//+------------------------------------------------------------------+
+//| Console button clicks                                            |
+//+------------------------------------------------------------------+
+void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
+  {
+   if(id != CHARTEVENT_OBJECT_CLICK)
+      return;
+
+   if(g_dash.IsParamsButton(sparam))
+     {
+      g_showParams = !g_showParams;
+      UpdateDashboard();
+     }
+   else
+      if(g_dash.IsMetricsButton(sparam))
+        {
+         g_showMetrics = !g_showMetrics;
+         UpdateDashboard();
+        }
   }
 //+------------------------------------------------------------------+

@@ -59,6 +59,91 @@ timing, and the FTMO daily reset — depends on this being right.**
 
 ---
 
+## The Aurum console
+
+The on-chart panel is the EA's control surface — gold on warm near-black, framed,
+with two-column rows. Everything the EA is thinking is on it, so a live challenge
+never has to be audited from the journal.
+
+### Status banner
+
+The line under the header is the single authoritative statement of what the EA is
+doing. It is set at every decision point in `OnTick`, so the panel and the trade
+logic can never disagree.
+
+| Banner | Colour | Meaning |
+|---|---|---|
+| `ACTIVE` | bright gold | In session, guards clear, hunting. The detail line shows the current confluence score and what it still needs. |
+| `IN TRADE` | green | Position open and being managed. |
+| `PAUSED - NEWS` | red | High-impact blackout. Shows the event and when it clears. |
+| `CLOSED - SESSION` | grey | Outside every enabled session. |
+| `PAUSED - RISK GUARD` | amber | A soft drawdown guard is holding trading. |
+| `PAUSED - LIMIT` | amber | Trade cap, entry spacing, spread, or loss streak. |
+| `CLOSED - WEEKEND` | grey | Friday cutoff or weekend flat. |
+| `TARGET REACHED` | green | Phase target hit, standing down. |
+| `HALTED` | red | A hard guard tripped — flat and stopped. |
+
+Under each is a detail line with the specific reason, e.g. `spread 61 pts > 45
+limit` or `USD Core CPI m/m`.
+
+Because `OnTick` does not run when no ticks arrive, the timer re-derives the
+session, news and weekend states every 20 seconds — the banner stays correct over
+a weekend or a long blackout.
+
+### Sections
+
+- **FTMO PROGRESS** — target progress, daily and total drawdown against both the
+  soft and hard guards, trading days against FTMO's minimum of 4, today's trades
+  and realised P/L, and the risk that will be used on the next trade including
+  the loss-streak factor.
+- **MARKET** — session status (open, or which one is next and in how long), clock
+  and DST state, spread against the limit, live ATR/ADX/RSI, VWAP.
+- **NEWS** — events loaded and the next one, or the active blackout and its clear
+  time.
+- **POSITIONS** — open count and each position's management stage.
+- **METRICS** — toggled with the `STATS` button, see below.
+- **STRATEGY PARAMETERS** — toggled with the `PARAMS` button.
+
+### The two buttons
+
+`PARAMS` and `STATS` in the header bar toggle their blocks. `InpShowParamsBlock`
+and `InpShowMetricsBlock` set the startup state.
+
+**`PARAMS` is the pre-flight check.** It prints what is actually loaded —
+timeframes, confluence gate, hard gates, risk basis, stop and target construction,
+both guard ladders against the real FTMO limits, trade limits, enabled sessions,
+quota settings, and the news configuration. Open it once after loading a preset to
+confirm you are running what you think you are running. It turns the sessions row
+red if none are enabled and the news row red if the filter is off.
+
+### Metrics
+
+| Metric | Note |
+|---|---|
+| Closed trades | W / L / breakeven |
+| Win rate | green ≥60%, amber ≥45%, red below |
+| Profit factor | green ≥1.35, amber ≥1.0, red below |
+| Avg win / avg loss | with the payoff ratio; green ≥1.3 |
+| Expectancy | **in R**, with sample size |
+| Avg R win / loss | the asymmetry, made explicit |
+| Total R | cumulative |
+| Best / worst | largest single win and loss |
+| Streaks | current, plus max win and loss streaks |
+| Closed-equity drawdown | peak-to-trough on closed trades |
+
+Money metrics are rebuilt from account history on startup
+(`InpRebuildStatsOnInit`, `InpStatsHistoryDays`), grouping deals by position id so
+a scaled-out trade counts once rather than three times. **R metrics start fresh
+after a restart** — the entry risk of a historical trade is not recoverable from
+the deal record, so it is reported with its own sample count rather than
+estimated. The journal says so when it rebuilds.
+
+Judge the strategy on **profit factor and expectancy in R**, not win rate. See
+`docs/STRATEGY.md` §4.
+
+
+---
+
 ## Time alignment and sessions
 
 ### How the offset is resolved
@@ -235,3 +320,6 @@ weights is more free parameters than a year of M15 data can honestly support.
 | Session windows shift by an hour in March/October | Expected — that is the EU/US DST gap being handled correctly. |
 | `order REJECTED: Invalid stops` | Broker stop level exceeds the ATR stop. Raise `InpMinStopAtr`. |
 | Partial close never fires | Position too small to split. Either raise risk or set `InpUsePartial = false`. |
+| Console buttons do nothing | `OnChartEvent` does not fire in the Strategy Tester. Live and demo charts only. |
+| Metrics show 0 after restart | `InpRebuildStatsOnInit` off, or the trades are older than `InpStatsHistoryDays`. |
+| R metrics blank | Expected right after a restart — R needs the entry risk, which only live-tracked trades carry. |
