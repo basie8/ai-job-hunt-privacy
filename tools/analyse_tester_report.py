@@ -27,7 +27,9 @@ for line in load(sys.argv[1]).split('\n'):
 # split into separate tester runs (balance resets to the initial deposit)
 runs=[]; cur=[]
 for r in rows:
-    if cur and r[1]>cur[-1][1] and abs(r[1]-rows[0][1])<0.01 and r[2]==r[1]:
+    # a run boundary is the balance returning EXACTLY to the initial deposit
+    # with equity equal to it - it can jump down as well as up
+    if cur and abs(r[1]-rows[0][1])<0.005 and abs(r[2]-r[1])<0.005 and len(cur)>2:
         runs.append(cur); cur=[]
     cur.append(r)
 runs.append(cur)
@@ -36,10 +38,14 @@ print(f"{len(runs)} tester run(s) in this file\n")
 grand=[]
 for ri,run in enumerate(runs,1):
     start_bal=run[0][1]
-    # Balance steps = closed deals, BUT the tester also books commission as its
-    # own tiny step when a position OPENS. Counting those as trades inflates the
-    # loss count enormously, so fold anything far below the typical step into the
-    # next real deal.
+    # Balance steps = closed deals. MT5 books commission as its own tiny step
+    # when a position OPENS, which makes those rows a reliable delimiter: every
+    # trade begins at a fee row and ends at the last step before the next one.
+    #
+    # Grouping by "a small step follows a large one" was WRONG. Under the retuned
+    # exits the runner banks MORE than the partial (40% at 1R vs 60% at 2.2R), so
+    # that rule split single trades into two and inflated both the trade count and
+    # the win rate.
     raw=[]
     for i in range(1,len(run)):
         d=run[i][1]-run[i-1][1]
@@ -47,19 +53,17 @@ for ri,run in enumerate(runs,1):
     mags=sorted(abs(d) for _,d in raw)
     med=mags[len(mags)//2] if mags else 0
     fee_cut=max(0.05*med, 0.5)
-    deals=[]; carry=0.0
+
+    trades=[]; cur=None; legs=0
     for t,d in raw:
-        if abs(d)<fee_cut: carry+=d; continue
-        deals.append((t, d+carry)); carry=0.0
-    # group into trades: a small positive step right after a large one is the
-    # runner closing at breakeven behind its partial
-    trades=[]; i=0
-    while i<len(deals):
-        t,d=deals[i]
-        if d>0 and i+1<len(deals) and 0<deals[i+1][1]<abs(d)*0.45:
-            trades.append((t, d+deals[i+1][1], 'partial+runner')); i+=2
+        if abs(d)<fee_cut:                 # commission -> a new position opened
+            if cur is not None: trades.append((cur[0], cur[1], 'scaled' if legs>1 else 'single'))
+            cur=[t, d]; legs=0
         else:
-            trades.append((t, d, 'single')); i+=1
+            if cur is None: cur=[t, 0.0]
+            cur[1]+=d; legs+=1
+    if cur is not None and legs>0:
+        trades.append((cur[0], cur[1], 'scaled' if legs>1 else 'single'))
 
     wins=[p for _,p,_ in trades if p>0]; losses=[-p for _,p,_ in trades if p<0]
     net=sum(p for _,p,_ in trades)
@@ -80,7 +84,7 @@ for ri,run in enumerate(runs,1):
     print(f"  LAST TRADE {max(t for t,_,_ in trades)}   RUN ENDS {run[-1][0]}")
     grand+=trades
     # runner analysis
-    runners=[(t,p) for t,p,k in trades if k=='partial+runner']
+    runners=[(t,p) for t,p,k in trades if k=='scaled']
     if runners:
         print(f"  scaled-out trades: {len(runners)}")
     print()

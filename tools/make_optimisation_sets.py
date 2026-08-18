@@ -150,6 +150,40 @@ PHASE_PRESETS = [
      "on a live payout account there is no deadline to chase."),
 ]
 
+# Diagnostic runs that bisect "why has the EA stopped trading".
+# Each one opens one more gate than the last. Whichever run restores a normal
+# trade count identifies the culprit. A bound of 0 disables a filter in BOTH
+# the old and new code, so these work even against a binary that has not been
+# recompiled with the newer inputs.
+DIAGNOSTIC_RUNS = [
+ ("Diagnose_1_NoVolFilter", {
+    'InpMinAtrPrice':'0', 'InpMaxAtrPrice':'0',
+    'InpAtrMinRelative':'0', 'InpAtrMaxRelative':'0',
+  }, "Volatility band fully disabled, everything else as Phase 1. If the trade "
+     "count jumps, the ATR gate was switching the EA off - which is what a "
+     "2025-2026 backtest suggested when it traded on 8 days out of 253."),
+
+ ("Diagnose_2_NoVolNoNews", {
+    'InpMinAtrPrice':'0', 'InpMaxAtrPrice':'0',
+    'InpAtrMinRelative':'0', 'InpAtrMaxRelative':'0',
+    'InpNewsSource':'0',
+  }, "Volatility band AND news filter off. Isolates the calendar as a cause. "
+     "Not FTMO compliant - a diagnostic only, never a trading configuration."),
+
+ ("Diagnose_3_AllGatesOpen", {
+    'InpMinAtrPrice':'0', 'InpMaxAtrPrice':'0',
+    'InpAtrMinRelative':'0', 'InpAtrMaxRelative':'0',
+    'InpNewsSource':'0', 'InpAdxMin':'5.0',
+    'InpScoreThreshold':'40.0', 'InpDominanceMargin':'5.0',
+    'InpMaxExtensionAtr':'0', 'InpMaxSpreadPrice':'5.0',
+    'InpMinMinutesBetween':'0', 'InpMaxTradesPerDay':'10',
+    'InpUseAsiaSession':'true', 'InpVolumeFactor':'0.1',
+  }, "Every gate opened as far as it goes. This is the CEILING on how many "
+     "trades the setup can produce - not a strategy. If even this stops "
+     "trading, the cause is not a filter: look at history data, the session "
+     "clock, or a risk guard."),
+]
+
 EXIT_RUNS = [
  ("Exit_A_Scaled",  {'InpUsePartial':'true',  'InpPartialPct':'40', 'InpTp1R':'1.0',
                      'InpTp2R':'2.2', 'InpSlAtrMult':'1.10', 'InpTrailStartR':'1.05',
@@ -272,6 +306,14 @@ for name,tf,mid,hi in TF_RUNS:
                'InpTfHigh':str(ENUMS[hi])})
     print(f"  Compare_{name}.set     single run   {tf[7:]}/{mid[7:]}/{hi[7:]}"
           f"  (relative ATR band, no rescaling needed)")
+
+for name,ov,why in DIAGNOSTIC_RUNS:
+    hdr=(f"XAUUSD FTMO Confluence EA - DIAGNOSTIC {name}\n\n{why}\n\n"
+         "Run over the SAME period as your Phase 1 test and compare the trade\n"
+         "count and the number of trading days. Do not trade these settings.")
+    write_set(f"{OUT}/{name}.set", hdr, {}, ov)
+    print(f"  {name}.set")
+print()
 
 for name,ov,why in EXIT_RUNS:
     hdr=(f"XAUUSD FTMO Confluence EA - EXIT STRUCTURE {name}\n\n{why}\n\n"
