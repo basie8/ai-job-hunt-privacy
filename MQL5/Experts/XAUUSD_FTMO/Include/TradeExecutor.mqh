@@ -44,6 +44,7 @@ private:
    bool              m_verbose;
 
    //--- management parameters
+   double            m_tp1R;               // R multiple at which the partial fires
    double            m_partialPct;         // % of the position closed at TP1
    double            m_beLockR;            // stop parked this many R beyond entry
    double            m_trailStartR;        // trail engages after this many R
@@ -74,7 +75,8 @@ public:
                           const int slippagePoints,
                           const bool verbose);
 
-   void              SetManagement(const double partialPct,
+   void              SetManagement(const double tp1R,
+                                   const double partialPct,
                                    const double beLockR,
                                    const double trailStartR,
                                    const double trailAtrMult,
@@ -110,6 +112,7 @@ CTradeExecutor::CTradeExecutor(void)
    m_magic          = 0;
    m_slippagePoints = 30;
    m_verbose        = false;
+   m_tp1R           = 1.0;
    m_partialPct     = 50.0;
    m_beLockR        = 0.10;
    m_trailStartR    = 1.5;
@@ -151,7 +154,8 @@ bool CTradeExecutor::Init(const string symbol,
   }
 
 //+------------------------------------------------------------------+
-void CTradeExecutor::SetManagement(const double partialPct,
+void CTradeExecutor::SetManagement(const double tp1R,
+                                   const double partialPct,
                                    const double beLockR,
                                    const double trailStartR,
                                    const double trailAtrMult,
@@ -159,6 +163,7 @@ void CTradeExecutor::SetManagement(const double partialPct,
                                    const bool   usePartial,
                                    const bool   useTrail)
   {
+   m_tp1R          = MathMax(0.1, tp1R);
    m_partialPct    = MathMax(0.0, MathMin(90.0, partialPct));
    m_beLockR       = beLockR;
    m_trailStartR   = trailStartR;
@@ -378,7 +383,7 @@ void CTradeExecutor::Manage(const double atr)
       //--------------------------------------------------------------
       // STAGE 0 -> 1 : take the partial at 1R and lock the trade in
       //--------------------------------------------------------------
-      if(m_stage[i] == 0 && m_usePartial && rMultiple >= 1.0)
+      if(m_stage[i] == 0 && m_usePartial && rMultiple >= m_tp1R)
         {
          double closeVol = NormalizeVolume(m_symbol, volume * m_partialPct / 100.0);
          double minLot   = SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_MIN);
@@ -387,8 +392,8 @@ void CTradeExecutor::Manage(const double atr)
          if(closeVol >= minLot && remain >= minLot)
            {
             if(m_trade.PositionClosePartial(ticket, closeVol))
-               PrintFormat("[Exec] #%I64u TP1 hit at %.2fR - banked %.2f lots, %.2f runs on",
-                           ticket, rMultiple, closeVol, remain);
+               PrintFormat("[Exec] #%I64u TP1 (%.2fR target) hit at %.2fR - banked %.2f lots, %.2f runs on",
+                           ticket, m_tp1R, rMultiple, closeVol, remain);
             else
                PrintFormat("[Exec] #%I64u partial close failed: %s", ticket, m_trade.ResultRetcodeDescription());
            }

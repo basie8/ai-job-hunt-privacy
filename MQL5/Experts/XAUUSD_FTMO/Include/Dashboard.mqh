@@ -69,7 +69,6 @@ public:
    void              Section(const string title);
    void              Row(const string label, const string value, const color valueColor = AURUM_TEXT);
    void              Banner(const string text, const color fg);
-   void              Separator(void);
 
    //--- toggle buttons
    void              BuildButtons(const bool paramsOn, const bool metricsOn);
@@ -77,7 +76,6 @@ public:
    bool              IsMetricsButton(const string objectName) const { return (objectName == DASH_BTN_METRICS); }
 
    void              Destroy(void);
-   bool              Enabled(void) const { return m_enabled; }
   };
 
 //+------------------------------------------------------------------+
@@ -312,14 +310,6 @@ void CDashboard::Banner(const string text, const color fg)
    ObjectDelete(m_chart, RowName(m_line, "v"));
 
    m_line++;
-  }
-
-//+------------------------------------------------------------------+
-void CDashboard::Separator(void)
-  {
-   if(!m_enabled)
-      return;
-   Row("", "");
   }
 
 //+------------------------------------------------------------------+

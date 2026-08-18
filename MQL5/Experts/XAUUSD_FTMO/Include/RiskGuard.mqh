@@ -101,7 +101,6 @@ public:
    void              RegisterClosedTrade(const double profit);
 
    //--- accessors
-   bool              CanOpenNewTrade(void);
    int               TradesToday(void)        const { return m_tradesToday; }
    int               WinsToday(void)          const { return m_winsToday; }
    int               LossesToday(void)        const { return m_lossesToday; }
@@ -117,6 +116,7 @@ public:
    double            ProfitPct(void)          const;
    datetime          CurrentDayStart(void)    const { return m_currentDayStart; }
    void              SetCetOffset(const int s)      { m_cetOffsetSec = s; }
+   void              SetTradingDays(const int d)    { m_tradingDays = MathMax(m_tradingDays, d); }
   };
 
 //+------------------------------------------------------------------+
@@ -339,12 +339,6 @@ ENUM_GUARD_ACTION CRiskGuard::Evaluate(void)
 
    m_lastReason = "OK";
    return GUARD_NONE;
-  }
-
-//+------------------------------------------------------------------+
-bool CRiskGuard::CanOpenNewTrade(void)
-  {
-   return (Evaluate() == GUARD_NONE);
   }
 
 //+------------------------------------------------------------------+

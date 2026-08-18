@@ -40,6 +40,7 @@ private:
    //--- R aggregates (subset where the risk is known)
    int               m_rSample;
    int               m_rWins;
+   int               m_rLosses;
    double            m_rTotal;
    double            m_rWinTotal;
    double            m_rLossTotal;    // stored positive
@@ -107,6 +108,7 @@ void CStatistics::Reset(void)
    m_largestLoss   = 0.0;
    m_rSample       = 0;
    m_rWins         = 0;
+   m_rLosses       = 0;
    m_rTotal        = 0.0;
    m_rWinTotal     = 0.0;
    m_rLossTotal    = 0.0;
@@ -172,7 +174,10 @@ void CStatistics::Register(const double profit, const double riskMoney)
         }
       else
          if(r < 0.0)
+           {
+            m_rLosses++;
             m_rLossTotal += -r;
+           }
      }
 
    //--- closed-equity drawdown
@@ -253,10 +258,9 @@ double CStatistics::AvgWinR(void) const
 //+------------------------------------------------------------------+
 double CStatistics::AvgLossR(void) const
   {
-   int rLosses = m_rSample - m_rWins;
-   if(rLosses <= 0)
+   if(m_rLosses <= 0)
       return 0.0;
-   return m_rLossTotal / (double)rLosses;
+   return m_rLossTotal / (double)m_rLosses;
   }
 
 //+------------------------------------------------------------------+

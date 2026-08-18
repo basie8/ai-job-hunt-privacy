@@ -213,6 +213,7 @@ bool     g_hardStopped  = false;
 ulong    g_accPosId[];
 double   g_accProfit[];
 double   g_accRisk[];          // risk money at entry, for R-multiple stats
+datetime g_accSeeded[];        // when the entry was created, for the orphan sweep
 int      g_accCount = 0;
 
 //+------------------------------------------------------------------+
@@ -233,9 +234,11 @@ void AccAdd(const ulong posId, const double profit)
       ArrayResize(g_accPosId, g_accCount + 1);
       ArrayResize(g_accProfit, g_accCount + 1);
       ArrayResize(g_accRisk, g_accCount + 1);
+      ArrayResize(g_accSeeded, g_accCount + 1);
       g_accPosId[g_accCount]  = posId;
       g_accProfit[g_accCount] = 0.0;
       g_accRisk[g_accCount]   = 0.0;
+      g_accSeeded[g_accCount] = TimeTradeServer();
       idx = g_accCount;
       g_accCount++;
      }
@@ -252,11 +255,13 @@ void AccRemove(const int idx)
       g_accPosId[i]  = g_accPosId[i + 1];
       g_accProfit[i] = g_accProfit[i + 1];
       g_accRisk[i]   = g_accRisk[i + 1];
+      g_accSeeded[i] = g_accSeeded[i + 1];
      }
    g_accCount--;
    ArrayResize(g_accPosId, g_accCount);
    ArrayResize(g_accProfit, g_accCount);
    ArrayResize(g_accRisk, g_accCount);
+   ArrayResize(g_accSeeded, g_accCount);
   }
 
 //+------------------------------------------------------------------+
@@ -269,6 +274,34 @@ void AccSetRisk(const ulong posId, const double riskMoney)
    int idx = AccIndex(posId);
    if(idx >= 0)
       g_accRisk[idx] = riskMoney;
+  }
+
+//+------------------------------------------------------------------+
+//| Drops accumulator entries whose position no longer exists and    |
+//| which never recorded an exit deal.                               |
+//|                                                                  |
+//| That combination only arises if the position ticket resolved at  |
+//| entry did not match the id the deal history reports - rare, but  |
+//| without this sweep the entry would live for the whole session.   |
+//| The five minute grace period keeps a normal close, where the     |
+//| position disappears a moment before its deal arrives, safe.      |
+//+------------------------------------------------------------------+
+void AccSweep(void)
+  {
+   datetime now = TimeTradeServer();
+
+   for(int i = g_accCount - 1; i >= 0; i--)
+     {
+      if(g_accProfit[i] != 0.0)
+         continue;                          // exit deals are arriving, leave it
+      if((now - g_accSeeded[i]) < 300)
+         continue;                          // inside the grace period
+      if(PositionSelectByTicket(g_accPosId[i]))
+         continue;                          // still open
+
+      PrintFormat("[Stats] dropped orphaned tracking entry for position #%I64u.", g_accPosId[i]);
+      AccRemove(i);
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -611,10 +644,247 @@ void RefreshTimeAlignment(const bool firstRun)
   }
 
 //+------------------------------------------------------------------+
+//| Input validation.                                                |
+//|                                                                  |
+//| Every check here is a setting that would otherwise fail silently |
+//| - the EA would attach, report no error, and simply never trade   |
+//| or trade with broken geometry. Failing init with a named reason  |
+//| is far better than a quiet no-op on a paid challenge.            |
+//+------------------------------------------------------------------+
+bool ValidateInputs(void)
+  {
+   int errors = 0;
+
+   //--- confluence gate must be reachable
+   if(InpScoreThreshold <= 0.0 || InpScoreThreshold > 100.0)
+     {
+      PrintFormat("INPUT ERROR: InpScoreThreshold (%.1f) must be in 0-100.", InpScoreThreshold);
+      errors++;
+     }
+   if(InpDominanceMargin < 0.0 || InpDominanceMargin > 100.0)
+     {
+      PrintFormat("INPUT ERROR: InpDominanceMargin (%.1f) must be in 0-100.", InpDominanceMargin);
+      errors++;
+     }
+   if(InpScoreThreshold + InpDominanceMargin > 200.0)
+     {
+      Print("INPUT ERROR: InpScoreThreshold + InpDominanceMargin can never be satisfied.");
+      errors++;
+     }
+
+   //--- weights must not all be zero, or every score is 0
+   double weightSum = InpWRegime + InpWMidTrend + InpWFastTrend + InpWAdx + InpWRsi
+                      + InpWMacd + InpWStoch + InpWVwap + InpWBands + InpWStructure + InpWVolume;
+   if(weightSum <= 0.0)
+     {
+      Print("INPUT ERROR: all confluence weights are zero - no signal can ever be produced.");
+      errors++;
+     }
+
+   //--- trade geometry
+   if(InpTp2R <= InpTp1R)
+     {
+      PrintFormat("INPUT ERROR: InpTp2R (%.2f) must exceed InpTp1R (%.2f).", InpTp2R, InpTp1R);
+      errors++;
+     }
+   if(InpTp1R <= 0.0)
+     {
+      Print("INPUT ERROR: InpTp1R must be greater than zero.");
+      errors++;
+     }
+   if(InpMaxStopAtr <= InpMinStopAtr)
+     {
+      PrintFormat("INPUT ERROR: InpMaxStopAtr (%.2f) must exceed InpMinStopAtr (%.2f).",
+                  InpMaxStopAtr, InpMinStopAtr);
+      errors++;
+     }
+   if(InpSlAtrMult <= 0.0)
+     {
+      Print("INPUT ERROR: InpSlAtrMult must be greater than zero.");
+      errors++;
+     }
+   if(InpUsePartial && (InpPartialPct <= 0.0 || InpPartialPct >= 100.0))
+     {
+      PrintFormat("INPUT ERROR: InpPartialPct (%.1f) must be between 0 and 100 exclusive "
+                  "- 100%% would leave no runner.", InpPartialPct);
+      errors++;
+     }
+   if(InpUseTrailing && InpTrailStartR < InpTp1R)
+      PrintFormat("INPUT WARNING: InpTrailStartR (%.2f) is below InpTp1R (%.2f) - "
+                  "the trail will engage before the partial is taken.",
+                  InpTrailStartR, InpTp1R);
+
+   //--- volatility band
+   if(InpMaxAtrPrice > 0.0 && InpMinAtrPrice > 0.0 && InpMaxAtrPrice <= InpMinAtrPrice)
+     {
+      PrintFormat("INPUT ERROR: InpMaxAtrPrice (%.2f) must exceed InpMinAtrPrice (%.2f).",
+                  InpMaxAtrPrice, InpMinAtrPrice);
+      errors++;
+     }
+
+   //--- risk
+   if(InpRiskMode != RISK_FIXED_LOT && InpRiskPercent <= 0.0)
+     {
+      Print("INPUT ERROR: InpRiskPercent must be greater than zero.");
+      errors++;
+     }
+   if(InpRiskMode == RISK_FIXED_LOT && InpFixedLot <= 0.0)
+     {
+      Print("INPUT ERROR: InpFixedLot must be greater than zero in fixed-lot mode.");
+      errors++;
+     }
+   if(InpMaxOpenPositions < 1)
+     {
+      Print("INPUT ERROR: InpMaxOpenPositions must be at least 1 or the EA can never trade.");
+      errors++;
+     }
+
+   //--- guard ladder must be ordered and inside the FTMO limits
+   if(InpHardDailyLossPct <= InpSoftDailyLossPct)
+     {
+      PrintFormat("INPUT ERROR: InpHardDailyLossPct (%.2f) must exceed InpSoftDailyLossPct (%.2f).",
+                  InpHardDailyLossPct, InpSoftDailyLossPct);
+      errors++;
+     }
+   if(InpHardTotalLossPct <= InpSoftTotalLossPct)
+     {
+      PrintFormat("INPUT ERROR: InpHardTotalLossPct (%.2f) must exceed InpSoftTotalLossPct (%.2f).",
+                  InpHardTotalLossPct, InpSoftTotalLossPct);
+      errors++;
+     }
+   if(InpHardDailyLossPct >= InpFtmoDailyLossPct)
+      PrintFormat("INPUT WARNING: InpHardDailyLossPct (%.2f) is not inside the FTMO daily limit "
+                  "(%.2f) - it will be clamped.", InpHardDailyLossPct, InpFtmoDailyLossPct);
+   if(InpHardTotalLossPct >= InpFtmoMaxLossPct)
+      PrintFormat("INPUT WARNING: InpHardTotalLossPct (%.2f) is not inside the FTMO total limit "
+                  "(%.2f) - it will be clamped.", InpHardTotalLossPct, InpFtmoMaxLossPct);
+
+   //--- sessions
+   if(!InpUseAsiaSession && !InpUseLondonSession && !InpUseNewYorkSession)
+     {
+      Print("INPUT ERROR: every trading session is disabled - the EA can never trade.");
+      errors++;
+     }
+   if(InpUseAsiaSession    && (ParseHHMM(InpAsiaStart)    < 0 || ParseHHMM(InpAsiaEnd)    < 0))
+     { Print("INPUT ERROR: Asia session times must be HH:MM.");     errors++; }
+   if(InpUseLondonSession  && (ParseHHMM(InpLondonStart)  < 0 || ParseHHMM(InpLondonEnd)  < 0))
+     { Print("INPUT ERROR: London session times must be HH:MM.");   errors++; }
+   if(InpUseNewYorkSession && (ParseHHMM(InpNewYorkStart) < 0 || ParseHHMM(InpNewYorkEnd) < 0))
+     { Print("INPUT ERROR: New York session times must be HH:MM."); errors++; }
+   if(ParseHHMM(InpFridayCutoff) < 0 || ParseHHMM(InpWeekendFlatTime) < 0)
+     { Print("INPUT ERROR: InpFridayCutoff / InpWeekendFlatTime must be HH:MM."); errors++; }
+   if(InpUseDailyQuota && ParseHHMM(InpQuotaFromTime) < 0)
+     { Print("INPUT ERROR: InpQuotaFromTime must be HH:MM."); errors++; }
+
+   //--- quota must actually be a relaxation
+   if(InpUseDailyQuota && InpQuotaScoreThreshold > InpScoreThreshold)
+      PrintFormat("INPUT WARNING: InpQuotaScoreThreshold (%.1f) is stricter than the normal "
+                  "threshold (%.1f) - quota mode will never fire.",
+                  InpQuotaScoreThreshold, InpScoreThreshold);
+   if(InpUseDailyQuota && (InpQuotaRiskFactor <= 0.0 || InpQuotaRiskFactor > 1.0))
+     {
+      PrintFormat("INPUT ERROR: InpQuotaRiskFactor (%.2f) must be in 0-1.", InpQuotaRiskFactor);
+      errors++;
+     }
+
+   //--- news
+   if(InpNewsSource != NEWS_SRC_OFF && InpNewsMinutesBefore + InpNewsMinutesAfter <= 0)
+     {
+      Print("INPUT ERROR: the news blackout window is zero minutes wide.");
+      errors++;
+     }
+
+   //--- indicator periods
+   if(InpEmaFastTrade >= InpEmaSlowTrade || InpEmaFastMid >= InpEmaSlowMid || InpEmaFastHigh >= InpEmaSlowHigh)
+     {
+      Print("INPUT ERROR: every fast EMA period must be shorter than its slow counterpart.");
+      errors++;
+     }
+   if(InpMacdFast >= InpMacdSlow)
+     {
+      Print("INPUT ERROR: InpMacdFast must be shorter than InpMacdSlow.");
+      errors++;
+     }
+   if(InpRsiPeriod < 2 || InpAdxPeriod < 2 || InpAtrPeriod < 2 || InpBandsPeriod < 2)
+     {
+      Print("INPUT ERROR: RSI / ADX / ATR / Bollinger periods must be at least 2.");
+      errors++;
+     }
+   if(InpSwingLookback < 3 || InpTrailLookback < 3)
+     {
+      Print("INPUT ERROR: InpSwingLookback and InpTrailLookback must be at least 3.");
+      errors++;
+     }
+
+   //--- RSI zones
+   if(InpRsiBullLow >= InpRsiBullHigh || InpRsiBearLow >= InpRsiBearHigh)
+     {
+      Print("INPUT ERROR: each RSI zone's lower bound must be below its upper bound.");
+      errors++;
+     }
+
+   if(errors > 0)
+      PrintFormat("=== %d input error(s). The EA will NOT start. Fix them and reattach. ===", errors);
+
+   return (errors == 0);
+  }
+
+//+------------------------------------------------------------------+
+//| Counts distinct days on which this EA opened a trade, so the     |
+//| FTMO minimum-trading-days counter survives a restart.            |
+//+------------------------------------------------------------------+
+int CountTradingDaysFromHistory(const datetime since)
+  {
+   if(!HistorySelect(since, TimeCurrent() + 86400))
+      return 0;
+
+   datetime seen[];
+   int days = 0;
+   int total = HistoryDealsTotal();
+
+   for(int i = 0; i < total; i++)
+     {
+      ulong deal = HistoryDealGetTicket(i);
+      if(deal == 0)
+         continue;
+      if(HistoryDealGetString(deal, DEAL_SYMBOL) != g_symbol)
+         continue;
+      if((ulong)HistoryDealGetInteger(deal, DEAL_MAGIC) != InpMagic)
+         continue;
+      if((ENUM_DEAL_ENTRY)HistoryDealGetInteger(deal, DEAL_ENTRY) != DEAL_ENTRY_IN)
+         continue;
+
+      datetime t   = (datetime)HistoryDealGetInteger(deal, DEAL_TIME);
+      datetime day = DayStart(t - (datetime)g_cetOffsetSec);   // CE(S)T day, as FTMO counts it
+
+      bool known = false;
+      for(int k = 0; k < days; k++)
+        {
+         if(seen[k] == day)
+           {
+            known = true;
+            break;
+           }
+        }
+      if(known)
+         continue;
+
+      ArrayResize(seen, days + 1);
+      seen[days] = day;
+      days++;
+     }
+
+   return days;
+  }
+
+//+------------------------------------------------------------------+
 //| OnInit                                                           |
 //+------------------------------------------------------------------+
 int OnInit(void)
   {
+   if(!ValidateInputs())
+      return INIT_PARAMETERS_INCORRECT;
+
    g_symbol = (StringLen(InpSymbolOverride) > 0 ? InpSymbolOverride : _Symbol);
 
    if(!SymbolSelect(g_symbol, true))
@@ -677,7 +947,7 @@ int OnInit(void)
    if(!g_exec.Init(g_symbol, InpTfTrade, InpMagic, InpSlippagePoints, InpVerboseLog))
       return INIT_FAILED;
 
-   g_exec.SetManagement(InpPartialPct, InpBreakevenLockR, InpTrailStartR,
+   g_exec.SetManagement(InpTp1R, InpPartialPct, InpBreakevenLockR, InpTrailStartR,
                         InpTrailAtrMult, InpTrailLookback,
                         InpUsePartial, InpUseTrailing);
 
@@ -704,6 +974,14 @@ int OnInit(void)
      {
       datetime since = TimeCurrent() - (datetime)(MathMax(1, InpStatsHistoryDays) * 86400);
       int rebuilt = g_stats.RebuildFromHistory(g_symbol, InpMagic, since);
+      int histDays = CountTradingDaysFromHistory(since);
+      if(histDays > 0)
+        {
+         g_risk.SetTradingDays(histDays);
+         PrintFormat("[Stats] %d distinct trading day(s) recovered from history "
+                     "(FTMO minimum is 4).", histDays);
+        }
+
       if(rebuilt > 0)
          PrintFormat("[Stats] rebuilt %d closed trades from history: "
                      "win rate %.1f%%, PF %.2f, net %+.2f. "
@@ -736,6 +1014,7 @@ void OnTimer(void)
       RefreshTimeAlignment(false);
 
    g_news.Refresh(false);
+   AccSweep();
    RefreshIdleStatus(TimeTradeServer());
    UpdateDashboard();
   }
@@ -1256,6 +1535,13 @@ void UpdateDashboard(void)
               StringFormat("%.2f%%  x%.2f streak factor",
                            InpRiskPercent, g_risk.RiskFactor()),
               (g_risk.RiskFactor() < 1.0 ? AURUM_WARN : AURUM_TEXT));
+   g_dash.Row("Day anchor",
+              StringFormat("%.2f  from %s",
+                           g_risk.DayStartBalance(),
+                           TimeToString(g_risk.CurrentDayStart(), TIME_DATE | TIME_MINUTES)));
+   g_dash.Row("Budget left today",
+              StringFormat("%.2f before the soft guard", g_risk.RemainingDailyRiskMoney()),
+              (g_risk.RemainingDailyRiskMoney() <= 0.0 ? AURUM_BAD : AURUM_TEXT));
 
    //================= market ======================================
    g_dash.Section("MARKET");
@@ -1295,6 +1581,8 @@ void UpdateDashboard(void)
                     StringFormat("%d", g_news.EventCount()),
                     (g_news.EventCount() > 0 ? AURUM_TEXT : AURUM_WARN));
          g_dash.Row("Next", g_news.NextEventText(now));
+         if(StringLen(g_news.LastError()) > 0)
+            g_dash.Row("Feed warning", g_news.LastError(), AURUM_WARN);
         }
 
    //================= positions ===================================
@@ -1302,6 +1590,9 @@ void UpdateDashboard(void)
    g_dash.Row("Open",
               StringFormat("%d   %s", g_exec.OpenPositions(), g_exec.StateText()),
               (g_exec.OpenPositions() > 0 ? AURUM_GOOD : AURUM_LABEL));
+   if(g_exec.OpenPositions() > 0)
+      g_dash.Row("At risk now",
+                 StringFormat("%.2f to the stops", g_exec.OpenRiskMoney()), AURUM_WARN);
 
    //================= optional blocks =============================
    if(g_showMetrics)

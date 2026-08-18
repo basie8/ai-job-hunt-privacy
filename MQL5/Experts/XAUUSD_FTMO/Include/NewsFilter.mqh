@@ -41,7 +41,6 @@ private:
    bool              m_verbose;
 
    datetime          m_lastFetch;
-   datetime          m_lastCalendarScan;
    bool              m_ffAvailable;
    bool              m_calendarAvailable;
    string            m_lastError;
@@ -109,7 +108,6 @@ CNewsFilter::CNewsFilter(void)
    m_manualCsv         = "";
    m_verbose           = false;
    m_lastFetch         = 0;
-   m_lastCalendarScan  = 0;
    m_ffAvailable       = false;
    m_calendarAvailable = false;
    m_lastError         = "";

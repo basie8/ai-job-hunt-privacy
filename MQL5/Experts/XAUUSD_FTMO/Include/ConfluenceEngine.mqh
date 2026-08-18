@@ -40,7 +40,6 @@ private:
    int               m_hEmaFastM, m_hEmaSlowM;       // mid   TF 21 / 50
    int               m_hEmaFastH, m_hEmaSlowH;       // high  TF 50 / 200
    int               m_hRsi, m_hMacd, m_hAdx, m_hStoch, m_hBands, m_hAtr;
-   int               m_hAtrDaily;
 
    //--- periods
    int               m_emaFastT, m_emaSlowT;
@@ -131,7 +130,6 @@ public:
    double            Adx(void)        const { return m_lastAdx; }
    double            Rsi(void)        const { return m_lastRsi; }
    double            Vwap(void)       const { return m_vwap; }
-   string            GateReason(void) const { return m_gateReason; }
    string            BreakdownText(void) const;
    double            AtrHandleValue(const int shift);
   };
@@ -148,7 +146,6 @@ CConfluenceEngine::CConfluenceEngine(void)
    m_hEmaFastM = m_hEmaSlowM = INVALID_HANDLE;
    m_hEmaFastH = m_hEmaSlowH = INVALID_HANDLE;
    m_hRsi = m_hMacd = m_hAdx = m_hStoch = m_hBands = m_hAtr = INVALID_HANDLE;
-   m_hAtrDaily = INVALID_HANDLE;
 
    m_emaFastT = 8;   m_emaSlowT = 21;
    m_emaFastM = 21;  m_emaSlowM = 50;
@@ -190,7 +187,6 @@ CConfluenceEngine::~CConfluenceEngine(void)
    if(m_hStoch    != INVALID_HANDLE) IndicatorRelease(m_hStoch);
    if(m_hBands    != INVALID_HANDLE) IndicatorRelease(m_hBands);
    if(m_hAtr      != INVALID_HANDLE) IndicatorRelease(m_hAtr);
-   if(m_hAtrDaily != INVALID_HANDLE) IndicatorRelease(m_hAtrDaily);
   }
 
 //+------------------------------------------------------------------+
@@ -273,7 +269,6 @@ bool CConfluenceEngine::Init(const string symbol,
    m_hStoch    = iStochastic(m_symbol, m_tfTrade, m_stochK, m_stochD, m_stochSlow, MODE_SMA, STO_LOWHIGH);
    m_hBands    = iBands(m_symbol, m_tfTrade, m_bandsPeriod, 0, m_bandsDev, PRICE_CLOSE);
    m_hAtr      = iATR(m_symbol, m_tfTrade, m_atrPeriod);
-   m_hAtrDaily = iATR(m_symbol, PERIOD_D1, 14);
 
    if(m_hEmaFastT == INVALID_HANDLE || m_hEmaSlowT == INVALID_HANDLE ||
       m_hEmaFastM == INVALID_HANDLE || m_hEmaSlowM == INVALID_HANDLE ||
