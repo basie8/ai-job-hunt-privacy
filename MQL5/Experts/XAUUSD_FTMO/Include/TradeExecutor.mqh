@@ -49,6 +49,7 @@ private:
    double            m_beLockR;            // stop parked this many R beyond entry
    double            m_trailStartR;        // trail engages after this many R
    double            m_trailAtrMult;       // chandelier distance in ATR
+   double            m_trailStepPrice;     // minimum stop improvement before a modify
    int               m_trailLookback;      // bars used for the chandelier extreme
    bool              m_usePartial;
    bool              m_useTrail;
@@ -62,6 +63,10 @@ private:
    int               m_count;
 
    int               IndexOf(const ulong ticket);
+   string            StateKey(const ulong ticket, const string field);
+   void              PersistState(const int idx);
+   void              ClearState(const ulong ticket);
+   bool              RestoreState(const ulong ticket, double &entry, double &risk, int &stage);
    void              Track(const ulong ticket, const double entry, const double risk, const double volume);
    void              Untrack(const int idx);
    double            ChandelierStop(const ENUM_POSITION_TYPE type, const double atr);
@@ -80,6 +85,7 @@ public:
                                    const double beLockR,
                                    const double trailStartR,
                                    const double trailAtrMult,
+                                   const double trailStepPrice,
                                    const int    trailLookback,
                                    const bool   usePartial,
                                    const bool   useTrail);
@@ -117,6 +123,7 @@ CTradeExecutor::CTradeExecutor(void)
    m_beLockR        = 0.10;
    m_trailStartR    = 1.5;
    m_trailAtrMult   = 2.0;
+   m_trailStepPrice = 0.20;
    m_trailLookback  = 10;
    m_usePartial     = true;
    m_useTrail       = true;
@@ -159,6 +166,7 @@ void CTradeExecutor::SetManagement(const double tp1R,
                                    const double beLockR,
                                    const double trailStartR,
                                    const double trailAtrMult,
+                                   const double trailStepPrice,
                                    const int    trailLookback,
                                    const bool   usePartial,
                                    const bool   useTrail)
@@ -167,10 +175,58 @@ void CTradeExecutor::SetManagement(const double tp1R,
    m_partialPct    = MathMax(0.0, MathMin(90.0, partialPct));
    m_beLockR       = beLockR;
    m_trailStartR   = trailStartR;
-   m_trailAtrMult  = trailAtrMult;
+   m_trailAtrMult   = trailAtrMult;
+   m_trailStepPrice = MathMax(0.0, trailStepPrice);
    m_trailLookback = MathMax(3, trailLookback);
    m_usePartial    = usePartial;
    m_useTrail      = useTrail;
+  }
+
+//+------------------------------------------------------------------+
+//| Per-position state survives a terminal restart.                  |
+//|                                                                  |
+//| Without this, adopting an open position after a restart had to   |
+//| guess its original risk from the current stop distance. Once the |
+//| stop is at breakeven that distance is a fraction of the real     |
+//| risk, so the computed R multiple was inflated by roughly ten     |
+//| times and the EA would immediately take a second scale-out on a  |
+//| trade it had already managed.                                    |
+//+------------------------------------------------------------------+
+string CTradeExecutor::StateKey(const ulong ticket, const string field)
+  {
+   return StringFormat("XFC%I64u_%I64u_%s", m_magic, ticket, field);
+  }
+
+//+------------------------------------------------------------------+
+void CTradeExecutor::PersistState(const int idx)
+  {
+   if(idx < 0 || idx >= m_count)
+      return;
+   ulong t = m_tickets[idx];
+   GlobalVariableSet(StateKey(t, "e"), m_entryPrice[idx]);
+   GlobalVariableSet(StateKey(t, "r"), m_initialRisk[idx]);
+   GlobalVariableSet(StateKey(t, "s"), (double)m_stage[idx]);
+  }
+
+//+------------------------------------------------------------------+
+void CTradeExecutor::ClearState(const ulong ticket)
+  {
+   GlobalVariableDel(StateKey(ticket, "e"));
+   GlobalVariableDel(StateKey(ticket, "r"));
+   GlobalVariableDel(StateKey(ticket, "s"));
+  }
+
+//+------------------------------------------------------------------+
+bool CTradeExecutor::RestoreState(const ulong ticket, double &entry, double &risk, int &stage)
+  {
+   if(!GlobalVariableCheck(StateKey(ticket, "r")))
+      return false;
+
+   entry = GlobalVariableGet(StateKey(ticket, "e"));
+   risk  = GlobalVariableGet(StateKey(ticket, "r"));
+   stage = (int)GlobalVariableGet(StateKey(ticket, "s"));
+
+   return (risk > 0.0 && entry > 0.0);
   }
 
 //+------------------------------------------------------------------+
@@ -199,6 +255,8 @@ void CTradeExecutor::Track(const ulong ticket, const double entry, const double 
    m_initialVolume[m_count] = volume;
    m_stage[m_count]         = 0;
    m_count++;
+
+   PersistState(m_count - 1);
   }
 
 //+------------------------------------------------------------------+
@@ -206,6 +264,9 @@ void CTradeExecutor::Untrack(const int idx)
   {
    if(idx < 0 || idx >= m_count)
       return;
+
+   ClearState(m_tickets[idx]);
+
    for(int i = idx; i < m_count - 1; i++)
      {
       m_tickets[i]       = m_tickets[i + 1];
@@ -241,10 +302,45 @@ void CTradeExecutor::SyncFromTerminal(void)
 
       double entry = m_pos.PriceOpen();
       double sl    = m_pos.StopLoss();
-      double risk  = (sl > 0.0 ? MathAbs(entry - sl) : 0.0);
+      bool   isBuy = (m_pos.PositionType() == POSITION_TYPE_BUY);
+
+      double savedEntry = 0.0, savedRisk = 0.0;
+      int    savedStage = 0;
+
+      if(RestoreState(ticket, savedEntry, savedRisk, savedStage))
+        {
+         Track(ticket, savedEntry, savedRisk, m_pos.Volume());
+         int idx = IndexOf(ticket);
+         if(idx >= 0)
+           {
+            m_stage[idx] = savedStage;
+            PersistState(idx);
+           }
+         PrintFormat("[Exec] adopted position #%I64u from saved state: entry=%.2f risk=%.2f stage=%d",
+                     ticket, savedEntry, savedRisk, savedStage);
+         continue;
+        }
+
+      // No saved state (EA added to an existing position, or the variable
+      // expired). Reconstruct conservatively.
+      double risk = (sl > 0.0 ? MathAbs(entry - sl) : 0.0);
+
+      // A stop already on the profitable side means this trade has been
+      // through the breakeven step, so the distance to it is NOT the
+      // original risk. Treat it as already protected and do not re-scale.
+      bool alreadyProtected = (sl > 0.0 && (isBuy ? sl >= entry : sl <= entry));
 
       Track(ticket, entry, risk, m_pos.Volume());
-      PrintFormat("[Exec] adopted orphaned position #%I64u entry=%.2f risk=%.2f", ticket, entry, risk);
+      int idx2 = IndexOf(ticket);
+      if(idx2 >= 0 && alreadyProtected)
+        {
+         m_stage[idx2] = 2;
+         PersistState(idx2);
+        }
+
+      PrintFormat("[Exec] adopted position #%I64u with no saved state: entry=%.2f risk=%.2f%s",
+                  ticket, entry, risk,
+                  (alreadyProtected ? " (stop already beyond entry - treated as protected, no further scale-out)" : ""));
      }
   }
 
@@ -345,6 +441,23 @@ double CTradeExecutor::ChandelierStop(const ENUM_POSITION_TYPE type, const doubl
 
 //+------------------------------------------------------------------+
 //| The management state machine, run on every tick.                 |
+//|                                                                  |
+//| STAGES - each one is a distinct concern, which matters because   |
+//| they can fail independently:                                     |
+//|                                                                  |
+//|   0  fresh          waiting for price to reach TP1               |
+//|   1  partial done   the scale-out is a ONE-SHOT and never        |
+//|                     repeats, whatever happens afterwards         |
+//|   2  breakeven set  the stop is protected; retried every tick    |
+//|                     until it succeeds, because a breakeven that  |
+//|                     failed silently is a full stop pretending    |
+//|                     to be a free trade                           |
+//|   3  trailing       the chandelier is active                     |
+//|                                                                  |
+//| Keeping the partial and the breakeven in one stage was a real    |
+//| defect: a broker rejecting the stop modify left the stage at 0,  |
+//| so the next tick took ANOTHER partial, and the position was      |
+//| scaled out of existence one tick at a time.                      |
 //+------------------------------------------------------------------+
 void CTradeExecutor::Manage(const double atr)
   {
@@ -362,6 +475,7 @@ void CTradeExecutor::Manage(const double atr)
    long   freezeLevelPts = SymbolInfoInteger(m_symbol, SYMBOL_TRADE_FREEZE_LEVEL);
    double point          = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
    double minDistance    = (double)MathMax(stopLevelPts, freezeLevelPts) * point;
+   double minLot         = SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_MIN);
 
    for(int i = m_count - 1; i >= 0; i--)
      {
@@ -370,6 +484,7 @@ void CTradeExecutor::Manage(const double atr)
          continue;
 
       ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)m_pos.PositionType();
+      bool   isBuy  = (type == POSITION_TYPE_BUY);
       double entry  = m_entryPrice[i];
       double risk   = m_initialRisk[i];
       double curSl  = m_pos.StopLoss();
@@ -381,103 +496,134 @@ void CTradeExecutor::Manage(const double atr)
 
       double bid = SymbolInfoDouble(m_symbol, SYMBOL_BID);
       double ask = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
-      double favourable = (type == POSITION_TYPE_BUY ? (bid - entry) : (entry - ask));
+      double favourable = (isBuy ? (bid - entry) : (entry - ask));
       double rMultiple  = favourable / risk;
+      double lock       = risk * m_beLockR;
 
       //--------------------------------------------------------------
-      // STAGE 0 -> 1 : take the partial at 1R and lock the trade in
+      // STAGE 0 : the scale-out. One shot, then the stage always
+      //           advances so it can never repeat.
       //--------------------------------------------------------------
-      if(m_stage[i] == 0 && m_usePartial && rMultiple >= m_tp1R)
+      if(m_stage[i] == 0)
         {
-         double closeVol = NormalizeVolume(m_symbol, volume * m_partialPct / 100.0);
-         double minLot   = SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_MIN);
-         double remain   = NormalizeVolume(m_symbol, volume - closeVol);
+         if(rMultiple < m_tp1R)
+            continue;                       // TP1 not reached yet
 
-         if(closeVol >= minLot && remain >= minLot)
+         if(m_usePartial)
            {
-            if(m_trade.PositionClosePartial(ticket, closeVol))
-               PrintFormat("[Exec] #%I64u TP1 (%.2fR target) hit at %.2fR - banked %.2f lots, %.2f runs on",
-                           ticket, m_tp1R, rMultiple, closeVol, remain);
-            else
-               PrintFormat("[Exec] #%I64u partial close FAILED: %s", ticket, m_trade.ResultRetcodeDescription());
-           }
-         else
-            PrintFormat("[Exec] #%I64u no partial taken at %.2fR: %.2f lots cannot be split into "
-                        "two parts of at least %.2f. The whole position runs to TP2 instead.",
-                        ticket, rMultiple, volume, minLot);
+            double closeVol = NormalizeVolume(m_symbol, volume * m_partialPct / 100.0);
+            double remain   = NormalizeVolume(m_symbol, volume - closeVol);
 
-         // breakeven + lock, applied whether or not the partial fitted
-         double lock = risk * m_beLockR;
-         double newSl = (type == POSITION_TYPE_BUY ? entry + lock : entry - lock);
-         newSl = NormalizePriceToTick(m_symbol, newSl);
-
-         bool distanceOk = (type == POSITION_TYPE_BUY ? (bid - newSl) > minDistance
-                                                      : (newSl - ask) > minDistance);
-
-         bool beDone = false;
-         if(distanceOk)
-           {
-            if(m_trade.PositionModify(ticket, newSl, curTp))
+            if(closeVol >= minLot && remain >= minLot)
               {
-               beDone = true;
-               PrintFormat("[Exec] #%I64u stop moved to breakeven+%.2f (%.2f)", ticket, lock, newSl);
+               if(m_trade.PositionClosePartial(ticket, closeVol))
+                  PrintFormat("[Exec] #%I64u TP1 (%.2fR) hit at %.2fR - banked %.2f lots, %.2f runs on",
+                              ticket, m_tp1R, rMultiple, closeVol, remain);
+               else
+                  PrintFormat("[Exec] #%I64u partial close FAILED: %s - the whole position runs on.",
+                              ticket, m_trade.ResultRetcodeDescription());
               }
             else
-               PrintFormat("[Exec] #%I64u breakeven move FAILED (%s) - will retry next tick.",
-                           ticket, m_trade.ResultRetcodeDescription());
+               PrintFormat("[Exec] #%I64u no partial at %.2fR: %.2f lots will not split into two "
+                           "parts of at least %.2f. The whole position runs to TP2.",
+                           ticket, rMultiple, volume, minLot);
            }
-         else
-            PrintFormat("[Exec] #%I64u breakeven deferred: target %.2f is inside the broker's "
-                        "%.2f stop/freeze distance from %.2f - will retry next tick.",
-                        ticket, newSl, minDistance, (type == POSITION_TYPE_BUY ? bid : ask));
 
-         // The stage only advances once the stop is actually protected. Advancing
-         // unconditionally would abandon a failed breakeven for the life of the
-         // trade, leaving a position that is supposed to be risk-free still
-         // exposed to a full stop-out.
-         if(beDone)
-            m_stage[i] = 1;
+         m_stage[i] = 1;
+         PersistState(i);
 
-         continue;
+         if(m_pos.SelectByTicket(ticket))     // refresh after a partial close
+           {
+            volume = m_pos.Volume();
+            curSl  = m_pos.StopLoss();
+            curTp  = m_pos.TakeProfit();
+           }
         }
 
       //--------------------------------------------------------------
-      // STAGE 1 -> 2 : engage the chandelier trail on the runner
+      // STAGE 1 : breakeven. Retried every tick until the stop is
+      //           genuinely protected.
       //--------------------------------------------------------------
-      if(m_useTrail && rMultiple >= m_trailStartR)
+      if(m_stage[i] == 1)
         {
-         double trail = ChandelierStop(type, atr);
-         if(trail > 0.0)
+         double newSl = NormalizePriceToTick(m_symbol, (isBuy ? entry + lock : entry - lock));
+
+         bool alreadyProtected = (curSl > 0.0 &&
+                                  (isBuy ? curSl >= newSl - point : curSl <= newSl + point));
+
+         if(alreadyProtected)
            {
-            trail = NormalizePriceToTick(m_symbol, trail);
+            m_stage[i] = 2;
+            PersistState(i);
+           }
+         else
+           {
+            bool distanceOk = (isBuy ? (bid - newSl) > minDistance : (newSl - ask) > minDistance);
 
-            bool improves = false;
-            if(type == POSITION_TYPE_BUY)
-               improves = (curSl <= 0.0 || trail > curSl) && ((bid - trail) > minDistance);
+            if(!distanceOk)
+               PrintFormat("[Exec] #%I64u breakeven deferred: %.2f is inside the broker's %.2f "
+                           "stop/freeze distance from %.2f - retrying.",
+                           ticket, newSl, minDistance, (isBuy ? bid : ask));
             else
-               improves = (curSl <= 0.0 || trail < curSl) && ((trail - ask) > minDistance);
-
-            // never trail backwards past the breakeven lock
-            double lock = risk * m_beLockR;
-            if(type == POSITION_TYPE_BUY)
-               improves = improves && (trail >= entry + lock);
-            else
-               improves = improves && (trail <= entry - lock);
-
-            if(improves)
-              {
-               if(m_trade.PositionModify(ticket, trail, curTp))
+               if(m_trade.PositionModify(ticket, newSl, curTp))
                  {
                   m_stage[i] = 2;
-                  if(m_verbose)
-                     PrintFormat("[Exec] #%I64u trail -> %.2f (at %.2fR)", ticket, trail, rMultiple);
+                  PersistState(i);
+                  curSl = newSl;
+                  PrintFormat("[Exec] #%I64u stop moved to breakeven+%.2f (%.2f) - trade is now free.",
+                              ticket, lock, newSl);
                  }
                else
-                  PrintFormat("[Exec] #%I64u trail update to %.2f FAILED: %s",
-                              ticket, trail, m_trade.ResultRetcodeDescription());
-              }
+                  PrintFormat("[Exec] #%I64u breakeven move FAILED (%s) - retrying next tick.",
+                              ticket, m_trade.ResultRetcodeDescription());
            }
+
+         if(m_stage[i] < 2)
+            continue;                        // do not trail an unprotected trade
         }
+
+      //--------------------------------------------------------------
+      // STAGE 2+ : chandelier trail on the runner
+      //--------------------------------------------------------------
+      if(!m_useTrail || rMultiple < m_trailStartR)
+         continue;
+
+      double trail = ChandelierStop(type, atr);
+      if(trail <= 0.0)
+         continue;
+
+      trail = NormalizePriceToTick(m_symbol, trail);
+
+      // The step gate. Without it the chandelier issues a modify on every
+      // tick that improves the stop by even one point, which brokers
+      // throttle and which buries the journal.
+      bool beatsStep = (curSl <= 0.0) ||
+                       (isBuy ? (trail > curSl + m_trailStepPrice)
+                              : (trail < curSl - m_trailStepPrice));
+
+      bool distanceOk = (isBuy ? (bid - trail) > minDistance : (trail - ask) > minDistance);
+
+      // never trail back behind the breakeven lock
+      bool beyondLock = (isBuy ? (trail >= entry + lock) : (trail <= entry - lock));
+
+      if(!(beatsStep && distanceOk && beyondLock))
+         continue;
+
+      if(m_trade.PositionModify(ticket, trail, curTp))
+        {
+         if(m_stage[i] < 3)
+           {
+            m_stage[i] = 3;
+            PrintFormat("[Exec] #%I64u trailing engaged at %.2fR, stop %.2f", ticket, rMultiple, trail);
+           }
+         else
+            if(m_verbose)
+               PrintFormat("[Exec] #%I64u trail -> %.2f (at %.2fR)", ticket, trail, rMultiple);
+         PersistState(i);
+        }
+      else
+         PrintFormat("[Exec] #%I64u trail update to %.2f FAILED: %s",
+                     ticket, trail, m_trade.ResultRetcodeDescription());
      }
   }
 

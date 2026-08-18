@@ -78,6 +78,7 @@ input double          InpBreakevenLockR      = 0.10;  // Stop parked this many R
 input bool            InpUseTrailing         = true;  // Trail the runner
 input double          InpTrailStartR         = 1.50;  // Trail engages at this many R
 input double          InpTrailAtrMult        = 2.00;  // Chandelier distance, in ATR
+input double          InpTrailStepPrice      = 0.20;  // Min stop improvement before a modify (USD)
 input int             InpTrailLookback       = 10;    // Bars for the chandelier extreme
 
 input group "=== Confluence thresholds ==="
@@ -726,6 +727,11 @@ bool ValidateInputs(void)
                   "- 100%% would leave no runner.", InpPartialPct);
       errors++;
      }
+   if(InpUseTrailing && InpTrailStepPrice < 0.0)
+     {
+      Print("INPUT ERROR: InpTrailStepPrice cannot be negative.");
+      errors++;
+     }
    if(InpUseTrailing && InpTrailStartR < InpTp1R)
       PrintFormat("INPUT WARNING: InpTrailStartR (%.2f) is below InpTp1R (%.2f) - "
                   "the trail will engage before the partial is taken.",
@@ -985,7 +991,7 @@ int OnInit(void)
       return INIT_FAILED;
 
    g_exec.SetManagement(InpTp1R, InpPartialPct, InpBreakevenLockR, InpTrailStartR,
-                        InpTrailAtrMult, InpTrailLookback,
+                        InpTrailAtrMult, InpTrailStepPrice, InpTrailLookback,
                         InpUsePartial, InpUseTrailing);
 
    //--- news
@@ -1417,7 +1423,8 @@ void DrawParameters(void)
                            InpTp1R, (InpUsePartial ? InpPartialPct : 0.0), InpTp2R));
 
    g_dash.Row("Trail",
-              (InpUseTrailing ? StringFormat("from %.1fR, %.1f x ATR", InpTrailStartR, InpTrailAtrMult)
+              (InpUseTrailing ? StringFormat("from %.1fR, %.1f x ATR, step %.2f",
+                                            InpTrailStartR, InpTrailAtrMult, InpTrailStepPrice)
                               : "off"));
 
    g_dash.Row("Guards daily",

@@ -7,6 +7,7 @@ every commit that touches the EA.
 ```
 python3 tools/audit_static.py
 python3 tools/audit_api.py
+python3 tools/simulate_exits.py
 ```
 
 Both exit non-zero on any finding.
@@ -36,3 +37,19 @@ They are not a compiler. They cannot verify type correctness, MQL5-specific
 semantics, or that the strategy is profitable. Compiling in MetaEditor and
 working through the validation protocol in `docs/STRATEGY.md` §9 remains
 mandatory before risking money.
+
+## simulate_exits.py
+
+A faithful port of `CTradeExecutor::Manage()` run over synthetic price paths.
+Verifies the exit engine produces the documented R-multiple distribution
+(−1.00R / +0.55R / +2.00R) and asserts two invariants over 16,000 randomised
+paths, in both directions and with the breakeven modify both succeeding and
+failing:
+
+- no outcome is ever worse than −1.00R;
+- no position is ever scaled out more than once.
+
+Run it after any change to `TradeExecutor.mqh`. It caught a real defect: the
+partial and the breakeven shared a stage, so a broker rejecting the stop modify
+left the stage unadvanced and the next tick took another partial — scaling the
+position out of existence one tick at a time.

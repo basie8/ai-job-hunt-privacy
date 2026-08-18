@@ -191,9 +191,15 @@ trade produces a *distribution* of outcomes rather than one:
 | Outcome | Result | Counts as |
 |---|---|---|
 | Stop hit before 1R | **−1.00R** | loss |
-| TP1 hit, then stopped at breakeven+lock | **+0.50R** | win |
-| TP1 hit, then trailed out | **+0.5R to +2.0R** | win |
+| TP1 hit, then stopped at breakeven+lock | **+0.55R** | win |
+| TP1 hit, then trailed out | **+0.55R to +2.0R** | win |
 | TP1 hit, then TP2 at 3R | **+2.00R** | win |
+
+These are not estimates. `tools/simulate_exits.py` is a faithful port of the
+management state machine; it reproduces each figure exactly and asserts two
+invariants over 16,000 randomised price paths: **no outcome is ever worse than
+−1.00R**, and **no position is ever scaled out twice**. Run it after any change
+to `TradeExecutor.mqh`.
 
 Every trade that touches 1R is booked green and can no longer lose. So the
 *percentage of green trades* tracks "how often does price reach 1R", which for a
@@ -228,6 +234,25 @@ Sizing is the **minimum** of three numbers:
 Clause 3 is what stops a drawdown compounding: as equity falls toward the floor,
 the position size automatically shrinks. You cannot reach the FTMO limit in a
 straight line.
+
+### The trailing step
+
+`InpTrailStepPrice` (default 0.20, in quote currency) is the minimum improvement
+the chandelier must offer before a stop modification is sent. Without it the
+trail fires a modify on every tick that improves the stop by even one point —
+brokers throttle that, and it buries the journal.
+
+### Restart safety
+
+Each position's entry, original risk and management stage are written to MT5
+global variables and restored on startup. Without that, adopting an open position
+after a restart had to infer its risk from the current stop distance — and once
+the stop is at breakeven that distance is a fraction of the real risk, so the
+computed R multiple came out roughly ten times too high and the EA would
+immediately take a second scale-out on a trade it had already managed. If no
+saved state exists (the EA was attached to a pre-existing position), a stop
+already on the profitable side is treated as protected and no further scale-out
+is taken.
 
 ### Loss-streak de-risking
 
