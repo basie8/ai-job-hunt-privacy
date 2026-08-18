@@ -56,6 +56,23 @@ partial and the breakeven shared a stage, so a broker rejecting the stop modify
 left the stage unadvanced and the next tick took another partial — scaling the
 position out of existence one tick at a time.
 
+## make_optimisation_sets.py
+
+Generates **every** `.set` file in `MQL5/Presets/` — the three phase presets, the
+five staged optimisation sweeps, and the timeframe and exit-structure comparison
+runs — from the EA's compiled defaults plus a small table of deliberate
+overrides per file.
+
+    python3 tools/make_optimisation_sets.py            # regenerate
+    python3 tools/make_optimisation_sets.py --check    # fail if any file is stale
+
+**Never hand-edit a `.set` file.** The phase presets used to be maintained by
+hand and they drifted: after the exit geometry was retuned, `Phase1_Challenge.set`
+still pinned the old 1.6 ATR stop and 3.0R target, so loading it silently
+restored the configuration that had produced a losing backtest. Deriving them
+from the EA defaults makes that class of bug impossible, and `--check` (wired
+into `audit_static.py`) fails the build if anyone edits one by hand.
+
 ## simulate_riskguard.py
 
 Ports `CRiskGuard` and asks the only question that really matters for a funded

@@ -174,6 +174,16 @@ for f,s in SRC.items():
     if f.endswith('.mqh') and not guards:
         flag('includes',f"{f}: no include guard")
 
+# ---------- 9. generated .set files must not have drifted ----------
+import subprocess
+_r=subprocess.run(['python3','tools/make_optimisation_sets.py','--check'],
+                  capture_output=True, text=True)
+if _r.returncode!=0:
+    for _l in _r.stdout.strip().split('\n'):
+        if _l.strip().startswith('MQL5/'):
+            flag('presets', f"{_l.strip()} is stale - regenerate with "
+                            f"tools/make_optimisation_sets.py")
+
 # ---------- report ----------
 order=['placeholder','balance','encoding','inputs','methods','deadcode','presets','includes']
 total=0

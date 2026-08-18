@@ -119,6 +119,37 @@ STAGES = [
 # Timeframes cannot be swept: ENUM_TIMEFRAMES values are not contiguous
 # (M30=30 but H1=16385), so a step would iterate thousands of invalid values.
 # They are compared as discrete runs instead. ATR bounds scale with sqrt(time).
+# The three phase presets. Only the values that DELIBERATELY differ from the
+# compiled defaults are listed; everything else tracks the EA automatically.
+#
+# These used to be hand-maintained, and they drifted: after the exit geometry
+# was retuned the presets still pinned the old stop and target, so loading
+# Phase 1 silently restored the configuration that produced a losing backtest.
+# Deriving them here makes that impossible.
+PHASE_PRESETS = [
+ ("Phase1_Challenge", {
+    'InpProfitTargetPct':'10.0', 'InpRiskPercent':'0.5', 'InpStopAtTarget':'true',
+    'InpSoftDailyLossPct':'2.0', 'InpHardDailyLossPct':'3.0',
+    'InpSoftTotalLossPct':'5.0', 'InpHardTotalLossPct':'7.0',
+    'InpMaxTradesPerDay':'3', 'InpUseDailyQuota':'true', 'InpScoreThreshold':'72.0',
+  }, "FTMO Challenge, phase 1. 10% target, 0.5% risk per trade."),
+
+ ("Phase2_Verification", {
+    'InpProfitTargetPct':'5.0', 'InpRiskPercent':'0.4', 'InpStopAtTarget':'true',
+    'InpSoftDailyLossPct':'1.8', 'InpHardDailyLossPct':'2.8',
+    'InpSoftTotalLossPct':'4.0', 'InpHardTotalLossPct':'6.0',
+    'InpMaxTradesPerDay':'3', 'InpUseDailyQuota':'true', 'InpScoreThreshold':'72.0',
+  }, "FTMO Verification, phase 2. Lower 5% target, so less risk is needed."),
+
+ ("Funded_Conservative", {
+    'InpProfitTargetPct':'100.0', 'InpRiskPercent':'0.3', 'InpStopAtTarget':'false',
+    'InpSoftDailyLossPct':'1.5', 'InpHardDailyLossPct':'2.5',
+    'InpSoftTotalLossPct':'4.0', 'InpHardTotalLossPct':'6.0',
+    'InpMaxTradesPerDay':'2', 'InpUseDailyQuota':'false', 'InpScoreThreshold':'70.0',
+  }, "Funded account. No auto-stop, smallest risk, fewer trades, quota off - "
+     "on a live payout account there is no deadline to chase."),
+]
+
 EXIT_RUNS = [
  ("Exit_A_Scaled",  {'InpUsePartial':'true',  'InpPartialPct':'40', 'InpTp1R':'1.0',
                      'InpTp2R':'2.2', 'InpSlAtrMult':'1.10', 'InpTrailStartR':'1.05',
@@ -184,8 +215,33 @@ def passes(opt):
         n *= int(round((stop-start)/step))+1
     return n
 
+CHECK = ('--check' in sys.argv)
+STALE = []
+
+_real_write = write_set
+def write_set(path, header, opt, overrides):
+    if CHECK:
+        import io as _io
+        before = open(path).read() if os.path.exists(path) else None
+        _real_write(path+'.tmp', header, opt, overrides)
+        after = open(path+'.tmp').read()
+        os.remove(path+'.tmp')
+        if before != after:
+            STALE.append(path)
+        return
+    _real_write(path, header, opt, overrides)
+
 os.makedirs(OUT, exist_ok=True)
-print("Generated optimisation sets\n")
+print("Checking generated sets are up to date\n" if CHECK else "Generated optimisation sets\n")
+
+for name, ov, why in PHASE_PRESETS:
+    hdr=(f"XAUUSD FTMO Confluence EA - {name}\n\n{why}\n\n"
+         "Generated from the EA's compiled defaults plus the deliberate\n"
+         "per-phase overrides. Do not hand-edit: regenerate with\n"
+         "  python3 tools/make_optimisation_sets.py")
+    write_set(f"{OUT}/{name}.set", hdr, {}, ov)
+    print(f"  {name}.set  target {ov['InpProfitTargetPct']}%  risk {ov['InpRiskPercent']}%")
+print()
 total=0
 frozen={}
 for i,(name,opt,why) in enumerate(STAGES, 1):
@@ -235,3 +291,11 @@ print("\ndegrees of freedom:")
 for name,opt,_ in STAGES:
     need=len(opt)*40
     print(f"  {name:<20} {len(opt)} params -> want >= {need} trades in the sample")
+
+if CHECK:
+    if STALE:
+        print("\nSTALE - these files no longer match the generator:")
+        for f in STALE: print(f"   {f}")
+        print("Run: python3 tools/make_optimisation_sets.py")
+        sys.exit(1)
+    print("\nall generated .set files are up to date")
