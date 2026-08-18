@@ -361,8 +361,8 @@ agent folder (`Tester/Agent-.../MQL5/Files/`).
 Optimise these, in this order, and **stop early** — more parameters tuned means
 more curve fit:
 
-1. `InpScoreThreshold` (55–75, step 2)
-2. `InpDominanceMargin` (12–30, step 2)
+1. `InpScoreThreshold` (62–80, step 2)
+2. `InpDominanceMargin` (20–40, step 2)
 3. `InpSlAtrMult` (1.2–2.4, step 0.2)
 4. `InpTp2R` (2.0–4.0, step 0.5)
 5. `InpAdxMin` (16–28, step 2)

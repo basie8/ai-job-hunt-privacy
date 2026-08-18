@@ -8,6 +8,8 @@ every commit that touches the EA.
 python3 tools/audit_static.py
 python3 tools/audit_api.py
 python3 tools/simulate_exits.py
+python3 tools/simulate_riskguard.py
+python3 tools/simulate_confluence.py
 ```
 
 Both exit non-zero on any finding.
@@ -53,3 +55,21 @@ Run it after any change to `TradeExecutor.mqh`. It caught a real defect: the
 partial and the breakeven shared a stage, so a broker rejecting the stop modify
 left the stage unadvanced and the next tick took another partial — scaling the
 position out of existence one tick at a time.
+
+## simulate_riskguard.py
+
+Ports `CRiskGuard` and asks the only question that really matters for a funded
+account: can any sequence of losses drive the balance through an FTMO limit?
+Checks the guard ladder ordering, that pathological inputs are clamped rather
+than honoured, that position sizing risks what it claims (within 0.2%), that
+sizing collapses to zero before the soft floor is crossed, the loss-streak
+de-risking curve, day rollover, and that the total guard still bites after a
+profitable stretch.
+
+## simulate_confluence.py
+
+Ports the scoring in `CConfluenceEngine::Evaluate()` plus the hard gates. Answers
+what a static read cannot: is the threshold reachable at all, can both sides
+score highly at once, and how much more often does an aligned state fire than
+noise. The separation figure it reports is what drove the 66/22 -> 72/30 default
+change; re-run it after changing any weight or threshold.

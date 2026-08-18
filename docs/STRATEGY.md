@@ -133,8 +133,8 @@ So each component awards **weighted points** to a bull score and a bear score,
 both normalised to 0–100. A trade requires:
 
 ```
-winning_score >= ScoreThreshold        (default 66)
-winning_score - losing_score >= Margin (default 22)
+winning_score >= ScoreThreshold        (default 72)
+winning_score - losing_score >= Margin (default 30)
 ```
 
 The margin requirement matters as much as the threshold — it rejects the
@@ -156,6 +156,46 @@ accounts.
 | 9 | Bollinger location | 6 | Between the mid and upper band; **only 20% of points above the upper band** | Explicitly penalises chasing an over-extended move |
 | 10 | Structure | 8 | Above the daily pivot and above the prior-day midpoint | Institutional reference levels |
 | 11 | Volume | 6 | Signal-bar tick volume ≥ 1.1× the 20-bar average | Separates real breaks from drift |
+
+### How selective is the gate, really?
+
+`tools/simulate_confluence.py` measures this rather than assuming it. It scores
+random market states where each component agrees with a "true" bias with
+probability *p*, and reports how often a trade fires:
+
+| Indicator agreement | Fires (normal gate) | Fires (quota gate) |
+|---|---|---|
+| 0.55 (near noise) | 23.6% | 50.8% |
+| 0.65 | 32.8% | 57.1% |
+| 0.75 | 49.6% | 69.5% |
+| 0.85 (well aligned) | 71.0% | 83.3% |
+| 0.95 (textbook) | 91.8% | 95.4% |
+
+An aligned state is **3.0x more likely to fire than noise**. That ratio, not the
+absolute rate, is the number worth optimising.
+
+**The defaults were tightened because of this test.** At the original 66/22 the
+same model gave 39.1% at noise against 79.7% aligned — a ratio of only 2.04x.
+Moving to 72/30 nearly halved the noise rate while giving up little at the top
+end:
+
+| Threshold / margin | Noise | Aligned | Ratio |
+|---|---|---|---|
+| 66 / 22 (original) | 39.1% | 79.7% | 2.04x |
+| **72 / 30 (default)** | **23.6%** | **71.0%** | **3.01x** |
+
+The change costs almost nothing in practice because trade frequency is bound by
+`InpMaxTradesPerDay` (3) and the 45-minute spacing, not by the signal rate — even
+at 0.85 coherence roughly 22 signals a day clear the gate.
+
+> Caveat on the model: it makes each component commit fully to one side.
+> Real indicators are correlated and mostly land on *partial* scores in chop, and
+> the ADX gate removes much of that first. So treat the noise column as an upper
+> bound. The comparison between settings is what holds.
+
+Raising the threshold further (75/30 scores best on separation in the pure model)
+is a reasonable choice if you want fewer, higher-quality trades. Re-run the
+script after changing any weight.
 
 ### Hard gates (these veto regardless of score)
 

@@ -82,8 +82,8 @@ input double          InpTrailStepPrice      = 0.20;  // Min stop improvement be
 input int             InpTrailLookback       = 10;    // Bars for the chandelier extreme
 
 input group "=== Confluence thresholds ==="
-input double          InpScoreThreshold      = 66.0;  // Minimum score (0-100) to trade
-input double          InpDominanceMargin     = 22.0;  // Winning side must lead by this much
+input double          InpScoreThreshold      = 72.0;  // Minimum score (0-100) to trade
+input double          InpDominanceMargin     = 30.0;  // Winning side must lead by this much
 input double          InpAdxMin              = 20.0;  // Minimum ADX (hard gate)
 input double          InpMaxExtensionAtr     = 2.20;  // Max distance from the slow EMA, in ATR
 input double          InpMinAtrPrice         = 1.20;  // Volatility floor, in PRICE (0 = off)
@@ -155,8 +155,8 @@ input int             InpMinMinutesBetween   = 45;        // Minimum minutes bet
 input group "=== Daily quota (the 'at least one trade a day' rule) ==="
 input bool            InpUseDailyQuota       = true;      // Relax the threshold late in the day
 input string          InpQuotaFromTime       = "14:30";   // Quota mode starts at (GMT)
-input double          InpQuotaScoreThreshold = 58.0;      // Relaxed score threshold
-input double          InpQuotaDominance      = 15.0;      // Relaxed dominance margin
+input double          InpQuotaScoreThreshold = 62.0;      // Relaxed score threshold
+input double          InpQuotaDominance      = 20.0;      // Relaxed dominance margin
 input double          InpQuotaRiskFactor     = 0.60;      // Risk multiplier for quota trades
 
 input group "=== News filter ==="
