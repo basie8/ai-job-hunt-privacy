@@ -110,19 +110,59 @@ for fn in sorted(freefn):
     if calls<=1:
         flag('deadcode',f"function defined but never called: {fn}()")
 
-# ---------- 7. preset keys must be real inputs ----------
+# ---------- 7. preset keys, and optimisation ranges ----------
 valid=set(input_names)
+# never sweep these - risk is a decision, and the guards are the FTMO rules
+NEVER_SWEEP = {n for n in input_names
+               if n.startswith('InpW')
+               or n in {'InpRiskPercent','InpFixedLot','InpSoftDailyLossPct','InpHardDailyLossPct',
+                        'InpSoftTotalLossPct','InpHardTotalLossPct','InpFtmoDailyLossPct',
+                        'InpFtmoMaxLossPct','InpNewsMinutesBefore','InpNewsMinutesAfter',
+                        'InpProfitTargetPct','InpInitialCapital','InpMagic'}}
+
 for pf in sorted(glob.glob('MQL5/Presets/*.set')):
-    seen=set()
+    seen=set(); total_passes=1; swept=0
     for ln,line in enumerate(open(pf).read().split('\n'),1):
         line=line.strip()
         if not line or line.startswith(';'): continue
         if '=' not in line:
             flag('presets',f"{pf}:{ln}: malformed line '{line}'"); continue
-        k=line.split('=',1)[0].strip()
+        k,v = line.split('=',1)
+        k=k.strip()
         if k not in valid: flag('presets',f"{pf}:{ln}: '{k}' is not an EA input")
         if k in seen: flag('presets',f"{pf}:{ln}: duplicate key '{k}'")
         seen.add(k)
+
+        if '||' not in v: continue
+        parts=v.split('||')
+        if len(parts)!=5:
+            flag('presets',f"{pf}:{ln}: '{k}' has {len(parts)} ||-fields, expected 5"); continue
+        val,start,step,stop,en = [x.strip() for x in parts]
+        if en not in ('Y','N'):
+            flag('presets',f"{pf}:{ln}: '{k}' enable flag is '{en}', expected Y or N")
+        if en!='Y': continue
+        swept+=1
+        if k in NEVER_SWEEP:
+            flag('presets',f"{pf}:{ln}: '{k}' must never be optimised (risk/compliance/weight)")
+        try:
+            fs,fp,fe,fv = float(start),float(step),float(stop),float(val)
+        except ValueError:
+            flag('presets',f"{pf}:{ln}: '{k}' has non-numeric range fields"); continue
+        if fp<=0:
+            flag('presets',f"{pf}:{ln}: '{k}' step is {fp}, must be > 0")
+            continue
+        if fs>fe:
+            flag('presets',f"{pf}:{ln}: '{k}' start {fs} exceeds stop {fe}")
+            continue
+        if not (fs-1e-9 <= fv <= fe+1e-9):
+            flag('presets',f"{pf}:{ln}: '{k}' seed value {fv} is outside its swept range {fs}..{fe}")
+        steps=int(round((fe-fs)/fp))+1
+        if steps>200:
+            flag('presets',f"{pf}:{ln}: '{k}' sweeps {steps} values - step is probably too small")
+        total_passes*=steps
+    if swept and total_passes>60000:
+        flag('presets',f"{pf}: {total_passes:,} passes across {swept} swept parameters "
+                       f"- split this into more stages")
 
 # ---------- 8. include graph ----------
 for f,s in SRC.items():

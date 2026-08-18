@@ -71,6 +71,12 @@ for FTMO progress, market state, news, and positions, plus two toggle buttons: a
 closed-equity drawdown) and a **PARAMS** block that prints the loaded strategy
 configuration so a wrong preset is visible without opening the Inputs tab.
 
+**Optimisation.** Staged sweep files are generated from the EA source by
+`tools/make_optimisation_sets.py` — five stages totalling ~5,100 passes, plus
+three discrete timeframe comparison runs. Risk, the FTMO guards and all twelve
+confluence weights are locked out of every sweep, and the audit fails the build
+if that ever changes. See `docs/OPTIMISATION.md`.
+
 ## Start here
 
 1. **[docs/STRATEGY.md](docs/STRATEGY.md)** — the design and its rationale.

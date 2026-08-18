@@ -299,6 +299,8 @@ risk-free.
 | `Phase1_Challenge.set` | 10% target, 0.5% risk. The default. |
 | `Phase2_Verification.set` | 5% target, 0.4% risk, tighter guards. |
 | `Funded_Conservative.set` | 0.3% risk, 2 trades/day, no quota mode. |
+| `Optimise_Stage*.set` | Staged optimisation sweeps — see `docs/OPTIMISATION.md`. |
+| `Compare_TF_*.set` | Timeframe comparison runs (M5 / M15 / M30). |
 
 Load via the EA's *Inputs* tab → **Load**.
 
@@ -358,7 +360,8 @@ agent folder (`Tester/Agent-.../MQL5/Files/`).
 
 ## Optimisation guidance
 
-Optimise these, in this order, and **stop early** — more parameters tuned means
+**Full protocol: `docs/OPTIMISATION.md`.** Generated staged files live in
+`MQL5/Presets/`. In short — optimise these, in this order, and **stop early** — more parameters tuned means
 more curve fit:
 
 1. `InpScoreThreshold` (62–80, step 2)
