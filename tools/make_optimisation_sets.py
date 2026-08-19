@@ -317,7 +317,11 @@ def write_set(path, header, opt, overrides):
             lines.append(f"{name}={val}||{fmt(start)}||{fmt(step)}||{fmt(stop)}||Y")
         else:
             lines.append(f"{name}={overrides.get(name, literal(name))}")
-    open(path,'w').write('\n'.join(lines)+'\n')
+    # CRLF, because that is what MetaTrader itself writes. Its .set parser is
+    # fussier than it looks and there is no reason to hand it a variant it
+    # never produces.
+    with open(path,'w',newline='\r\n') as fh:
+        fh.write('\n'.join(lines)+'\n')
 
 def passes(opt):
     n=1
@@ -332,9 +336,9 @@ _real_write = write_set
 def write_set(path, header, opt, overrides):
     if CHECK:
         import io as _io
-        before = open(path).read() if os.path.exists(path) else None
+        before = open(path,newline='').read() if os.path.exists(path) else None
         _real_write(path+'.tmp', header, opt, overrides)
-        after = open(path+'.tmp').read()
+        after = open(path+'.tmp',newline='').read()
         os.remove(path+'.tmp')
         if before != after:
             STALE.append(path)
