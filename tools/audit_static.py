@@ -227,6 +227,13 @@ if os.path.exists(_bundle):
         flag('includes', f"the bundle has a #property at line {max(_props)} - "
                          f"they must all sit at the top")
 
+# ---------- 8e. the bundle must contain every declaration from the sources ----------
+_vb=_sp.run(['python3','tools/verify_bundle.py'],capture_output=True,text=True)
+if _vb.returncode!=0:
+    for _l in _vb.stdout.split('\n'):
+        if 'MISSING' in _l or 'OUT OF ORDER' in _l:
+            flag('includes', f"single-file build incomplete: {_l.strip()}")
+
 # ---------- 9. generated .set files must not have drifted ----------
 import subprocess
 _r=subprocess.run(['python3','tools/make_optimisation_sets.py','--check'],
