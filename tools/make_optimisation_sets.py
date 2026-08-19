@@ -229,6 +229,17 @@ EXIT_RUNS = [
   "drag of always banking half the trade at 1R, which is what capped the "
   "average win at 0.5R in the backtest."),
 
+ ("Exit_B_Runner_FullPeriod", {'InpUsePartial':'false', 'InpTp1R':'1.0', 'InpTp2R':'2.5',
+                     'InpSlAtrMult':'1.10', 'InpTrailStartR':'1.0',
+                     'InpTrailAtrMult':'1.5', 'InpBreakevenLockR':'0.05',
+                     'InpStopAtTarget':'false', 'InpProfitTargetPct':'100.0'},
+  "Exit B with the profit-target stop DISABLED. B looked best, but it halted "
+  "at +10% after 56 trading days while A and C ran 217 and 221 - and every "
+  "configuration was up over that same Aug-Oct window. This run makes B "
+  "comparable: same period, same trade count scale. If its profit factor "
+  "holds near 1.6 over the full year, the edge is real; if it collapses "
+  "toward 1.0, B simply stopped during a good patch."),
+
  ("Exit_C_Tight",   {'InpUsePartial':'true',  'InpPartialPct':'50', 'InpTp1R':'0.8',
                      'InpTp2R':'1.8', 'InpSlAtrMult':'0.90', 'InpTrailStartR':'0.85',
                      'InpTrailAtrMult':'1.0', 'InpBreakevenLockR':'0.05'},
