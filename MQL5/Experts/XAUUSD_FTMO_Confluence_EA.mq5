@@ -1740,6 +1740,15 @@ void CRiskGuard::RollDay(const datetime serverNow)
    m_realisedToday     = 0.0;
    m_dayLockedOut      = false;
 
+   // The loss streak MUST clear here. It used not to, and the effect was a
+   // permanent deadlock: hitting the streak limit halted trading, the streak
+   // only cleared on a winning trade, and no trade could be opened to produce
+   // one. A backtest hit three losses on 15 August and never traded again for
+   // the following eight months.
+   if(m_consecutiveLosses > 0)
+      PrintFormat("[Risk] loss streak of %d cleared by the new trading day.", m_consecutiveLosses);
+   m_consecutiveLosses = 0;
+
    PrintFormat("[Risk] new trading day from %s (server). Day-start balance %.2f",
                TimeToString(m_currentDayStart, TIME_DATE | TIME_MINUTES), m_dayStartBalance);
   }
@@ -1831,7 +1840,7 @@ ENUM_GUARD_ACTION CRiskGuard::Evaluate(void)
 
    if(m_maxConsecutiveLosses > 0 && m_consecutiveLosses >= m_maxConsecutiveLosses)
      {
-      m_lastReason = StringFormat("%d consecutive losses - paused for the day", m_consecutiveLosses);
+      m_lastReason = StringFormat("%d consecutive losses - paused until tomorrow", m_consecutiveLosses);
       return GUARD_SOFT_HALT;
      }
 

@@ -370,6 +370,13 @@ is taken.
 
 ### Loss-streak de-risking
 
+> **The streak clears at the next trading day.** It must: the streak halts
+> trading, and it used only to clear on a *winning* trade — but no trade could
+> be opened to produce one. That deadlock silenced a backtest for eight months
+> after three losses in a row, and it is what the `no guard may latch
+> permanently` test in `tools/simulate_riskguard.py` now guards against.
+
+
 After consecutive losses, risk is multiplied by `0.6^(streak−1)` (floored at
 0.25×). Two losses → 60% size. Three → 36%. Three consecutive losses also stops
 trading for the day entirely.

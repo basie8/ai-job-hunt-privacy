@@ -49,8 +49,12 @@ class RiskGuard:
         wanted = s.initial*risk_pct/100.0*s.risk_factor()
         return min(wanted, s.room_daily()*0.70, s.room_total()*0.70)
 
-    def roll_day(s):
-        s.day_start=min(s.equity,s.equity); s.trades_today=0; s.locked=False
+    def roll_day(s, reset_streak=True):
+        s.day_start=s.equity; s.trades_today=0; s.locked=False
+        # THE BUG: RollDay reset the day counters but not the loss streak.
+        # The streak only cleared on a winning trade - and the guard blocked
+        # every trade, so no win could occur. A permanent deadlock.
+        if reset_streak: s.streak=0
 
 fails=0
 def check(cond,msg):
@@ -127,6 +131,38 @@ g.equity=INIT-5100
 check(g.evaluate() in ("SOFT","HARD_FLAT"),
       f"total DD {g.total_dd():.2f}% halts trading even though the account once ran +8%")
 check(g.total_dd()<g.ftmo_t, "and it bites well before the FTMO 10% floor")
+
+print("\n=== 9. no guard may latch permanently ===")
+# Reproduces the real failure: three losses in a row, then the EA never
+# traded again for eight months of a backtest.
+g=RiskGuard(INIT, max_streak=3)
+for _ in range(3):
+    g.equity-=50; g.streak+=1; g.trades_today+=1
+check(g.evaluate()=="SOFT", f"{g.streak} consecutive losses halts trading (intended)")
+
+buggy=RiskGuard(INIT, max_streak=3)
+for _ in range(3):
+    buggy.equity-=50; buggy.streak+=1; buggy.trades_today+=1
+for _ in range(200):                      # 200 days later
+    buggy.roll_day(reset_streak=False)
+check(buggy.evaluate()!="NONE",
+      "WITHOUT the fix the halt survives 200 day rollovers - permanent deadlock")
+
+fixed=RiskGuard(INIT, max_streak=3)
+for _ in range(3):
+    fixed.equity-=50; fixed.streak+=1; fixed.trades_today+=1
+fixed.roll_day()
+check(fixed.evaluate()=="NONE",
+      "WITH the fix the next day clears the streak and trading resumes")
+
+print("\n=== 10. every latching flag clears on a new day ===")
+g=RiskGuard(INIT, max_streak=3, max_trades=3)
+g.equity=INIT-2100; g.evaluate()                 # trips the soft daily guard
+g.trades_today=3; g.streak=3
+g.roll_day()
+for name,val in (("day lockout",g.locked),("trades today",g.trades_today),
+                 ("loss streak",g.streak)):
+    check(not val, f"{name} cleared by the rollover")
 
 print("\nRISK GUARD:", "PASS" if fails==0 else f"{fails} FAILURE(S)")
 sys.exit(1 if fails else 0)
