@@ -283,6 +283,13 @@ def fmt(v):
     return f"{v:g}"
 
 def write_set(path, header, opt, overrides):
+    # every generated file names its own diagnostics output, so a batch of
+    # comparison runs leaves one file per run instead of overwriting one
+    # --check writes to '<name>.set.tmp', so strip that too or the tag - and
+    # therefore the comparison - differs between writing and checking
+    tag = os.path.basename(path).replace('.set.tmp','').replace('.set','')
+    overrides = dict(overrides)
+    overrides.setdefault('InpRunTag', tag)
     lines=[]
     for h in header.split('\n'):
         lines.append('; '+h if h else ';')

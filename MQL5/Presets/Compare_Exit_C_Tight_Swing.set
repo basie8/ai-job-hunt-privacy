@@ -140,4 +140,5 @@ InpShowParamsBlock=false
 InpShowMetricsBlock=true
 InpRebuildStatsOnInit=true
 InpWriteDiagnosticFile=true
+InpRunTag=Compare_Exit_C_Tight_Swing
 InpStatsHistoryDays=90

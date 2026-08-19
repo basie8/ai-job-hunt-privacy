@@ -138,4 +138,5 @@ InpShowParamsBlock=false
 InpShowMetricsBlock=true
 InpRebuildStatsOnInit=true
 InpWriteDiagnosticFile=true
+InpRunTag=Compare_Exit_A_Scaled
 InpStatsHistoryDays=90

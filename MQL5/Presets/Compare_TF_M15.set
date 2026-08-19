@@ -139,4 +139,5 @@ InpShowParamsBlock=false
 InpShowMetricsBlock=true
 InpRebuildStatsOnInit=true
 InpWriteDiagnosticFile=true
+InpRunTag=Compare_TF_M15
 InpStatsHistoryDays=90

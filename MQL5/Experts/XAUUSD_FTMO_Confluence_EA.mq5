@@ -4858,7 +4858,8 @@ input int             InpDashFontSize        = 8;        // Console font size
 input bool            InpShowParamsBlock     = false;    // Start with the parameter block open
 input bool            InpShowMetricsBlock    = true;     // Start with the metrics block open
 input bool            InpRebuildStatsOnInit  = true;     // Rebuild metrics from account history
-input bool            InpWriteDiagnosticFile = true;     // Write XFC_diagnostics.csv on exit
+input bool            InpWriteDiagnosticFile = true;     // Write a diagnostics CSV on exit
+input string          InpRunTag              = "";       // Run label - names the diagnostics file
 input int             InpStatsHistoryDays    = 90;       // How far back to rebuild (days)
 
 //+------------------------------------------------------------------+
@@ -5933,7 +5934,15 @@ void WriteDiagnosticFile(void)
    // terminal's MQL5/Files - so the file appears to be missing. The common
    // folder is shared by the terminal and every agent, and is the one place
    // it can always be found.
-   int h = FileOpen("XFC_diagnostics.csv", FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
+   // One file per run. Comparison runs used to overwrite a single
+   // XFC_diagnostics.csv, leaving nothing to compare but the equity curves -
+   // which cannot show payoff ratio, and which mislead badly when a run
+   // terminates early on a guard or on the profit target.
+   string fname = (StringLen(InpRunTag) > 0
+                   ? StringFormat("XFC_diag_%s.csv", InpRunTag)
+                   : "XFC_diagnostics.csv");
+
+   int h = FileOpen(fname, FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
    if(h == INVALID_HANDLE)
      {
       PrintFormat("[Why] could not write the diagnostic file (error %d)", GetLastError());
@@ -5942,6 +5951,7 @@ void WriteDiagnosticFile(void)
 
    FileWrite(h, "section", "item", "count", "pct", "note");
    FileWrite(h, "run", "build_id", XFC_BUILD_ID, "", "must match the build you compiled");
+   FileWrite(h, "run", "run_tag", (StringLen(InpRunTag) > 0 ? InpRunTag : "untagged"), "", "");
    FileWrite(h, "run", "symbol", g_symbol, "", EnumToString(InpTfTrade));
    FileWrite(h, "run", "ticks_seen", (int)g_ticksSeen, "",
              (g_ticksSeen == 0 ? "NO PRICE DATA AT ALL for this period" : ""));
@@ -5967,6 +5977,17 @@ void WriteDiagnosticFile(void)
       if(g_vetoGate[g] > 0)
          FileWrite(h, "gate", GateLabel((ENUM_GATE_REASON)g), (int)g_vetoGate[g],
                    DoubleToString(100.0 * g_vetoGate[g] / MathMax(1, g_barsSeen), 1), "% of bars");
+
+   // How a run ENDED decides whether its numbers are comparable at all.
+   string ending = "ran to the end of the period";
+   if(g_risk.TargetReached())
+      ending = "STOPPED EARLY - profit target reached, stood down by design";
+   else
+      if(g_risk.TotalDrawdownPct() >= InpSoftTotalLossPct)
+         ending = "STOPPED EARLY - total loss guard tripped";
+   FileWrite(h, "run", "ended", ending, "", "early stops are NOT comparable with full runs");
+   FileWrite(h, "run", "final_profit_pct", DoubleToString(g_risk.ProfitPct(), 2), "", "");
+   FileWrite(h, "run", "max_total_dd_pct", DoubleToString(g_risk.TotalDrawdownPct(), 2), "", "");
 
    FileWrite(h, "metrics", "win_rate_pct", DoubleToString(g_stats.WinRate(), 1), "", "");
    FileWrite(h, "metrics", "profit_factor", DoubleToString(g_stats.ProfitFactor(), 2), "", "");

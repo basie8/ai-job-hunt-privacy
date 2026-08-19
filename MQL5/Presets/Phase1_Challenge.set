@@ -136,4 +136,5 @@ InpShowParamsBlock=false
 InpShowMetricsBlock=true
 InpRebuildStatsOnInit=true
 InpWriteDiagnosticFile=true
+InpRunTag=Phase1_Challenge
 InpStatsHistoryDays=90

@@ -136,4 +136,5 @@ InpShowParamsBlock=false
 InpShowMetricsBlock=true
 InpRebuildStatsOnInit=true
 InpWriteDiagnosticFile=true
+InpRunTag=Funded_Conservative
 InpStatsHistoryDays=90

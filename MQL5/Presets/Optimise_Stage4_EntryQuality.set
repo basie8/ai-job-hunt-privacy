@@ -139,4 +139,5 @@ InpShowParamsBlock=false
 InpShowMetricsBlock=true
 InpRebuildStatsOnInit=true
 InpWriteDiagnosticFile=true
+InpRunTag=Optimise_Stage4_EntryQuality
 InpStatsHistoryDays=90

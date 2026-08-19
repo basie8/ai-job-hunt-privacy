@@ -141,4 +141,5 @@ InpShowParamsBlock=false
 InpShowMetricsBlock=true
 InpRebuildStatsOnInit=true
 InpWriteDiagnosticFile=true
+InpRunTag=Compare_TF_M5_Swing
 InpStatsHistoryDays=90

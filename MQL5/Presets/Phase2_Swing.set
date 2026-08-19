@@ -136,4 +136,5 @@ InpShowParamsBlock=false
 InpShowMetricsBlock=true
 InpRebuildStatsOnInit=true
 InpWriteDiagnosticFile=true
+InpRunTag=Phase2_Swing
 InpStatsHistoryDays=90

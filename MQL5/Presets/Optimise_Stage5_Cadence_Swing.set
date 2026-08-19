@@ -142,4 +142,5 @@ InpShowParamsBlock=false
 InpShowMetricsBlock=true
 InpRebuildStatsOnInit=true
 InpWriteDiagnosticFile=true
+InpRunTag=Optimise_Stage5_Cadence_Swing
 InpStatsHistoryDays=90

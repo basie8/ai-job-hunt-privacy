@@ -142,4 +142,5 @@ InpShowParamsBlock=false
 InpShowMetricsBlock=true
 InpRebuildStatsOnInit=true
 InpWriteDiagnosticFile=true
+InpRunTag=Optimise_Stage2_Exits_Swing
 InpStatsHistoryDays=90

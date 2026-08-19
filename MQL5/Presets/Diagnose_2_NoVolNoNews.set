@@ -135,4 +135,5 @@ InpShowParamsBlock=false
 InpShowMetricsBlock=true
 InpRebuildStatsOnInit=true
 InpWriteDiagnosticFile=true
+InpRunTag=Diagnose_2_NoVolNoNews
 InpStatsHistoryDays=90
