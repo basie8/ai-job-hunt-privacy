@@ -99,6 +99,7 @@ input int             InpMaxTradesPerDay     = 3;     // Max trades per day (0 =
 input int             InpMaxConsecLosses     = 3;     // Pause for the day after N losses in a row
 input double          InpLossStreakFactor    = 0.60;  // Risk multiplier per extra consecutive loss
 input int             InpMaxOpenPositions    = 1;     // Max simultaneous positions
+input double          InpMaxMarginPct        = 80.0;  // Max % of free margin one trade may use
 
 input group "=== Exit management (the asymmetry engine) ==="
 input double          InpSlAtrMult           = 1.10;  // Initial stop = ATR x this
@@ -840,6 +841,11 @@ bool ValidateInputs(void)
       Print("INPUT ERROR: InpMaxOpenPositions must be at least 1 or the EA can never trade.");
       errors++;
      }
+   if(InpMaxMarginPct < 5.0 || InpMaxMarginPct > 95.0)
+     {
+      PrintFormat("INPUT ERROR: InpMaxMarginPct (%.1f) must be between 5 and 95.", InpMaxMarginPct);
+      errors++;
+     }
 
    //--- guard ladder must be ordered and inside the FTMO limits
    if(InpHardDailyLossPct <= InpSoftDailyLossPct)
@@ -1069,6 +1075,8 @@ int OnInit(void)
                    InpMaxTradesPerDay, InpMaxConsecLosses,
                    InpLossStreakFactor, g_cetOffsetSec))
       return INIT_FAILED;
+
+   g_risk.SetMaxMarginPct(InpMaxMarginPct);
 
    //--- execution
    if(!g_exec.Init(g_symbol, InpTfTrade, InpMagic, InpSlippagePoints, InpVerboseLog))

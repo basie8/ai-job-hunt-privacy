@@ -325,6 +325,80 @@ what each phase changes.
 
 ---
 
+## FTMO Swing accounts
+
+A Swing account differs from a normal one in three ways that matter here.
+
+### Leverage 1:30 — the hard constraint
+
+Gold margin per lot roughly triples:
+
+| Leverage | Margin per lot (gold at $3,300) | 0.15 lots on a $10k account |
+|---|---|---|
+| 1:100 | $3,300 | 5.0% |
+| **1:30** | **$11,000** | **16.5%** |
+
+A backtest that peaked around 13% deposit load at 1:100 would sit near **43%** at
+1:30. The EA's free-margin cap was hardcoded at 50%, which would have started
+**silently rejecting ordinary trades** — logged, but easy to miss.
+
+`InpMaxMarginPct` is now an input, set to **85%** in the Swing presets. That is
+safe here because the drawdown guards bite long before margin does: trading stops
+at a 5% total loss, nowhere near a margin call.
+
+The startup journal now reports what your account actually allows:
+
+```
+   account leverage 1:30 -> margin 11000.00 USD per lot
+   at current equity 10000.00 that is 0.91 lots of total exposure
+[Broker] NOTE: leverage is 1:30 or lower (FTMO Swing)...
+```
+
+If trades are skipped for margin, **raise `InpMaxMarginPct` rather than cutting
+risk** — cutting risk to fit a margin cap changes the strategy; raising the cap
+does not.
+
+### Weekend holding is permitted
+
+`InpFlatBeforeWeekend = false` in the Swing presets, and `InpFridayCutoff` moves
+to 20:00 GMT so Friday is traded in full.
+
+> This is a genuine trade-off, not a free win. Gold gaps over the weekend, and a
+> gap through your stop is a loss larger than 1R that no stop can prevent. The
+> guards will catch it — the daily loss check includes floating P/L — but the
+> trade itself can exceed its intended risk. If that troubles you, set
+> `InpFlatBeforeWeekend = true` even on a Swing account; the presets are a
+> starting point, not a rule.
+
+### News trading is unrestricted
+
+Swing accounts carry no restriction on trading around news, so the blackout is no
+longer a *compliance* requirement. **The Swing presets still leave it on**,
+because the reason to avoid CPI and NFP on gold is a trading one: spreads widen,
+slippage spikes, and a $10–20 candle blows through an ATR-sized stop.
+
+Turn it off (`InpNewsSource = NEWS_SRC_OFF`) only if you have tested that it
+helps on your data. Compare a run with it on against one with it off before
+deciding.
+
+### Which preset
+
+| Account | Preset |
+|---|---|
+| Swing Challenge | `Phase1_Swing.set` |
+| Swing Verification | `Phase2_Swing.set` |
+| Swing funded | `Funded_Swing.set` |
+
+Everything else — targets, loss limits, minimum trading days — is the same as a
+normal account.
+
+> **Verify the current rules yourself.** Web research was unavailable in the
+> session that produced this section, so the Swing specifics above come from
+> earlier research in the same session rather than a fresh check of FTMO's terms.
+> The leverage and margin arithmetic is independent of that and holds regardless.
+
+---
+
 ## FTMO-specific settings checklist
 
 | Input | Phase 1 | Phase 2 | Funded |

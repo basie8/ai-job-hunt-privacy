@@ -297,6 +297,24 @@ bool DescribeAndValidateSymbol(const string symbol)
                (int)stopsLvl, stopsLvl * point, (int)freezeLvl, freezeLvl * point);
    PrintFormat("   current spread %d pts (%.2f price)", (int)spreadPts, spreadPts * point);
 
+   //--- leverage and what it costs to hold a position
+   long   leverage = AccountInfoInteger(ACCOUNT_LEVERAGE);
+   double marginOneLot = 0.0;
+   double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
+   if(OrderCalcMargin(ORDER_TYPE_BUY, symbol, 1.0, ask, marginOneLot) && marginOneLot > 0.0)
+     {
+      double equity   = AccountInfoDouble(ACCOUNT_EQUITY);
+      double maxLots  = (marginOneLot > 0.0 ? equity / marginOneLot : 0.0);
+      PrintFormat("   account leverage 1:%d -> margin %.2f %s per lot",
+                  (int)leverage, marginOneLot, curAcct);
+      PrintFormat("   at current equity %.2f that is %.2f lots of total exposure",
+                  equity, maxLots);
+      if(leverage > 0 && leverage <= 30)
+         Print("[Broker] NOTE: leverage is 1:30 or lower (FTMO Swing). Margin per lot is "
+               "roughly 3x a 1:100 account - if trades are skipped for margin, raise "
+               "InpMaxMarginPct rather than cutting risk.");
+     }
+
    string fills = "";
    if((fillMode & SYMBOL_FILLING_FOK) != 0) fills += "FOK ";
    if((fillMode & SYMBOL_FILLING_IOC) != 0) fills += "IOC ";

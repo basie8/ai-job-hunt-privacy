@@ -1,9 +1,10 @@
-; XAUUSD FTMO Confluence EA - DIAGNOSTIC Diagnose_2_NoVolNoNews
+; XAUUSD FTMO Confluence EA - Phase1_Swing
 ;
-; Volatility band AND news filter off. Isolates the calendar as a cause. Not FTMO compliant - a diagnostic only, never a trading configuration.
+; FTMO SWING Challenge phase 1. Margin cap raised for 1:30, weekend flattening off, Friday traded in full.
 ;
-; Run over the SAME period as your Phase 1 test and compare the trade
-; count and the number of trading days. Do not trade these settings.
+; Generated from the EA's compiled defaults plus the deliberate
+; per-phase overrides. Do not hand-edit: regenerate with
+;   python3 tools/make_optimisation_sets.py
 ;
 InpSymbolOverride=
 InpMagic=20260818
@@ -21,17 +22,17 @@ InpStopAtTarget=true
 InpAutoCetOffset=true
 InpCetOffsetHours=0
 InpRiskMode=2
-InpRiskPercent=0.50
+InpRiskPercent=0.5
 InpFixedLot=0.10
-InpSoftDailyLossPct=2.00
-InpHardDailyLossPct=3.00
-InpSoftTotalLossPct=5.00
-InpHardTotalLossPct=7.00
+InpSoftDailyLossPct=2.0
+InpHardDailyLossPct=3.0
+InpSoftTotalLossPct=5.0
+InpHardTotalLossPct=7.0
 InpMaxTradesPerDay=3
 InpMaxConsecLosses=3
 InpLossStreakFactor=0.60
 InpMaxOpenPositions=1
-InpMaxMarginPct=80.0
+InpMaxMarginPct=85.0
 InpSlAtrMult=1.10
 InpSwingLookback=12
 InpSwingBufferAtr=0.25
@@ -52,13 +53,13 @@ InpDominanceMargin=30.0
 InpAdxMin=20.0
 InpMaxExtensionAtr=2.20
 InpAtrBandMode=0
-InpAtrMinRelative=0
-InpAtrMaxRelative=0
+InpAtrMinRelative=0.60
+InpAtrMaxRelative=2.50
 InpAtrAvgPeriod=100
 InpAtrMinPercent=0.020
 InpAtrMaxPercent=0.350
-InpMinAtrPrice=0
-InpMaxAtrPrice=0
+InpMinAtrPrice=1.20
+InpMaxAtrPrice=14.00
 InpVolumeFactor=1.10
 InpEmaFastTrade=8
 InpEmaSlowTrade=21
@@ -107,8 +108,8 @@ InpNewYorkStart=08:00
 InpNewYorkEnd=12:00
 InpTradeMonday=true
 InpTradeFriday=true
-InpFridayCutoff=15:00
-InpFlatBeforeWeekend=true
+InpFridayCutoff=20:00
+InpFlatBeforeWeekend=false
 InpWeekendFlatTime=19:00
 InpMaxSpreadPrice=0.50
 InpMinMinutesBetween=45
@@ -117,7 +118,7 @@ InpQuotaFromTime=14:30
 InpQuotaScoreThreshold=62.0
 InpQuotaDominance=20.0
 InpQuotaRiskFactor=0.60
-InpNewsSource=0
+InpNewsSource=3
 InpNewsCurrencies=USD,XAU,ALL
 InpNewsMinutesBefore=30
 InpNewsMinutesAfter=30

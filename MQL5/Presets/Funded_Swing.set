@@ -1,9 +1,10 @@
-; XAUUSD FTMO Confluence EA - DIAGNOSTIC Diagnose_2_NoVolNoNews
+; XAUUSD FTMO Confluence EA - Funded_Swing
 ;
-; Volatility band AND news filter off. Isolates the calendar as a cause. Not FTMO compliant - a diagnostic only, never a trading configuration.
+; FTMO SWING funded account.
 ;
-; Run over the SAME period as your Phase 1 test and compare the trade
-; count and the number of trading days. Do not trade these settings.
+; Generated from the EA's compiled defaults plus the deliberate
+; per-phase overrides. Do not hand-edit: regenerate with
+;   python3 tools/make_optimisation_sets.py
 ;
 InpSymbolOverride=
 InpMagic=20260818
@@ -16,18 +17,18 @@ InpTfHigh=16388
 InpInitialCapital=0.0
 InpFtmoDailyLossPct=5.0
 InpFtmoMaxLossPct=10.0
-InpProfitTargetPct=10.0
-InpStopAtTarget=true
+InpProfitTargetPct=100.0
+InpStopAtTarget=false
 InpAutoCetOffset=true
 InpCetOffsetHours=0
 InpRiskMode=2
-InpRiskPercent=0.50
+InpRiskPercent=0.3
 InpFixedLot=0.10
-InpSoftDailyLossPct=2.00
-InpHardDailyLossPct=3.00
-InpSoftTotalLossPct=5.00
-InpHardTotalLossPct=7.00
-InpMaxTradesPerDay=3
+InpSoftDailyLossPct=1.5
+InpHardDailyLossPct=2.5
+InpSoftTotalLossPct=4.0
+InpHardTotalLossPct=6.0
+InpMaxTradesPerDay=2
 InpMaxConsecLosses=3
 InpLossStreakFactor=0.60
 InpMaxOpenPositions=1
@@ -47,18 +48,18 @@ InpTrailStartR=1.05
 InpTrailAtrMult=1.20
 InpTrailStepPrice=0.20
 InpTrailLookback=10
-InpScoreThreshold=72.0
+InpScoreThreshold=70.0
 InpDominanceMargin=30.0
 InpAdxMin=20.0
 InpMaxExtensionAtr=2.20
 InpAtrBandMode=0
-InpAtrMinRelative=0
-InpAtrMaxRelative=0
+InpAtrMinRelative=0.60
+InpAtrMaxRelative=2.50
 InpAtrAvgPeriod=100
 InpAtrMinPercent=0.020
 InpAtrMaxPercent=0.350
-InpMinAtrPrice=0
-InpMaxAtrPrice=0
+InpMinAtrPrice=1.20
+InpMaxAtrPrice=14.00
 InpVolumeFactor=1.10
 InpEmaFastTrade=8
 InpEmaSlowTrade=21
@@ -107,17 +108,17 @@ InpNewYorkStart=08:00
 InpNewYorkEnd=12:00
 InpTradeMonday=true
 InpTradeFriday=true
-InpFridayCutoff=15:00
-InpFlatBeforeWeekend=true
+InpFridayCutoff=20:00
+InpFlatBeforeWeekend=false
 InpWeekendFlatTime=19:00
 InpMaxSpreadPrice=0.50
 InpMinMinutesBetween=45
-InpUseDailyQuota=true
+InpUseDailyQuota=false
 InpQuotaFromTime=14:30
 InpQuotaScoreThreshold=62.0
 InpQuotaDominance=20.0
 InpQuotaRiskFactor=0.60
-InpNewsSource=0
+InpNewsSource=3
 InpNewsCurrencies=USD,XAU,ALL
 InpNewsMinutesBefore=30
 InpNewsMinutesAfter=30

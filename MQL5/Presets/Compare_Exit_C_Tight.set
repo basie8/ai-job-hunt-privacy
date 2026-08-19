@@ -34,6 +34,7 @@ InpMaxTradesPerDay=3
 InpMaxConsecLosses=3
 InpLossStreakFactor=0.60
 InpMaxOpenPositions=1
+InpMaxMarginPct=80.0
 InpSlAtrMult=0.90
 InpSwingLookback=12
 InpSwingBufferAtr=0.25

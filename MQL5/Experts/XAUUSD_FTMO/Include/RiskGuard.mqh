@@ -47,6 +47,7 @@ private:
    int               m_maxTradesPerDay;
    int               m_maxConsecutiveLosses;
    double            m_lossStreakRiskFactor;
+   double            m_maxMarginPct;        // cap on free margin a single trade may consume
 
    //--- runtime state
    int               m_tradesToday;
@@ -121,6 +122,7 @@ public:
    double            ProfitPct(void)          const;
    datetime          CurrentDayStart(void)    const { return m_currentDayStart; }
    void              SetCetOffset(const int s)      { m_cetOffsetSec = s; }
+   void              SetMaxMarginPct(const double p) { m_maxMarginPct = MathMax(5.0, MathMin(95.0, p)); }
    void              SetTradingDays(const int d)    { m_tradingDays = MathMax(m_tradingDays, d); }
   };
 
@@ -143,6 +145,7 @@ CRiskGuard::CRiskGuard(void)
    m_maxTradesPerDay      = 3;
    m_maxConsecutiveLosses = 3;
    m_lossStreakRiskFactor = 0.6;
+   m_maxMarginPct         = 80.0;
    m_tradesToday          = 0;
    m_winsToday            = 0;
    m_lossesToday          = 0;
@@ -473,10 +476,16 @@ double CRiskGuard::LotsForRisk(const double riskPercent,
    if(OrderCalcMargin(ORDER_TYPE_BUY, m_symbol, lots, ask, marginRequired))
      {
       double freeMargin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
-      if(marginRequired > freeMargin * 0.5)
+      // The cap is configurable because leverage changes what is reasonable.
+      // On an FTMO Swing account at 1:30 gold margin is 3.3x what it is at
+      // 1:100, so a 50% cap - fine on a normal account - starts rejecting
+      // perfectly ordinary trades. The drawdown guards are the real
+      // constraint here; margin only has to stay clear of a margin call.
+      if(marginRequired > freeMargin * m_maxMarginPct / 100.0)
         {
-         reason = StringFormat("lot %.2f needs %.2f margin, only %.2f free (50%% cap)",
-                               lots, marginRequired, freeMargin);
+         reason = StringFormat("lot %.2f needs %.2f margin, only %.2f free (%.0f%% cap) "
+                               "- low leverage? raise InpMaxMarginPct or cut risk",
+                               lots, marginRequired, freeMargin, m_maxMarginPct);
          return 0.0;
         }
      }

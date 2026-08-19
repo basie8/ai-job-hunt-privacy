@@ -148,6 +148,37 @@ PHASE_PRESETS = [
     'InpMaxTradesPerDay':'2', 'InpUseDailyQuota':'false', 'InpScoreThreshold':'70.0',
   }, "Funded account. No auto-stop, smallest risk, fewer trades, quota off - "
      "on a live payout account there is no deadline to chase."),
+
+ # ---- FTMO SWING variants ---------------------------------------------
+ # A Swing account differs in three ways that matter here: leverage is 1:30
+ # rather than 1:100, positions may be held over the weekend, and there is
+ # no restriction on trading around news. The first is a hard constraint -
+ # gold margin per lot roughly triples, so the default free-margin cap
+ # starts rejecting ordinary trades unless it is raised.
+ ("Phase1_Swing", {
+    'InpProfitTargetPct':'10.0', 'InpRiskPercent':'0.5', 'InpStopAtTarget':'true',
+    'InpSoftDailyLossPct':'2.0', 'InpHardDailyLossPct':'3.0',
+    'InpSoftTotalLossPct':'5.0', 'InpHardTotalLossPct':'7.0',
+    'InpMaxTradesPerDay':'3', 'InpUseDailyQuota':'true', 'InpScoreThreshold':'72.0',
+    'InpMaxMarginPct':'85.0', 'InpFlatBeforeWeekend':'false', 'InpFridayCutoff':'20:00',
+  }, "FTMO SWING Challenge phase 1. Margin cap raised for 1:30, weekend "
+     "flattening off, Friday traded in full."),
+
+ ("Phase2_Swing", {
+    'InpProfitTargetPct':'5.0', 'InpRiskPercent':'0.4', 'InpStopAtTarget':'true',
+    'InpSoftDailyLossPct':'1.8', 'InpHardDailyLossPct':'2.8',
+    'InpSoftTotalLossPct':'4.0', 'InpHardTotalLossPct':'6.0',
+    'InpMaxTradesPerDay':'3', 'InpUseDailyQuota':'true', 'InpScoreThreshold':'72.0',
+    'InpMaxMarginPct':'85.0', 'InpFlatBeforeWeekend':'false', 'InpFridayCutoff':'20:00',
+  }, "FTMO SWING Verification phase 2."),
+
+ ("Funded_Swing", {
+    'InpProfitTargetPct':'100.0', 'InpRiskPercent':'0.3', 'InpStopAtTarget':'false',
+    'InpSoftDailyLossPct':'1.5', 'InpHardDailyLossPct':'2.5',
+    'InpSoftTotalLossPct':'4.0', 'InpHardTotalLossPct':'6.0',
+    'InpMaxTradesPerDay':'2', 'InpUseDailyQuota':'false', 'InpScoreThreshold':'70.0',
+    'InpMaxMarginPct':'80.0', 'InpFlatBeforeWeekend':'false', 'InpFridayCutoff':'20:00',
+  }, "FTMO SWING funded account."),
 ]
 
 # Diagnostic runs that bisect "why has the EA stopped trading".
@@ -274,7 +305,8 @@ for name, ov, why in PHASE_PRESETS:
          "per-phase overrides. Do not hand-edit: regenerate with\n"
          "  python3 tools/make_optimisation_sets.py")
     write_set(f"{OUT}/{name}.set", hdr, {}, ov)
-    print(f"  {name}.set  target {ov['InpProfitTargetPct']}%  risk {ov['InpRiskPercent']}%")
+    _sw = ("   SWING: margin cap %s%%, holds weekends" % ov['InpMaxMarginPct']) if 'Swing' in name else ""
+    print(f"  {name}.set  target {ov['InpProfitTargetPct']}%  risk {ov['InpRiskPercent']}%{_sw}")
 print()
 total=0
 frozen={}

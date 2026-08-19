@@ -329,6 +329,24 @@ bool DescribeAndValidateSymbol(const string symbol)
                (int)stopsLvl, stopsLvl * point, (int)freezeLvl, freezeLvl * point);
    PrintFormat("   current spread %d pts (%.2f price)", (int)spreadPts, spreadPts * point);
 
+   //--- leverage and what it costs to hold a position
+   long   leverage = AccountInfoInteger(ACCOUNT_LEVERAGE);
+   double marginOneLot = 0.0;
+   double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
+   if(OrderCalcMargin(ORDER_TYPE_BUY, symbol, 1.0, ask, marginOneLot) && marginOneLot > 0.0)
+     {
+      double equity   = AccountInfoDouble(ACCOUNT_EQUITY);
+      double maxLots  = (marginOneLot > 0.0 ? equity / marginOneLot : 0.0);
+      PrintFormat("   account leverage 1:%d -> margin %.2f %s per lot",
+                  (int)leverage, marginOneLot, curAcct);
+      PrintFormat("   at current equity %.2f that is %.2f lots of total exposure",
+                  equity, maxLots);
+      if(leverage > 0 && leverage <= 30)
+         Print("[Broker] NOTE: leverage is 1:30 or lower (FTMO Swing). Margin per lot is "
+               "roughly 3x a 1:100 account - if trades are skipped for margin, raise "
+               "InpMaxMarginPct rather than cutting risk.");
+     }
+
    string fills = "";
    if((fillMode & SYMBOL_FILLING_FOK) != 0) fills += "FOK ";
    if((fillMode & SYMBOL_FILLING_IOC) != 0) fills += "IOC ";
@@ -1521,6 +1539,7 @@ private:
    int               m_maxTradesPerDay;
    int               m_maxConsecutiveLosses;
    double            m_lossStreakRiskFactor;
+   double            m_maxMarginPct;        // cap on free margin a single trade may consume
 
    //--- runtime state
    int               m_tradesToday;
@@ -1595,6 +1614,7 @@ public:
    double            ProfitPct(void)          const;
    datetime          CurrentDayStart(void)    const { return m_currentDayStart; }
    void              SetCetOffset(const int s)      { m_cetOffsetSec = s; }
+   void              SetMaxMarginPct(const double p) { m_maxMarginPct = MathMax(5.0, MathMin(95.0, p)); }
    void              SetTradingDays(const int d)    { m_tradingDays = MathMax(m_tradingDays, d); }
   };
 
@@ -1617,6 +1637,7 @@ CRiskGuard::CRiskGuard(void)
    m_maxTradesPerDay      = 3;
    m_maxConsecutiveLosses = 3;
    m_lossStreakRiskFactor = 0.6;
+   m_maxMarginPct         = 80.0;
    m_tradesToday          = 0;
    m_winsToday            = 0;
    m_lossesToday          = 0;
@@ -1947,10 +1968,16 @@ double CRiskGuard::LotsForRisk(const double riskPercent,
    if(OrderCalcMargin(ORDER_TYPE_BUY, m_symbol, lots, ask, marginRequired))
      {
       double freeMargin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
-      if(marginRequired > freeMargin * 0.5)
+      // The cap is configurable because leverage changes what is reasonable.
+      // On an FTMO Swing account at 1:30 gold margin is 3.3x what it is at
+      // 1:100, so a 50% cap - fine on a normal account - starts rejecting
+      // perfectly ordinary trades. The drawdown guards are the real
+      // constraint here; margin only has to stay clear of a margin call.
+      if(marginRequired > freeMargin * m_maxMarginPct / 100.0)
         {
-         reason = StringFormat("lot %.2f needs %.2f margin, only %.2f free (50%% cap)",
-                               lots, marginRequired, freeMargin);
+         reason = StringFormat("lot %.2f needs %.2f margin, only %.2f free (%.0f%% cap) "
+                               "- low leverage? raise InpMaxMarginPct or cut risk",
+                               lots, marginRequired, freeMargin, m_maxMarginPct);
          return 0.0;
         }
      }
@@ -4695,6 +4722,7 @@ input int             InpMaxTradesPerDay     = 3;     // Max trades per day (0 =
 input int             InpMaxConsecLosses     = 3;     // Pause for the day after N losses in a row
 input double          InpLossStreakFactor    = 0.60;  // Risk multiplier per extra consecutive loss
 input int             InpMaxOpenPositions    = 1;     // Max simultaneous positions
+input double          InpMaxMarginPct        = 80.0;  // Max % of free margin one trade may use
 
 input group "=== Exit management (the asymmetry engine) ==="
 input double          InpSlAtrMult           = 1.10;  // Initial stop = ATR x this
@@ -5436,6 +5464,11 @@ bool ValidateInputs(void)
       Print("INPUT ERROR: InpMaxOpenPositions must be at least 1 or the EA can never trade.");
       errors++;
      }
+   if(InpMaxMarginPct < 5.0 || InpMaxMarginPct > 95.0)
+     {
+      PrintFormat("INPUT ERROR: InpMaxMarginPct (%.1f) must be between 5 and 95.", InpMaxMarginPct);
+      errors++;
+     }
 
    //--- guard ladder must be ordered and inside the FTMO limits
    if(InpHardDailyLossPct <= InpSoftDailyLossPct)
@@ -5665,6 +5698,8 @@ int OnInit(void)
                    InpMaxTradesPerDay, InpMaxConsecLosses,
                    InpLossStreakFactor, g_cetOffsetSec))
       return INIT_FAILED;
+
+   g_risk.SetMaxMarginPct(InpMaxMarginPct);
 
    //--- execution
    if(!g_exec.Init(g_symbol, InpTfTrade, InpMagic, InpSlippagePoints, InpVerboseLog))

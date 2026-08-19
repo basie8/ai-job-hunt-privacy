@@ -45,7 +45,7 @@ will measure the wrong thing.
 | Modelling | **Every tick based on real ticks** | anything less will not model partial exits or the trail |
 | Period | **12 months minimum** | see the degrees-of-freedom table below |
 | Deposit | your challenge size | drawdown guards are percentages of it |
-| Leverage | match FTMO (1:100 typical) | affects the margin check |
+| Leverage | **match your account** — 1:100 normal, **1:30 Swing** | at 1:30 gold margin per lot triples; a wrong setting here makes every margin result meaningless |
 | Optimisation | *Disabled* for single runs | |
 | `InpUseManualGmtOffset` | **true**, with your broker's offset | `TimeGMT()` is simulated in the tester |
 
@@ -53,7 +53,8 @@ will measure the wrong thing.
 
 ## Phase 1 — Baseline, and the uptime gate
 
-Run `Phase1_Challenge.set` as a **single test** over your full period.
+Run `Phase1_Challenge.set` — or **`Phase1_Swing.set` on a Swing account** — as a
+**single test** over your full period.
 
 Then analyse it:
 
