@@ -20,7 +20,7 @@
 
 //--- Bump on every release. Printed at init and written into the diagnostic
 //--- file, so "am I running the build I just compiled?" is never a guess.
-#define XFC_BUILD_ID "586a2cb3"   // replaced with a content hash by tools/build_single_file.py
+#define XFC_BUILD_ID "15e08b02"   // replaced with a content hash by tools/build_single_file.py
 
 //+------------------------------------------------------------------+
 //| SINGLE-FILE BUILD                                                |
@@ -5946,6 +5946,27 @@ void WriteDiagnosticFile(void)
   {
    if(!InpWriteDiagnosticFile)
       return;
+
+   // Never during an optimisation. The filename comes from InpRunTag, which is
+   // fixed across every pass, so all passes target one file and the parallel
+   // agents overwrite each other - what survives is whichever agent finished
+   // last, with nothing to say which pass it was. Analysing that file would be
+   // worse than having none, so refuse and say why. The optimisation results
+   // table is the correct source for per-pass metrics; re-run the winning
+   // parameters as a single backtest to get a diagnosis of it.
+   if(MQLInfoInteger(MQL_OPTIMIZATION))
+     {
+      static bool told = false;
+      if(!told)
+        {
+         Print("[Why] optimisation pass - no diagnostics file written. Every pass "
+               "shares InpRunTag and would overwrite the same file. Read the "
+               "optimisation results tab, then re-run the winner as a single "
+               "backtest for a diagnosis.");
+         told = true;
+        }
+      return;
+     }
 
    // FILE_COMMON matters. In the Strategy Tester a plain FileOpen writes into
    // the AGENT's private sandbox (Tester/Agent-.../MQL5/Files), not the
