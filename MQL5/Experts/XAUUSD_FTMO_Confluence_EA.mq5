@@ -20,7 +20,7 @@
 
 //--- Bump on every release. Printed at init and written into the diagnostic
 //--- file, so "am I running the build I just compiled?" is never a guess.
-#define XFC_BUILD_ID "2026.08.19-b7"
+#define XFC_BUILD_ID "ff803a9f"   // replaced with a content hash by tools/build_single_file.py
 
 //+------------------------------------------------------------------+
 //| SINGLE-FILE BUILD                                                |
@@ -5940,7 +5940,12 @@ void WriteDiagnosticFile(void)
    // terminates early on a guard or on the profit target.
    string fname = (StringLen(InpRunTag) > 0
                    ? StringFormat("XFC_diag_%s.csv", InpRunTag)
-                   : "XFC_diagnostics.csv");
+                   : "XFC_diagnostics_UNTAGGED.csv");
+
+   if(StringLen(InpRunTag) == 0)
+      Print("[Why] InpRunTag is empty - writing XFC_diagnostics_UNTAGGED.csv. "
+            "A generated .set file always sets it, so either the preset was not "
+            "loaded or this binary predates the run-tag input.");
 
    int h = FileOpen(fname, FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
    if(h == INVALID_HANDLE)

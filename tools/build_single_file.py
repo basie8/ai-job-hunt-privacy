@@ -87,6 +87,17 @@ def build():
 
 text = build()
 
+# Stamp the build with a hash of its own content. Bumping a version string by
+# hand is a step that gets forgotten - it was, and the diagnostics file then
+# reported the same build id before and after a change, so there was no way to
+# tell a stale binary from a new one. Deriving it from the source cannot be
+# forgotten: any change to any module changes the stamp.
+import re as _re
+_placeholder = '#define XFC_BUILD_ID "dev"'
+_body = text.replace(_placeholder, '#define XFC_BUILD_ID "<stamp>"')
+_stamp = hashlib.sha256(_body.encode()).hexdigest()[:8]
+text = text.replace(_placeholder, f'#define XFC_BUILD_ID "{_stamp}"')
+
 if '--check' in sys.argv:
     cur = open(OUT).read() if os.path.exists(OUT) else None
     if cur != text:
@@ -101,4 +112,4 @@ n = len(text.split('\n'))
 print(f"built {OUT}")
 print(f"  {n:,} lines, {len(text)/1024:.0f} KB")
 print(f"  includes: {len(re.findall(r'^#include', text, re.M))}")
-print(f"  sha256:   {hashlib.sha256(text.encode()).hexdigest()[:16]}")
+print(f"  build id: {_stamp}   <- must match run,build_id in XFC_diag*.csv")
