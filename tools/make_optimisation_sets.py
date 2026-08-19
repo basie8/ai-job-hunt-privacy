@@ -242,6 +242,16 @@ TF_RUNS = [
  ("TF_M30", 'PERIOD_M30', 'PERIOD_H4',  'PERIOD_D1'),
 ]
 
+# What makes any run a SWING run. Applied to a parallel copy of every
+# optimisation stage and comparison, because tuning against the normal-account
+# base and then trading a Swing account fits the parameters to a configuration
+# you will not use: weekend holding and the Friday cutoff both change results.
+SWING_BASE = {
+ 'InpFlatBeforeWeekend':'false',
+ 'InpFridayCutoff':'20:00',
+ 'InpMaxMarginPct':'85.0',
+}
+
 # Never optimised, and the file says why.
 LOCKED = {
  'InpRiskPercent':'risk is a decision, not a fitted parameter - optimising it only finds the largest number',
@@ -320,8 +330,15 @@ for i,(name,opt,why) in enumerate(STAGES, 1):
            "\nRun order matters: freeze this stage's winner into the next stage's\n"
            "file before running it.")
     write_set(f"{OUT}/Optimise_{name}.set", hdr, opt, frozen)
+
+    swing_over = dict(frozen); swing_over.update(SWING_BASE)
+    write_set(f"{OUT}/Optimise_{name}_Swing.set",
+              hdr + "\n\nSWING variant: 1:30 margin cap, holds over weekends,\n"
+                    "Friday traded in full. Use this one on a Swing account.",
+              opt, swing_over)
+
     rng=", ".join(f"{k.replace('Inp','')} {v[0]}->{v[2]}" for k,v in opt.items())
-    print(f"  Optimise_{name}.set   {p:>6,} passes   {rng}")
+    print(f"  Optimise_{name}[_Swing].set   {p:>6,} passes   {rng}")
 
 print()
 for name,tf,mid,hi in TF_RUNS:
@@ -333,10 +350,12 @@ for name,tf,mid,hi in TF_RUNS:
          "its own average, which is dimensionless - it needs no rescaling when\n"
          "the timeframe changes, and none when the gold price changes either.\n"
          "That is the whole reason relative mode is the default.")
-    write_set(f"{OUT}/Compare_{name}.set", hdr, {},
-              {'InpTfTrade':str(ENUMS[tf]), 'InpTfMid':str(ENUMS[mid]),
-               'InpTfHigh':str(ENUMS[hi])})
-    print(f"  Compare_{name}.set     single run   {tf[7:]}/{mid[7:]}/{hi[7:]}"
+    base={'InpTfTrade':str(ENUMS[tf]), 'InpTfMid':str(ENUMS[mid]),
+          'InpTfHigh':str(ENUMS[hi])}
+    write_set(f"{OUT}/Compare_{name}.set", hdr, {}, base)
+    sb=dict(base); sb.update(SWING_BASE)
+    write_set(f"{OUT}/Compare_{name}_Swing.set", hdr + "\n\nSWING variant.", {}, sb)
+    print(f"  Compare_{name}[_Swing].set  single run   {tf[7:]}/{mid[7:]}/{hi[7:]}"
           f"  (relative ATR band, no rescaling needed)")
 
 for name,ov,why in DIAGNOSTIC_RUNS:
@@ -355,7 +374,9 @@ for name,ov,why in EXIT_RUNS:
          "the backtest delivered 0.50 where roughly 1.6 is needed at a 46%\n"
          "win rate.")
     write_set(f"{OUT}/Compare_{name}.set", hdr, {}, ov)
-    print(f"  Compare_{name}.set  single run   {why.split('.')[0]}")
+    sb=dict(ov); sb.update(SWING_BASE)
+    write_set(f"{OUT}/Compare_{name}_Swing.set", hdr + "\n\nSWING variant.", {}, sb)
+    print(f"  Compare_{name}[_Swing].set  single run   {why.split('.')[0]}")
 print()
 
 print(f"\ntotal optimisation passes across all stages: {total:,}")

@@ -14,6 +14,31 @@ python3 tools/audit_static.py                # validates every range
 Never hand-edit a `.set` file — edit the `STAGES` table in the generator and
 rebuild, or the audit will fail and your change will be lost.
 
+> **On a Swing account use the `_Swing` files throughout.** Every stage and
+> comparison has a twin carrying the Swing base — weekend holding on, Friday
+> traded to 20:00 GMT, margin cap 85%. Tuning against the normal-account base
+> and then trading Swing fits the parameters to a configuration you will not
+> use.
+
+## The run order at a glance
+
+| # | Normal account | Swing account | Type |
+|---|---|---|---|
+| 1 | `Phase1_Challenge.set` | `Phase1_Swing.set` | single run — baseline + gate |
+| 2 | `Compare_Exit_A_Scaled.set` | `Compare_Exit_A_Scaled_Swing.set` | single run |
+| 3 | `Compare_Exit_B_Runner.set` | `Compare_Exit_B_Runner_Swing.set` | single run |
+| 4 | `Compare_Exit_C_Tight.set` | `Compare_Exit_C_Tight_Swing.set` | single run |
+| 5 | `Compare_TF_M5.set` | `Compare_TF_M5_Swing.set` | single run |
+| 6 | `Compare_TF_M15.set` | `Compare_TF_M15_Swing.set` | single run |
+| 7 | `Compare_TF_M30.set` | `Compare_TF_M30_Swing.set` | single run |
+| 8 | `Optimise_Stage1_Signal.set` | `Optimise_Stage1_Signal_Swing.set` | optimise, 1,056 |
+| 9 | `Optimise_Stage2_Exits.set` | `Optimise_Stage2_Exits_Swing.set` | optimise, 3,969 |
+| 10 | `Optimise_Stage3_Volatility.set` | `Optimise_Stage3_Volatility_Swing.set` | optimise, 616 |
+| 11 | `Optimise_Stage4_EntryQuality.set` | `Optimise_Stage4_EntryQuality_Swing.set` | optimise, 1,225 |
+| 12 | `Optimise_Stage5_Cadence.set` | `Optimise_Stage5_Cadence_Swing.set` | optimise, 40 |
+
+Diagnostics (`Diagnose_1..3`) are for use only when step 1 fails its gate.
+
 ---
 
 ## Phase 0 — Install and compile
