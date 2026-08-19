@@ -246,6 +246,23 @@ TF_RUNS = [
 # optimisation stage and comparison, because tuning against the normal-account
 # base and then trading a Swing account fits the parameters to a configuration
 # you will not use: weekend holding and the Friday cutoff both change results.
+def load_frozen():
+    """Winners carried forward from earlier stages. Hand-maintained, because
+    it is the one thing a human decides; everything else is generated."""
+    path='tools/frozen_params.txt'
+    out={}
+    if not os.path.exists(path):
+        return out
+    for line in open(path):
+        line=line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        k,v=line.split('=',1)
+        out[k.strip()]=v.strip()
+    return out
+
+FROZEN = load_frozen()
+
 SWING_BASE = {
  'InpFlatBeforeWeekend':'false',
  'InpFridayCutoff':'20:00',
@@ -329,9 +346,10 @@ for i,(name,opt,why) in enumerate(STAGES, 1):
            "value shown, including every risk and compliance setting.\n"
            "\nRun order matters: freeze this stage's winner into the next stage's\n"
            "file before running it.")
-    write_set(f"{OUT}/Optimise_{name}.set", hdr, opt, frozen)
+    base_over = dict(frozen); base_over.update(FROZEN)
+    write_set(f"{OUT}/Optimise_{name}.set", hdr, opt, base_over)
 
-    swing_over = dict(frozen); swing_over.update(SWING_BASE)
+    swing_over = dict(base_over); swing_over.update(SWING_BASE)
     write_set(f"{OUT}/Optimise_{name}_Swing.set",
               hdr + "\n\nSWING variant: 1:30 margin cap, holds over weekends,\n"
                     "Friday traded in full. Use this one on a Swing account.",
@@ -350,8 +368,9 @@ for name,tf,mid,hi in TF_RUNS:
          "its own average, which is dimensionless - it needs no rescaling when\n"
          "the timeframe changes, and none when the gold price changes either.\n"
          "That is the whole reason relative mode is the default.")
-    base={'InpTfTrade':str(ENUMS[tf]), 'InpTfMid':str(ENUMS[mid]),
-          'InpTfHigh':str(ENUMS[hi])}
+    base=dict(FROZEN)
+    base.update({'InpTfTrade':str(ENUMS[tf]), 'InpTfMid':str(ENUMS[mid]),
+                 'InpTfHigh':str(ENUMS[hi])})   # the TF run owns the timeframe
     write_set(f"{OUT}/Compare_{name}.set", hdr, {}, base)
     sb=dict(base); sb.update(SWING_BASE)
     write_set(f"{OUT}/Compare_{name}_Swing.set", hdr + "\n\nSWING variant.", {}, sb)
@@ -378,6 +397,13 @@ for name,ov,why in EXIT_RUNS:
     write_set(f"{OUT}/Compare_{name}_Swing.set", hdr + "\n\nSWING variant.", {}, sb)
     print(f"  Compare_{name}[_Swing].set  single run   {why.split('.')[0]}")
 print()
+
+if FROZEN:
+    print(f"\nfrozen and carried into every downstream file ({len(FROZEN)} value(s)):")
+    for k,v in sorted(FROZEN.items()):
+        print(f"   {k} = {v}")
+else:
+    print("\nnothing frozen yet - edit tools/frozen_params.txt after each step")
 
 print(f"\ntotal optimisation passes across all stages: {total:,}")
 print(f"locked from optimisation: {len(LOCKED)} risk/compliance inputs, "
