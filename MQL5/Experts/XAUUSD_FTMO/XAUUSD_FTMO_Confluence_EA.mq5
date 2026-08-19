@@ -255,6 +255,9 @@ long     g_vetoGate[GATE_REASON_COUNT];
 long     g_vetoGateDay[GATE_REASON_COUNT];
 long     g_barsSeen      = 0;
 long     g_barsSeenDay   = 0;
+long     g_ticksSeen     = 0;   // ticks the EA was called on at all
+long     g_ticksSeenDay  = 0;
+datetime g_lastSummary   = 0;
 datetime g_vetoDayStamp  = 0;
 datetime g_lastBarTime  = 0;
 datetime g_lastEntryTime = 0;
@@ -1149,6 +1152,15 @@ void OnTimer(void)
    if(InpReDetectOffset || g_cetPending)
       RefreshTimeAlignment(false);
 
+   // Report periodically even when OnTick keeps returning early, so a long
+   // quiet stretch produces evidence rather than nothing.
+   datetime nowT = TimeTradeServer();
+   if(g_lastSummary == 0 || (nowT - g_lastSummary) >= 6 * 3600)
+     {
+      LogVetoSummary(false);
+      g_lastSummary = nowT;
+     }
+
    g_news.Refresh(false);
    AccSweep();
    RefreshIdleStatus(TimeTradeServer());
@@ -1171,8 +1183,9 @@ void VetoRollDayIfNeeded(const datetime now)
    if(g_vetoDayStamp > 0 && g_barsSeenDay > 0)
       LogVetoSummary(true);
 
-   g_vetoDayStamp = d;
-   g_barsSeenDay  = 0;
+   g_vetoDayStamp  = d;
+   g_barsSeenDay   = 0;
+   g_ticksSeenDay  = 0;
    ArrayInitialize(g_vetoStatusDay, 0);
    ArrayInitialize(g_vetoGateDay, 0);
   }
@@ -1204,27 +1217,41 @@ void CountGate(const ENUM_GATE_REASON g)
 //+------------------------------------------------------------------+
 void LogVetoSummary(const bool daily)
   {
-   long bars = (daily ? g_barsSeenDay : g_barsSeen);
-   if(bars <= 0)
-      return;
+   long bars  = (daily ? g_barsSeenDay  : g_barsSeen);
+   long ticks = (daily ? g_ticksSeenDay : g_ticksSeen);
 
-   PrintFormat("[Why] %s: %d evaluated bars, %d trades taken.",
-               (daily ? "today" : "since start"), (int)bars,
-               (daily ? g_risk.TradesToday() : (long)g_stats.Trades()));
+   // A silent period is exactly what needs explaining, so this prints even
+   // when nothing happened. Zero ticks and zero bars mean very different
+   // things: no ticks is missing history, ticks without bars is a filter.
+   PrintFormat("[Why] %s: %d ticks, %d evaluated bars, %d trades.",
+               (daily ? "today" : "since start"), (int)ticks, (int)bars,
+               (daily ? (long)g_risk.TradesToday() : (long)g_stats.Trades()));
+
+   if(ticks <= 0)
+     {
+      Print("        no ticks at all - the tester has no price data for this period, "
+            "or the chart is not receiving quotes.");
+      return;
+     }
+   if(bars <= 0)
+     {
+      Print("        ticks arrived but no bar was ever evaluated - every one was "
+            "rejected before the signal check. The reasons below say which.");
+     }
 
    for(int i = 0; i < 9; i++)
      {
       long c = (daily ? g_vetoStatusDay[i] : g_vetoStatus[i]);
       if(c > 0 && (ENUM_EA_STATUS)i != EA_STATUS_ACTIVE)
-         PrintFormat("        %-22s %6d  (%.0f%%)", StatusLabel((ENUM_EA_STATUS)i),
-                     (int)c, 100.0 * c / bars);
+         PrintFormat("        %-22s %6d  (%.0f%% of ticks)", StatusLabel((ENUM_EA_STATUS)i),
+                     (int)c, 100.0 * c / MathMax(1, ticks));
      }
    for(int g = 1; g < GATE_REASON_COUNT; g++)
      {
       long c = (daily ? g_vetoGateDay[g] : g_vetoGate[g]);
       if(c > 0)
-         PrintFormat("        gate: %-16s %6d  (%.0f%%)", GateLabel((ENUM_GATE_REASON)g),
-                     (int)c, 100.0 * c / bars);
+         PrintFormat("        gate: %-16s %6d  (%.0f%% of bars)", GateLabel((ENUM_GATE_REASON)g),
+                     (int)c, 100.0 * c / MathMax(1, bars));
      }
   }
 
@@ -1244,9 +1271,11 @@ string TopVetoReason(void)
    for(int g = 1; g < GATE_REASON_COUNT; g++)
       if(g_vetoGate[g] > best) { best = g_vetoGate[g]; label = GateLabel((ENUM_GATE_REASON)g); }
 
-   if(best <= 0 || g_barsSeen <= 0)
+   if(g_ticksSeen > 0 && g_barsSeen <= 0)
+      return "no bar ever reached the signal check";
+   if(best <= 0 || g_ticksSeen <= 0)
       return "nothing blocking";
-   return StringFormat("%s (%.0f%% of bars)", label, 100.0 * best / g_barsSeen);
+   return StringFormat("%s (%.0f%% of ticks)", label, 100.0 * best / MathMax(1, g_ticksSeen));
   }
 
 //+------------------------------------------------------------------+
@@ -1269,6 +1298,14 @@ void SetStatus(const ENUM_EA_STATUS st, const string detail)
 void OnTick(void)
   {
    datetime now = TimeTradeServer();
+
+   // Counted FIRST. Previously the day rollover sat below eight possible
+   // early returns, so on a day the EA never traded the summary never
+   // printed - the diagnostic was silent in exactly the case it existed
+   // to explain.
+   VetoRollDayIfNeeded(now);
+   g_ticksSeen++;
+   g_ticksSeenDay++;
 
    g_risk.OnTick(now);
 
@@ -1372,11 +1409,17 @@ void OnTick(void)
 
    //--- 9. one evaluation per closed bar
    datetime barTime = iTime(g_symbol, InpTfTrade, 0);
+   if(barTime <= 0)
+     {
+      // no series data for this bar - do not latch it, or a single gap would
+      // block every future evaluation
+      SetStatus(EA_STATUS_ACTIVE, "no bar data for the execution timeframe");
+      return;
+     }
    if(barTime == g_lastBarTime)
       return;
    g_lastBarTime = barTime;
 
-   VetoRollDayIfNeeded(now);
    g_barsSeen++;
    g_barsSeenDay++;
 
@@ -1830,8 +1873,9 @@ void UpdateDashboard(void)
 
    //================= why not trading =============================
    g_dash.Section("WHY NOT TRADING");
-   g_dash.Row("Bars evaluated",
-              StringFormat("%d total, %d today", (int)g_barsSeen, (int)g_barsSeenDay));
+   g_dash.Row("Ticks / bars",
+              StringFormat("%d ticks, %d bars evaluated", (int)g_ticksSeen, (int)g_barsSeen),
+              (g_ticksSeen > 0 && g_barsSeen == 0 ? AURUM_BAD : AURUM_TEXT));
    g_dash.Row("Dominant blocker", TopVetoReason(),
               (g_barsSeen > 200 && g_stats.Trades() == 0 ? AURUM_BAD : AURUM_TEXT));
    g_dash.Row("ATR band",
