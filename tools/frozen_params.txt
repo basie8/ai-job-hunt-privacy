@@ -1,0 +1,53 @@
+# FROZEN PARAMETERS - the winners carried forward between stages.
+#
+# This is the ONE file you edit by hand. Everything in MQL5/Presets/ is
+# generated, and hand-edits there are discarded on the next build.
+#
+# Workflow: after each step, copy the winning values in here, then run
+#     python3 tools/make_optimisation_sets.py
+# and every DOWNSTREAM file picks them up automatically.
+#
+#   after the exit comparison   -> the winning exit block
+#   after the timeframe run     -> InpTfTrade / InpTfMid / InpTfHigh
+#   after Stage 1               -> score threshold, margin, ADX floor
+#   after Stage 2               -> stop and target geometry
+#   ... and so on
+#
+# Applied to: Compare_TF_* and every Optimise_Stage* file (and their _Swing
+# twins). NOT applied to Compare_Exit_*, which exist to define the exits.
+#
+# Format: one Inp<Name>=<value> per line. Enum values are integers -
+# PERIOD_M5=5, PERIOD_M15=15, PERIOD_M30=30, PERIOD_H1=16385,
+# PERIOD_H4=16388, PERIOD_D1=16408.
+#
+# Nothing is frozen yet. Uncomment and fill in as you go.
+
+# ---- after the exit comparison (step 2-4) --------------------------------
+# NOT frozen. A, B and C were statistically indistinguishable over the full
+# period - PF 1.01 / 1.02 / 0.99, every expectancy within noise of zero. The
+# default (A: scaled exit) is retained because nothing beat it.
+# InpUsePartial=true
+# InpPartialPct=40.0
+# InpTp1R=1.00
+# InpTp2R=2.20
+# InpSlAtrMult=1.10
+# InpTrailStartR=1.05
+# InpTrailAtrMult=1.20
+# InpBreakevenLockR=0.05
+
+# ---- after the timeframe comparison (step 5-7) ---------------------------
+# FROZEN: M30 won. Full-period results, same exits, same period:
+#   M5   PF 0.60  exp -0.26R  -4.98%  (stopped on the 5% loss guard, 18 days)
+#   M15  PF 1.01  exp -0.01R  +0.62%
+#   M30  PF 1.11  exp +0.05R  +4.24%   <- best, and the only positive expectancy
+InpTfTrade=30
+InpTfMid=16388
+InpTfHigh=16408
+
+# ---- after Stage 1 (step 8) ---------------------------------------------
+# InpScoreThreshold=72.0
+# InpDominanceMargin=30.0
+# InpAdxMin=20.0
+
+# ---- after Stage 2 (step 9) ---------------------------------------------
+# (stop and target geometry, if different from the exit comparison winner)

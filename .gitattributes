@@ -1,0 +1,3 @@
+# MetaTrader preset files are CRLF because that is what the terminal writes.
+# Pin them so no checkout setting rewrites the line endings under us.
+*.set -text
