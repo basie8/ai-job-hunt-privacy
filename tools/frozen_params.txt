@@ -23,6 +23,9 @@
 # Nothing is frozen yet. Uncomment and fill in as you go.
 
 # ---- after the exit comparison (step 2-4) --------------------------------
+# NOT frozen. A, B and C were statistically indistinguishable over the full
+# period - PF 1.01 / 1.02 / 0.99, every expectancy within noise of zero. The
+# default (A: scaled exit) is retained because nothing beat it.
 # InpUsePartial=true
 # InpPartialPct=40.0
 # InpTp1R=1.00
@@ -33,9 +36,13 @@
 # InpBreakevenLockR=0.05
 
 # ---- after the timeframe comparison (step 5-7) ---------------------------
-# InpTfTrade=15
-# InpTfMid=16385
-# InpTfHigh=16388
+# FROZEN: M30 won. Full-period results, same exits, same period:
+#   M5   PF 0.60  exp -0.26R  -4.98%  (stopped on the 5% loss guard, 18 days)
+#   M15  PF 1.01  exp -0.01R  +0.62%
+#   M30  PF 1.11  exp +0.05R  +4.24%   <- best, and the only positive expectancy
+InpTfTrade=30
+InpTfMid=16388
+InpTfHigh=16408
 
 # ---- after Stage 1 (step 8) ---------------------------------------------
 # InpScoreThreshold=72.0
