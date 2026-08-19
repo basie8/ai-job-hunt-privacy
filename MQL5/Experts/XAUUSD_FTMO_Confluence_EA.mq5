@@ -4845,6 +4845,7 @@ input int             InpDashFontSize        = 8;        // Console font size
 input bool            InpShowParamsBlock     = false;    // Start with the parameter block open
 input bool            InpShowMetricsBlock    = true;     // Start with the metrics block open
 input bool            InpRebuildStatsOnInit  = true;     // Rebuild metrics from account history
+input bool            InpWriteDiagnosticFile = true;     // Write XFC_diagnostics.csv on exit
 input int             InpStatsHistoryDays    = 90;       // How far back to rebuild (days)
 
 //+------------------------------------------------------------------+
@@ -5763,6 +5764,7 @@ void OnDeinit(const int reason)
   {
    EventKillTimer();
    LogVetoSummary(false);
+   WriteDiagnosticFile();
    g_dash.Destroy();
    PrintFormat("=== EA stopped (reason %d) ===", reason);
   }
@@ -5876,6 +5878,64 @@ void LogVetoSummary(const bool daily)
          PrintFormat("        gate: %-16s %6d  (%.0f%% of bars)", GateLabel((ENUM_GATE_REASON)g),
                      (int)c, 100.0 * c / MathMax(1, bars));
      }
+  }
+
+//+------------------------------------------------------------------+
+//| Writes the whole diagnosis to MQL5/Files/XFC_diagnostics.csv.    |
+//|                                                                  |
+//| The tester journal holds this too, but a file is far easier to   |
+//| retrieve and to send on. Three backtests in a row were reported  |
+//| from the equity curve alone, which cannot show WHY the EA was    |
+//| idle - only that it was.                                         |
+//+------------------------------------------------------------------+
+void WriteDiagnosticFile(void)
+  {
+   if(!InpWriteDiagnosticFile)
+      return;
+
+   int h = FileOpen("XFC_diagnostics.csv", FILE_WRITE | FILE_CSV | FILE_ANSI, ',');
+   if(h == INVALID_HANDLE)
+     {
+      PrintFormat("[Why] could not write the diagnostic file (error %d)", GetLastError());
+      return;
+     }
+
+   FileWrite(h, "section", "item", "count", "pct", "note");
+   FileWrite(h, "run", "symbol", g_symbol, "", EnumToString(InpTfTrade));
+   FileWrite(h, "run", "ticks_seen", (int)g_ticksSeen, "",
+             (g_ticksSeen == 0 ? "NO PRICE DATA AT ALL for this period" : ""));
+   FileWrite(h, "run", "bars_evaluated", (int)g_barsSeen, "",
+             (g_ticksSeen > 0 && g_barsSeen == 0
+              ? "ticks arrived but every bar was rejected before the signal check" : ""));
+   FileWrite(h, "run", "trades_closed", (int)g_stats.Trades(), "", "");
+   FileWrite(h, "run", "trading_days", (int)g_risk.TradingDays(), "", "FTMO minimum is 4");
+   FileWrite(h, "run", "server_offset_h", (int)(g_gmtOffsetSec / 3600), "",
+             (g_offsetPlausible ? "auto-detected" : "DETECTION FAILED - set it manually"));
+   FileWrite(h, "run", "account_leverage", (int)AccountInfoInteger(ACCOUNT_LEVERAGE), "",
+             "1:30 = FTMO Swing, 1:100 = normal");
+   FileWrite(h, "run", "atr_band_mode", (int)InpAtrBandMode, "",
+             "0 relative, 1 percent, 2 absolute");
+   FileWrite(h, "run", "news_events_loaded", (int)g_news.EventCount(), "", g_news.LastError());
+
+   for(int i = 0; i < 9; i++)
+      if(g_vetoStatus[i] > 0)
+         FileWrite(h, "status", StatusLabel((ENUM_EA_STATUS)i), (int)g_vetoStatus[i],
+                   DoubleToString(100.0 * g_vetoStatus[i] / MathMax(1, g_ticksSeen), 1), "% of ticks");
+
+   for(int g = 1; g < GATE_REASON_COUNT; g++)
+      if(g_vetoGate[g] > 0)
+         FileWrite(h, "gate", GateLabel((ENUM_GATE_REASON)g), (int)g_vetoGate[g],
+                   DoubleToString(100.0 * g_vetoGate[g] / MathMax(1, g_barsSeen), 1), "% of bars");
+
+   FileWrite(h, "metrics", "win_rate_pct", DoubleToString(g_stats.WinRate(), 1), "", "");
+   FileWrite(h, "metrics", "profit_factor", DoubleToString(g_stats.ProfitFactor(), 2), "", "");
+   FileWrite(h, "metrics", "payoff_ratio", DoubleToString(g_stats.PayoffRatio(), 2), "",
+             "needs ~1.6 at a 45% win rate");
+   FileWrite(h, "metrics", "expectancy_R", DoubleToString(g_stats.ExpectancyR(), 2), "",
+             StringFormat("n=%d", g_stats.RSample()));
+
+   FileClose(h);
+   Print("[Why] diagnosis written to MQL5/Files/XFC_diagnostics.csv");
   }
 
 //+------------------------------------------------------------------+

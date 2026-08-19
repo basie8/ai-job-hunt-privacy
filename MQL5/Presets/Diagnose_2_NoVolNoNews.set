@@ -134,4 +134,5 @@ InpDashFontSize=8
 InpShowParamsBlock=false
 InpShowMetricsBlock=true
 InpRebuildStatsOnInit=true
+InpWriteDiagnosticFile=true
 InpStatsHistoryDays=90
