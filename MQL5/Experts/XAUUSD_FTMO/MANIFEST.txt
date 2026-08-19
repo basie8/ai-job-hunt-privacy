@@ -1,17 +1,24 @@
-# File manifest for MQL5/Experts/XAUUSD_FTMO/
+# File manifest
 #
-# Copy the ENTIRE folder into <Terminal Data Folder>/MQL5/Experts/.
-# A new .mq5 next to stale .mqh files is the single most common cause of
-# a wall of 'undeclared identifier' compile errors.
+# INSTALL: copy the single file
+#     MQL5/Experts/XAUUSD_FTMO_Confluence_EA.mq5
+# into <Terminal Data Folder>/MQL5/Experts/ and compile. It has no
+# includes of any kind - not the project headers, not the MQL5 Standard
+# Library - so there is nothing else to copy and nothing to keep in step.
 #
-# Verify a copy:  python3 tools/verify_manifest.py <path-to-XAUUSD_FTMO>
+# The XAUUSD_FTMO/ folder below is the modular SOURCE, kept for review and
+# testing. The single file is generated from it by
+#     python3 tools/build_single_file.py
+#
+# Verify a copy:  python3 tools/verify_manifest.py <path>
 
-68ec12be74c02fd4  Include/ConfluenceEngine.mqh
-53d2c01a1834b77a  Include/CoreDefs.mqh
-621063ac75bfd9b9  Include/Dashboard.mqh
-ca64283dca45ace3  Include/NewsFilter.mqh
-587a72819c498f4c  Include/RiskGuard.mqh
-3ece6609da1ad0ca  Include/Statistics.mqh
-8916dc006da59f22  Include/TimeZones.mqh
-a66f8c18f2f7ee0f  Include/TradeExecutor.mqh
-6a3ef67976ec0a4b  XAUUSD_FTMO_Confluence_EA.mq5
+6c4188abc29696ac  MQL5/Experts/XAUUSD_FTMO_Confluence_EA.mq5
+68ec12be74c02fd4  MQL5/Experts/XAUUSD_FTMO/Include/ConfluenceEngine.mqh
+53d2c01a1834b77a  MQL5/Experts/XAUUSD_FTMO/Include/CoreDefs.mqh
+621063ac75bfd9b9  MQL5/Experts/XAUUSD_FTMO/Include/Dashboard.mqh
+ca64283dca45ace3  MQL5/Experts/XAUUSD_FTMO/Include/NewsFilter.mqh
+587a72819c498f4c  MQL5/Experts/XAUUSD_FTMO/Include/RiskGuard.mqh
+3ece6609da1ad0ca  MQL5/Experts/XAUUSD_FTMO/Include/Statistics.mqh
+8916dc006da59f22  MQL5/Experts/XAUUSD_FTMO/Include/TimeZones.mqh
+fdc63cd64cc35e7b  MQL5/Experts/XAUUSD_FTMO/Include/TradeExecutor.mqh
+6a3ef67976ec0a4b  MQL5/Experts/XAUUSD_FTMO/XAUUSD_FTMO_Confluence_EA.mq5

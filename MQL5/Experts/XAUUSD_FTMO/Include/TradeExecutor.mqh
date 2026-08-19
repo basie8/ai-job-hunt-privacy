@@ -30,16 +30,280 @@
 //--- next to a stale .mqh fails with one named error instead of forty.
 #define XFC_V_TRADEEXEC_3
 
-#include <Trade\Trade.mqh>
-#include <Trade\PositionInfo.mqh>
 #include "CoreDefs.mqh"
+
+//+------------------------------------------------------------------+
+//| SELF-CONTAINED TRADE LAYER                                       |
+//|                                                                  |
+//| Replaces <Trade\Trade.mqh> and <Trade\PositionInfo.mqh> so the    |
+//| EA compiles with no include outside its own source. The Standard |
+//| Library ships with every terminal, but it is still code this EA  |
+//| does not control: its behaviour has shifted across builds, and a |
+//| user with a modified copy under MQL5/Include gets a silently     |
+//| different EA. Both classes expose only the members this EA       |
+//| actually used, so the call sites are unchanged.                  |
+//+------------------------------------------------------------------+
+class CRawPosition
+  {
+private:
+   ulong             m_ticket;
+public:
+                     CRawPosition(void) { m_ticket = 0; }
+
+   //--- both selectors make the position current for the getters below,
+   //--- exactly as CPositionInfo did
+   bool              SelectByIndex(const int index)
+     {
+      ulong t = PositionGetTicket(index);
+      if(t == 0)
+         return false;
+      m_ticket = t;
+      return true;
+     }
+   bool              SelectByTicket(const ulong ticket)
+     {
+      if(!PositionSelectByTicket(ticket))
+         return false;
+      m_ticket = ticket;
+      return true;
+     }
+
+   ulong             Ticket(void)       const { return m_ticket; }
+   string            Symbol(void)       const { return PositionGetString(POSITION_SYMBOL); }
+   long              Magic(void)        const { return PositionGetInteger(POSITION_MAGIC); }
+   long              PositionType(void) const { return PositionGetInteger(POSITION_TYPE); }
+   double            Volume(void)       const { return PositionGetDouble(POSITION_VOLUME); }
+   double            PriceOpen(void)    const { return PositionGetDouble(POSITION_PRICE_OPEN); }
+   double            StopLoss(void)     const { return PositionGetDouble(POSITION_SL); }
+   double            TakeProfit(void)   const { return PositionGetDouble(POSITION_TP); }
+   double            PriceCurrent(void) const { return PositionGetDouble(POSITION_PRICE_CURRENT); }
+  };
+
+//+------------------------------------------------------------------+
+class CRawTrade
+  {
+private:
+   ulong             m_magic;
+   ulong             m_deviation;
+   ENUM_ORDER_TYPE_FILLING m_filling;
+   MqlTradeResult    m_res;
+
+   bool              Send(MqlTradeRequest &req);
+
+public:
+                     CRawTrade(void);
+
+   void              SetExpertMagicNumber(const ulong m) { m_magic = m; }
+   void              SetDeviationInPoints(const ulong d) { m_deviation = d; }
+   void              SetTypeFillingBySymbol(const string symbol);
+
+   bool              Buy(const double volume, const string symbol, const double price,
+                         const double sl, const double tp, const string comment);
+   bool              Sell(const double volume, const string symbol, const double price,
+                          const double sl, const double tp, const string comment);
+   bool              PositionModify(const ulong ticket, const double sl, const double tp);
+   bool              PositionClose(const ulong ticket);
+   bool              PositionClosePartial(const ulong ticket, const double volume);
+
+   uint              ResultRetcode(void) const { return m_res.retcode; }
+   ulong             ResultDeal(void)    const { return m_res.deal; }
+   ulong             ResultOrder(void)   const { return m_res.order; }
+   double            ResultPrice(void)   const { return m_res.price; }
+   string            ResultRetcodeDescription(void) const;
+  };
+
+//+------------------------------------------------------------------+
+CRawTrade::CRawTrade(void)
+  {
+   m_magic     = 0;
+   m_deviation = 30;
+   m_filling   = ORDER_FILLING_FOK;
+   ZeroMemory(m_res);
+  }
+
+//+------------------------------------------------------------------+
+//| Picks a filling mode the symbol actually accepts. Sending an     |
+//| unsupported one is retcode 10030 and no trade.                   |
+//+------------------------------------------------------------------+
+void CRawTrade::SetTypeFillingBySymbol(const string symbol)
+  {
+   long mask = SymbolInfoInteger(symbol, SYMBOL_FILLING_MODE);
+
+   if((mask & SYMBOL_FILLING_FOK) != 0)
+      m_filling = ORDER_FILLING_FOK;
+   else
+      if((mask & SYMBOL_FILLING_IOC) != 0)
+         m_filling = ORDER_FILLING_IOC;
+      else
+         m_filling = ORDER_FILLING_RETURN;
+  }
+
+//+------------------------------------------------------------------+
+bool CRawTrade::Send(MqlTradeRequest &req)
+  {
+   ZeroMemory(m_res);
+   ResetLastError();
+
+   if(!OrderSend(req, m_res))
+     {
+      if(m_res.retcode == 0)
+         m_res.retcode = (uint)GetLastError();
+      return false;
+     }
+
+   return (m_res.retcode == TRADE_RETCODE_DONE ||
+           m_res.retcode == TRADE_RETCODE_PLACED ||
+           m_res.retcode == TRADE_RETCODE_DONE_PARTIAL);
+  }
+
+//+------------------------------------------------------------------+
+bool CRawTrade::Buy(const double volume, const string symbol, const double price,
+                    const double sl, const double tp, const string comment)
+  {
+   MqlTradeRequest req;
+   ZeroMemory(req);
+   req.action       = TRADE_ACTION_DEAL;
+   req.symbol       = symbol;
+   req.volume       = volume;
+   req.type         = ORDER_TYPE_BUY;
+   req.price        = (price > 0.0 ? price : SymbolInfoDouble(symbol, SYMBOL_ASK));
+   req.sl           = sl;
+   req.tp           = tp;
+   req.deviation    = m_deviation;
+   req.magic        = m_magic;
+   req.comment      = comment;
+   req.type_filling = m_filling;
+   return Send(req);
+  }
+
+//+------------------------------------------------------------------+
+bool CRawTrade::Sell(const double volume, const string symbol, const double price,
+                     const double sl, const double tp, const string comment)
+  {
+   MqlTradeRequest req;
+   ZeroMemory(req);
+   req.action       = TRADE_ACTION_DEAL;
+   req.symbol       = symbol;
+   req.volume       = volume;
+   req.type         = ORDER_TYPE_SELL;
+   req.price        = (price > 0.0 ? price : SymbolInfoDouble(symbol, SYMBOL_BID));
+   req.sl           = sl;
+   req.tp           = tp;
+   req.deviation    = m_deviation;
+   req.magic        = m_magic;
+   req.comment      = comment;
+   req.type_filling = m_filling;
+   return Send(req);
+  }
+
+//+------------------------------------------------------------------+
+bool CRawTrade::PositionModify(const ulong ticket, const double sl, const double tp)
+  {
+   if(!PositionSelectByTicket(ticket))
+      return false;
+
+   MqlTradeRequest req;
+   ZeroMemory(req);
+   req.action   = TRADE_ACTION_SLTP;
+   req.position = ticket;
+   req.symbol   = PositionGetString(POSITION_SYMBOL);
+   req.sl       = sl;
+   req.tp       = tp;
+   req.magic    = m_magic;
+   return Send(req);
+  }
+
+//+------------------------------------------------------------------+
+//| Closes 'volume' of a position by sending the opposing deal.      |
+//| A volume of 0 means the whole position.                          |
+//+------------------------------------------------------------------+
+bool CRawTrade::PositionClosePartial(const ulong ticket, const double volume)
+  {
+   if(!PositionSelectByTicket(ticket))
+      return false;
+
+   string symbol = PositionGetString(POSITION_SYMBOL);
+   long   type   = PositionGetInteger(POSITION_TYPE);
+   double open   = PositionGetDouble(POSITION_VOLUME);
+   double vol    = (volume > 0.0 ? MathMin(volume, open) : open);
+
+   MqlTradeRequest req;
+   ZeroMemory(req);
+   req.action       = TRADE_ACTION_DEAL;
+   req.position     = ticket;
+   req.symbol       = symbol;
+   req.volume       = vol;
+   req.deviation    = m_deviation;
+   req.magic        = m_magic;
+   req.type_filling = m_filling;
+
+   if(type == POSITION_TYPE_BUY)
+     {
+      req.type  = ORDER_TYPE_SELL;
+      req.price = SymbolInfoDouble(symbol, SYMBOL_BID);
+     }
+   else
+     {
+      req.type  = ORDER_TYPE_BUY;
+      req.price = SymbolInfoDouble(symbol, SYMBOL_ASK);
+     }
+
+   return Send(req);
+  }
+
+//+------------------------------------------------------------------+
+bool CRawTrade::PositionClose(const ulong ticket)
+  {
+   return PositionClosePartial(ticket, 0.0);
+  }
+
+//+------------------------------------------------------------------+
+string CRawTrade::ResultRetcodeDescription(void) const
+  {
+   switch(m_res.retcode)
+     {
+      case TRADE_RETCODE_REQUOTE:            return "requote";
+      case TRADE_RETCODE_REJECT:             return "request rejected";
+      case TRADE_RETCODE_CANCEL:             return "cancelled by trader";
+      case TRADE_RETCODE_PLACED:             return "order placed";
+      case TRADE_RETCODE_DONE:               return "done";
+      case TRADE_RETCODE_DONE_PARTIAL:       return "partially filled";
+      case TRADE_RETCODE_ERROR:              return "request processing error";
+      case TRADE_RETCODE_TIMEOUT:            return "timed out";
+      case TRADE_RETCODE_INVALID:            return "invalid request";
+      case TRADE_RETCODE_INVALID_VOLUME:     return "invalid volume";
+      case TRADE_RETCODE_INVALID_PRICE:      return "invalid price";
+      case TRADE_RETCODE_INVALID_STOPS:      return "invalid stops (inside the broker stop level)";
+      case TRADE_RETCODE_TRADE_DISABLED:     return "trading disabled";
+      case TRADE_RETCODE_MARKET_CLOSED:      return "market closed";
+      case TRADE_RETCODE_NO_MONEY:           return "insufficient funds";
+      case TRADE_RETCODE_PRICE_CHANGED:      return "price changed";
+      case TRADE_RETCODE_PRICE_OFF:          return "no quotes to process the request";
+      case TRADE_RETCODE_INVALID_EXPIRATION: return "invalid expiration";
+      case TRADE_RETCODE_ORDER_CHANGED:      return "order state changed";
+      case TRADE_RETCODE_TOO_MANY_REQUESTS:  return "too many requests";
+      case TRADE_RETCODE_NO_CHANGES:         return "no changes in the request";
+      case TRADE_RETCODE_SERVER_DISABLES_AT: return "autotrading disabled by the server";
+      case TRADE_RETCODE_CLIENT_DISABLES_AT: return "autotrading disabled by the terminal";
+      case TRADE_RETCODE_LOCKED:             return "request locked for processing";
+      case TRADE_RETCODE_FROZEN:             return "position or order frozen";
+      case TRADE_RETCODE_INVALID_FILL:       return "unsupported filling mode";
+      case TRADE_RETCODE_CONNECTION:         return "no connection to the trade server";
+      case TRADE_RETCODE_LIMIT_VOLUME:       return "volume limit for the symbol reached";
+      case TRADE_RETCODE_POSITION_CLOSED:    return "position already closed";
+      case TRADE_RETCODE_INVALID_CLOSE_VOLUME: return "invalid close volume";
+      case TRADE_RETCODE_LIMIT_POSITIONS:    return "position limit reached";
+     }
+   return StringFormat("retcode %d", m_res.retcode);
+  }
+
 
 //+------------------------------------------------------------------+
 class CTradeExecutor
   {
 private:
-   CTrade            m_trade;
-   CPositionInfo     m_pos;
+   CRawTrade         m_trade;
+   CRawPosition      m_pos;
 
    string            m_symbol;
    ENUM_TIMEFRAMES   m_tf;
@@ -150,8 +414,6 @@ bool CTradeExecutor::Init(const string symbol,
    m_trade.SetExpertMagicNumber(m_magic);
    m_trade.SetDeviationInPoints(m_slippagePoints);
    m_trade.SetTypeFillingBySymbol(m_symbol);
-   m_trade.SetAsyncMode(false);
-   m_trade.LogLevel(LOG_LEVEL_ERRORS);
 
    ArrayResize(m_tickets, 0);
    ArrayResize(m_entryPrice, 0);

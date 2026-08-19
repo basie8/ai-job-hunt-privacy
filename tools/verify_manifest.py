@@ -13,7 +13,8 @@ for line in open(ROOT+'/MANIFEST.txt'):
     line=line.strip()
     if not line or line.startswith('#'): continue
     want,rel=line.split(None,1)
-    p=os.path.join(target,rel)
+    p=rel if os.path.isabs(rel) or target==ROOT else os.path.join(target,os.path.basename(rel))
+    if target==ROOT: p=rel
     if not os.path.exists(p):
         print(f"  MISSING   {rel}"); bad+=1; continue
     got=hashlib.sha256(open(p,'rb').read()).hexdigest()[:16]

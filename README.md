@@ -77,6 +77,12 @@ three discrete timeframe comparison runs. Risk, the FTMO guards and all twelve
 confluence weights are locked out of every sweep, and the audit fails the build
 if that ever changes. See `docs/OPTIMISATION.md`.
 
+**Installation is one file.** `MQL5/Experts/XAUUSD_FTMO_Confluence_EA.mq5` has
+no `#include` at all — not the project headers, not the MQL5 Standard Library.
+Order handling is implemented directly on `OrderSend()`. Copy it into
+`MQL5/Experts/` and compile. The `XAUUSD_FTMO/` folder is the modular source the
+single file is generated from.
+
 ## Start here
 
 1. **[docs/STRATEGY.md](docs/STRATEGY.md)** — the design and its rationale.

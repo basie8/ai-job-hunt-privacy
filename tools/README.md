@@ -121,3 +121,19 @@ Regenerate the manifest whenever a source file changes:
     import hashlib,glob,os
     # see the block in the commit that introduced MANIFEST.txt
     EOF
+
+## build_single_file.py
+
+    python3 tools/build_single_file.py            # rebuild the bundle
+    python3 tools/build_single_file.py --check    # fail if it is stale
+
+Concatenates the eight `Include/*.mqh` modules and the EA into a single
+self-contained `MQL5/Experts/XAUUSD_FTMO_Confluence_EA.mq5` — stripping project
+includes, include guards, version stamps and stray `#property` lines, which must
+sit at the top of a file.
+
+The modular sources stay the source of truth because they are easier to review
+and test. The bundle is the install artefact because a folder of headers that
+must stay in step is fragile — a new `.mq5` beside one stale `.mqh` produced
+forty misleading compile errors. `audit_static.py` runs `--check`, so the two
+cannot disagree, and it also asserts the bundle contains no `#include` at all.

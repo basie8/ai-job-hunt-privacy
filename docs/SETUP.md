@@ -1,40 +1,42 @@
 # Installation & Setup
 
-## 1. Install the files
+## 1. Install the EA
 
-Copy the EA folder into your terminal's data directory (MetaTrader 5 →
-*File → Open Data Folder*):
+Copy **one file**:
 
 ```
-<Terminal Data Folder>/MQL5/Experts/XAUUSD_FTMO/
-    XAUUSD_FTMO_Confluence_EA.mq5
-    Include/
-        CoreDefs.mqh
-        NewsFilter.mqh
-        RiskGuard.mqh
-        ConfluenceEngine.mqh
-        TradeExecutor.mqh
-        Dashboard.mqh
+MQL5/Experts/XAUUSD_FTMO_Confluence_EA.mq5
 ```
 
-Keep the `Include/` sub-folder where it is — the EA includes by relative path.
+into your terminal's data folder (MetaTrader 5 → *File → Open Data Folder*) under
+`MQL5/Experts/`, then open it in MetaEditor and press **F7**.
 
-> **Copy the whole folder, every time.** Dropping in a new `.mq5` next to stale
-> `.mqh` files is the most common cause of a wall of `undeclared identifier`
-> errors, and the errors point at the *wrong* file. Each header now carries a
-> version stamp that the EA checks, so a mismatch fails with a single named
-> error such as
-> `undeclared identifier 'XFC_V_COREDEFS_3_IS_MISSING'` on a line reading
-> `STALE_INCLUDE__CoreDefs_mqh__RECOPY_THE_WHOLE_Include_FOLDER`.
->
-> To check a deployed copy:
->
-> ```
-> python3 tools/verify_manifest.py "<Terminal Data Folder>/MQL5/Experts/XAUUSD_FTMO"
-> ```
+That is the whole installation. The file has **no `#include` of any kind** — not
+the project headers, and not the MQL5 Standard Library. Order handling is
+implemented directly on `OrderSend()` in the `CRawTrade` / `CRawPosition` classes
+inside the file.
 
-Open `XAUUSD_FTMO_Confluence_EA.mq5` in MetaEditor and press **F7**. It should
-compile with zero errors.
+> **Why single-file.** A folder of headers that must stay in step is fragile: a
+> new `.mq5` copied next to one stale `.mqh` produced forty `undeclared
+> identifier` errors, every one of them naming the wrong file. With no includes
+> there is nothing to get out of step. Dropping the Standard Library as well
+> removes the other variable — `CTrade`'s behaviour has shifted across terminal
+> builds, and a user with a modified copy under `MQL5/Include` would silently get
+> a different EA.
+
+### For developers
+
+`MQL5/Experts/XAUUSD_FTMO/` holds the modular sources — they are the source of
+truth, because they are far easier to review and test in isolation. The single
+file is **generated**:
+
+```
+python3 tools/build_single_file.py            # rebuild
+python3 tools/build_single_file.py --check    # fail if stale
+```
+
+`tools/audit_static.py` runs the check, so the two can never disagree. **Never
+edit the generated file** — the change is lost on the next build.
 
 ## 2. Whitelist the ForexFactory feed
 

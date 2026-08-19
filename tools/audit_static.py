@@ -211,6 +211,22 @@ for _fn,_tok in _TOK.items():
     if f'#ifndef {_tok}' not in _ea:
         flag('includes', f"the EA does not check for {_tok}")
 
+# ---------- 8d. the single-file bundle must be current and self-contained ----------
+import subprocess as _sp
+_b=_sp.run(['python3','tools/build_single_file.py','--check'],capture_output=True,text=True)
+if _b.returncode!=0:
+    flag('includes', "MQL5/Experts/XAUUSD_FTMO_Confluence_EA.mq5 is stale - "
+                     "rebuild with tools/build_single_file.py")
+_bundle='MQL5/Experts/XAUUSD_FTMO_Confluence_EA.mq5'
+if os.path.exists(_bundle):
+    _bt=open(_bundle).read()
+    for _m in re.finditer(r'^#include.*$', _bt, re.M):
+        flag('includes', f"the single-file build still has an include: {_m.group(0)}")
+    _props=[i for i,_l in enumerate(_bt.split('\n'),1) if _l.startswith('#property')]
+    if _props and max(_props)>60:
+        flag('includes', f"the bundle has a #property at line {max(_props)} - "
+                         f"they must all sit at the top")
+
 # ---------- 9. generated .set files must not have drifted ----------
 import subprocess
 _r=subprocess.run(['python3','tools/make_optimisation_sets.py','--check'],
