@@ -112,6 +112,20 @@ for fn in sorted(freefn):
 
 # ---------- 7. preset keys, and optimisation ranges ----------
 valid=set(input_names)
+
+# The bundle is what actually gets compiled, so preset keys must resolve
+# against IT, not only against the modular source they were generated from.
+BUNDLE_INPUTS=set()
+_bp='MQL5/Experts/XAUUSD_FTMO_Confluence_EA.mq5'
+if os.path.exists(_bp):
+    for _l in open(_bp):
+        _m=re.match(r'^input\s+(\S+)\s+(\w+)\s*=', _l)
+        if _m and _m.group(1)!='group': BUNDLE_INPUTS.add(_m.group(2))
+    if BUNDLE_INPUTS and BUNDLE_INPUTS!=valid:
+        for _n in sorted(valid-BUNDLE_INPUTS):
+            flag('presets', f"input '{_n}' exists in the modular EA but not in the bundle")
+        for _n in sorted(BUNDLE_INPUTS-valid):
+            flag('presets', f"input '{_n}' exists in the bundle but not in the modular EA")
 # never sweep these - risk is a decision, and the guards are the FTMO rules
 NEVER_SWEEP = {n for n in input_names
                if n.startswith('InpW')
