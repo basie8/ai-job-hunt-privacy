@@ -1360,7 +1360,10 @@ void WriteDiagnosticFile(void)
          ending = "STOPPED EARLY - total loss guard tripped";
    FileWrite(h, "run", "ended", ending, "", "early stops are NOT comparable with full runs");
    FileWrite(h, "run", "final_profit_pct", DoubleToString(g_risk.ProfitPct(), 2), "", "");
-   FileWrite(h, "run", "max_total_dd_pct", DoubleToString(g_risk.TotalDrawdownPct(), 2), "", "");
+   FileWrite(h, "run", "max_total_dd_pct", DoubleToString(g_risk.MaxTotalDrawdownPct(), 2), "",
+             "true peak-to-trough; acceptance threshold is 5%");
+   FileWrite(h, "run", "final_total_dd_pct", DoubleToString(g_risk.TotalDrawdownPct(), 2), "",
+             "drawdown at the moment the run ended");
 
    FileWrite(h, "metrics", "win_rate_pct", DoubleToString(g_stats.WinRate(), 1), "", "");
    FileWrite(h, "metrics", "profit_factor", DoubleToString(g_stats.ProfitFactor(), 2), "", "");

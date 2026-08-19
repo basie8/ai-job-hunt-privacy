@@ -20,7 +20,7 @@
 
 //--- Bump on every release. Printed at init and written into the diagnostic
 //--- file, so "am I running the build I just compiled?" is never a guess.
-#define XFC_BUILD_ID "ff803a9f"   // replaced with a content hash by tools/build_single_file.py
+#define XFC_BUILD_ID "586a2cb3"   // replaced with a content hash by tools/build_single_file.py
 
 //+------------------------------------------------------------------+
 //| SINGLE-FILE BUILD                                                |
@@ -1544,6 +1544,8 @@ private:
    int               m_maxConsecutiveLosses;
    double            m_lossStreakRiskFactor;
    double            m_maxMarginPct;        // cap on free margin a single trade may consume
+   double            m_peakEquity;          // running high-water mark
+   double            m_maxTotalDdPct;       // worst peak-to-trough, as % of initial
 
    //--- runtime state
    int               m_tradesToday;
@@ -1615,6 +1617,7 @@ public:
    double            RiskFactor(void)         const;
    double            DailyDrawdownPct(void)   const;
    double            TotalDrawdownPct(void)   const;
+   double            MaxTotalDrawdownPct(void) const { return m_maxTotalDdPct; }
    double            ProfitPct(void)          const;
    datetime          CurrentDayStart(void)    const { return m_currentDayStart; }
    void              SetCetOffset(const int s)      { m_cetOffsetSec = s; }
@@ -1642,6 +1645,8 @@ CRiskGuard::CRiskGuard(void)
    m_maxConsecutiveLosses = 3;
    m_lossStreakRiskFactor = 0.6;
    m_maxMarginPct         = 80.0;
+   m_peakEquity           = 0.0;
+   m_maxTotalDdPct        = 0.0;
    m_tradesToday          = 0;
    m_winsToday            = 0;
    m_lossesToday          = 0;
@@ -1756,6 +1761,19 @@ void CRiskGuard::RollDay(const datetime serverNow)
 //+------------------------------------------------------------------+
 void CRiskGuard::OnTick(const datetime serverNow)
   {
+   // True peak-to-trough drawdown. TotalDrawdownPct() is the drawdown RIGHT
+   // NOW, which is zero for any run that ends above its starting equity - so
+   // reporting it as "max" understated the risk of every profitable run.
+   double eq = AccountInfoDouble(ACCOUNT_EQUITY);
+   if(eq > m_peakEquity)
+      m_peakEquity = eq;
+   if(m_peakEquity > 0.0 && m_initialCapital > 0.0)
+     {
+      double dd = (m_peakEquity - eq) / m_initialCapital * 100.0;
+      if(dd > m_maxTotalDdPct)
+         m_maxTotalDdPct = dd;
+     }
+
    datetime cetNow = serverNow - (datetime)m_cetOffsetSec;
    datetime cetMid = DayStart(cetNow);
    datetime boundary = cetMid + (datetime)m_cetOffsetSec;
@@ -5992,7 +6010,10 @@ void WriteDiagnosticFile(void)
          ending = "STOPPED EARLY - total loss guard tripped";
    FileWrite(h, "run", "ended", ending, "", "early stops are NOT comparable with full runs");
    FileWrite(h, "run", "final_profit_pct", DoubleToString(g_risk.ProfitPct(), 2), "", "");
-   FileWrite(h, "run", "max_total_dd_pct", DoubleToString(g_risk.TotalDrawdownPct(), 2), "", "");
+   FileWrite(h, "run", "max_total_dd_pct", DoubleToString(g_risk.MaxTotalDrawdownPct(), 2), "",
+             "true peak-to-trough; acceptance threshold is 5%");
+   FileWrite(h, "run", "final_total_dd_pct", DoubleToString(g_risk.TotalDrawdownPct(), 2), "",
+             "drawdown at the moment the run ended");
 
    FileWrite(h, "metrics", "win_rate_pct", DoubleToString(g_stats.WinRate(), 1), "", "");
    FileWrite(h, "metrics", "profit_factor", DoubleToString(g_stats.ProfitFactor(), 2), "", "");

@@ -48,6 +48,8 @@ private:
    int               m_maxConsecutiveLosses;
    double            m_lossStreakRiskFactor;
    double            m_maxMarginPct;        // cap on free margin a single trade may consume
+   double            m_peakEquity;          // running high-water mark
+   double            m_maxTotalDdPct;       // worst peak-to-trough, as % of initial
 
    //--- runtime state
    int               m_tradesToday;
@@ -119,6 +121,7 @@ public:
    double            RiskFactor(void)         const;
    double            DailyDrawdownPct(void)   const;
    double            TotalDrawdownPct(void)   const;
+   double            MaxTotalDrawdownPct(void) const { return m_maxTotalDdPct; }
    double            ProfitPct(void)          const;
    datetime          CurrentDayStart(void)    const { return m_currentDayStart; }
    void              SetCetOffset(const int s)      { m_cetOffsetSec = s; }
@@ -146,6 +149,8 @@ CRiskGuard::CRiskGuard(void)
    m_maxConsecutiveLosses = 3;
    m_lossStreakRiskFactor = 0.6;
    m_maxMarginPct         = 80.0;
+   m_peakEquity           = 0.0;
+   m_maxTotalDdPct        = 0.0;
    m_tradesToday          = 0;
    m_winsToday            = 0;
    m_lossesToday          = 0;
@@ -260,6 +265,19 @@ void CRiskGuard::RollDay(const datetime serverNow)
 //+------------------------------------------------------------------+
 void CRiskGuard::OnTick(const datetime serverNow)
   {
+   // True peak-to-trough drawdown. TotalDrawdownPct() is the drawdown RIGHT
+   // NOW, which is zero for any run that ends above its starting equity - so
+   // reporting it as "max" understated the risk of every profitable run.
+   double eq = AccountInfoDouble(ACCOUNT_EQUITY);
+   if(eq > m_peakEquity)
+      m_peakEquity = eq;
+   if(m_peakEquity > 0.0 && m_initialCapital > 0.0)
+     {
+      double dd = (m_peakEquity - eq) / m_initialCapital * 100.0;
+      if(dd > m_maxTotalDdPct)
+         m_maxTotalDdPct = dd;
+     }
+
    datetime cetNow = serverNow - (datetime)m_cetOffsetSec;
    datetime cetMid = DayStart(cetNow);
    datetime boundary = cetMid + (datetime)m_cetOffsetSec;
