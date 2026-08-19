@@ -376,7 +376,8 @@ agent folder (`Tester/Agent-.../MQL5/Files/`).
 
 ## Optimisation guidance
 
-**Full protocol: `docs/OPTIMISATION.md`.** Generated staged files live in
+**Full procedure: `docs/OPTIMISATION.md`** — seven phases, starting with an
+uptime gate you must pass before optimising anything. Generated staged files live in
 `MQL5/Presets/`. In short — optimise these, in this order, and **stop early** — more parameters tuned means
 more curve fit:
 
