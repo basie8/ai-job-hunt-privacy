@@ -18,6 +18,10 @@
 #property version   "1.00"
 #property description "XAUUSD confluence EA with FTMO 2-step risk guards and a high-impact news blackout."
 
+//--- Bump on every release. Printed at init and written into the diagnostic
+//--- file, so "am I running the build I just compiled?" is never a guess.
+#define XFC_BUILD_ID "2026.08.19-b7"
+
 //+------------------------------------------------------------------+
 //| SINGLE-FILE BUILD                                                |
 //|                                                                  |
@@ -5755,7 +5759,29 @@ int OnInit(void)
 
    UpdateDashboard();
 
-   Print("=== XAUUSD FTMO Confluence EA initialised ===");
+   PrintFormat("=== XAUUSD FTMO Confluence EA initialised | BUILD %s ===", XFC_BUILD_ID);
+   PrintFormat("=== diagnostics will be written to: %sFiles\\XFC_diagnostics.csv ===",
+               TerminalInfoString(TERMINAL_COMMONDATA_PATH));
+
+   // A start marker, written immediately. If this file does not appear the
+   // moment the run begins, the binary in the terminal is not this build -
+   // which is a faster answer than waiting for a run to finish.
+   int mh = FileOpen("XFC_started.txt", FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
+   if(mh != INVALID_HANDLE)
+     {
+      FileWriteString(mh, StringFormat("build %s\r\nstarted %s\r\nsymbol %s %s\r\n"
+                                       "leverage 1:%d\r\nATR band mode %d\r\ntester %s\r\n",
+                                       XFC_BUILD_ID,
+                                       TimeToString(TimeTradeServer(), TIME_DATE | TIME_MINUTES),
+                                       g_symbol, EnumToString(InpTfTrade),
+                                       (int)AccountInfoInteger(ACCOUNT_LEVERAGE),
+                                       (int)InpAtrBandMode,
+                                       (MQLInfoInteger(MQL_TESTER) ? "yes" : "no")));
+      FileClose(mh);
+     }
+   else
+      PrintFormat("WARNING: could not write the start marker (error %d)", GetLastError());
+
    return INIT_SUCCEEDED;
   }
 
@@ -5893,7 +5919,12 @@ void WriteDiagnosticFile(void)
    if(!InpWriteDiagnosticFile)
       return;
 
-   int h = FileOpen("XFC_diagnostics.csv", FILE_WRITE | FILE_CSV | FILE_ANSI, ',');
+   // FILE_COMMON matters. In the Strategy Tester a plain FileOpen writes into
+   // the AGENT's private sandbox (Tester/Agent-.../MQL5/Files), not the
+   // terminal's MQL5/Files - so the file appears to be missing. The common
+   // folder is shared by the terminal and every agent, and is the one place
+   // it can always be found.
+   int h = FileOpen("XFC_diagnostics.csv", FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
    if(h == INVALID_HANDLE)
      {
       PrintFormat("[Why] could not write the diagnostic file (error %d)", GetLastError());
@@ -5901,6 +5932,7 @@ void WriteDiagnosticFile(void)
      }
 
    FileWrite(h, "section", "item", "count", "pct", "note");
+   FileWrite(h, "run", "build_id", XFC_BUILD_ID, "", "must match the build you compiled");
    FileWrite(h, "run", "symbol", g_symbol, "", EnumToString(InpTfTrade));
    FileWrite(h, "run", "ticks_seen", (int)g_ticksSeen, "",
              (g_ticksSeen == 0 ? "NO PRICE DATA AT ALL for this period" : ""));
@@ -5935,7 +5967,8 @@ void WriteDiagnosticFile(void)
              StringFormat("n=%d", g_stats.RSample()));
 
    FileClose(h);
-   Print("[Why] diagnosis written to MQL5/Files/XFC_diagnostics.csv");
+   PrintFormat("[Why] diagnosis written to: %sFiles\\XFC_diagnostics.csv",
+               TerminalInfoString(TERMINAL_COMMONDATA_PATH));
   }
 
 //+------------------------------------------------------------------+
