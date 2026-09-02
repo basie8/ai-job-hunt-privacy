@@ -61,7 +61,7 @@ public:
    void              Write(const int lvl,const string msg)
      {
       if(lvl>m_level) return;
-      string line=StringFormat("[%s] %s | %s",TimeToString(TimeCurrent(),TIME_DATE|TIME_MINUTES|TIME_SECONDS),Tag(lvl),msg);
+      string line=StringFormat("[%s] %s | %s",TimeToString(SmcNow(),TIME_DATE|TIME_MINUTES|TIME_SECONDS),Tag(lvl),msg);
       Print(line);
       if(m_to_file && m_fh!=INVALID_HANDLE)
         {

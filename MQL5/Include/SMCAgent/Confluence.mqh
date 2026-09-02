@@ -121,7 +121,7 @@ private:
    //--- push the external pools into the entry engine ------------------
    void              FeedExternalLiquidity(void)
      {
-      datetime now=TimeCurrent();
+      datetime now=SmcNow();
       if(m_has_day)
         {
          m_e.AddLiquidity(LQ_PDH,DIR_BULL,m_pdh,now-86400,1.00);
@@ -208,6 +208,9 @@ public:
       m_news_importance=news_importance;
      }
 
+   void              SetGmtOffset(const int gmt_offset) { m_gmt=gmt_offset; }
+   int               GmtOffset(void) const { return(m_gmt); }
+
    //--- accessors for the dashboard -------------------------------------
    int               FactorCount(void) { return(F_COUNT); }
    bool              GetFactor(const int i,SFactor &f)
@@ -265,7 +268,7 @@ public:
 
       SNewsEvent ne;
       ne.time=0; ne.name=""; ne.currency=""; ne.importance=0;
-      if(m_news!=NULL && m_news.JustReleased(TimeCurrent(),60,m_news_importance,ne)) post_news=true;
+      if(m_news!=NULL && m_news.JustReleased(SmcNow(),60,m_news_importance,ne)) post_news=true;
 
       //--- playbook A / B : liquidity raid then change of character
       if(m_e.SweepValid() && m_e.SweepDir()!=DIR_NONE)
@@ -414,7 +417,7 @@ public:
         {
          string evn="";
          int mins=0;
-         if(m_news.InBlackout(TimeCurrent(),m_news_block_before,m_news_block_after,m_news_importance,evn,mins))
+         if(m_news.InBlackout(SmcNow(),m_news_block_before,m_news_block_after,m_news_importance,evn,mins))
            {
             m_veto=StringFormat("inside the release window of %s (%+d min)",evn,mins);
             m_context=StringFormat("%s %s - %s. Rejected: %s",SmcDirShort(dir),m_playbook,why,m_veto);
@@ -482,7 +485,7 @@ public:
       SetFactor(F_PREM_DISC,"Premium/discount",pos,0.0,
                 StringFormat("%.0f%% of range (%s)",pos*100.0,(pos>0.5?"premium":"discount")));
       SetFactor(F_DISPLACEMENT,"Displacement",0.0,0.0,"waiting");
-      double ss=SessionScore(TimeCurrent(),lbl);
+      double ss=SessionScore(SmcNow(),lbl);
       SetFactor(F_SESSION,"Session",ss,ss,lbl);
       double vr=m_ms.VolRegime();
       SetFactor(F_VOLATILITY,"Volatility regime",vr,VolScore(vr),VolNote(vr));
@@ -494,7 +497,7 @@ public:
       SetFactor(F_CANDLE,"Confirmation",0.0,0.0,"no confirmation candle");
       SetFactor(F_VOLUME,"Participation",0.0,0.0,"neutral");
       double nsc=NewsScore(false);
-      SetFactor(F_NEWS,"News context",nsc,nsc,(m_news!=NULL?m_news.Describe(TimeCurrent(),m_news_importance):"news feed off"));
+      SetFactor(F_NEWS,"News context",nsc,nsc,(m_news!=NULL?m_news.Describe(SmcNow(),m_news_importance):"news feed off"));
       SetFactor(F_INDUCEMENT,"Inducement",0.0,0.0,"no zone engaged");
      }
 
@@ -519,7 +522,7 @@ public:
       SNewsEvent e;
       int mins=0;
       double s=0.0;
-      if(m_news.NextEvent(TimeCurrent(),m_news_importance,e,mins))
+      if(m_news.NextEvent(SmcNow(),m_news_importance,e,mins))
         {
          if(mins<=m_news_block_before)      s=-1.00;
          else if(mins<=45)                  s=-0.55;
@@ -622,7 +625,7 @@ public:
 
       //--- 8 session
       string lbl="";
-      double s_ses=SessionScore(TimeCurrent(),lbl);
+      double s_ses=SessionScore(SmcNow(),lbl);
       SetFactor(F_SESSION,"Session",s_ses,s_ses,lbl);
 
       //--- 9 volatility regime
@@ -696,7 +699,7 @@ public:
 
       //--- 15 news context
       double s_news=NewsScore(post_news);
-      string n_news=(m_news!=NULL?m_news.Describe(TimeCurrent(),m_news_importance):"news feed off");
+      string n_news=(m_news!=NULL?m_news.Describe(SmcNow(),m_news_importance):"news feed off");
       if(post_news) n_news=StringFormat("raid after %s (%s) - engineered liquidity",ne.name,ne.currency);
       SetFactor(F_NEWS,"News context",s_news,s_news,n_news);
      }

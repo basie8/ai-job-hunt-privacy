@@ -88,6 +88,7 @@ policy and display settings.
 | `InpSoftMaxPct` | 7.0 | protective overall floor |
 | `InpBaseRiskPct` | 0.5 | base risk per trade, before conviction and streak scaling |
 | `InpDailyResetHour` | 0 | server hour of the FTMO reset (midnight CE(S)T — on a GMT+2/+3 broker this is 0) |
+| `InpGmtOffsetHours` | 99 | broker GMT offset; 99 = auto-detect and re-check daily. Pin it for backtests |
 | `InpMinTradingDays` | 4 | phase requirement, surfaced on the panel |
 
 ### Agent behaviour
@@ -106,22 +107,90 @@ See the input groups in the EA — partial/break-even/trail R multiples, the new
 window and importance filter, the CSV fallback name, panel position and log level
 (`3` = full decision log, `4` = adds observation-book detail).
 
-## 5. Files it writes (common files folder)
+## 5. Time, news sources and broker-clock alignment
+
+**Where the news comes from.** One primary source and one fallback:
+
+| Source | When it is used | Function |
+|---|---|---|
+| **MetaTrader 5 built-in economic calendar** (the MQL5 calendar service your broker's terminal subscribes to) | always, when the terminal serves it | `CalendarValueHistory` for the window −3 to +10 days, each value resolved to its event with `CalendarEventById` so importance can be filtered |
+| **`smc_news.csv`** in the common files folder | only when the calendar returns nothing (strategy tester, or a broker that does not serve it) | `CNewsFilter::LoadFromCsv` |
+
+There is no third-party feed, no web request and no API key — the EA cannot make
+outbound HTTP calls and does not try to. The panel tells you which source is live:
+a `[csv]` prefix means the fallback is in use, `calendar unavailable` means neither
+worked and only the time-of-day protection is left.
+
+**Which events.** Filtered by currency, not "all news": USD first (gold is a
+USD-denominated macro asset), plus EUR and GBP because they move the dollar index.
+Importance is filtered by `InpNewsImportance` (default 3 = high impact only).
+
+**Time base — this is the part that has to be right.** The MT5 calendar publishes
+event times in **GMT**; every timestamp inside the agent is **server time**. The
+conversion is a single offset, applied once when events are cached:
+
+```
+server_event_time = calendar_time_GMT + (server_time − GMT)
+```
+
+- The offset is **auto-detected** from `TimeTradeServer() − TimeGMT()` and rounded
+  to the nearest hour. `TimeTradeServer()` is used deliberately rather than
+  `TimeCurrent()`: the latter is the timestamp of the last tick and goes stale over
+  weekends and quiet books, which would shift every event.
+- It is **re-detected every timer tick and applied only when it changes**, so a
+  broker daylight-saving switch is self-correcting: the change is logged and the
+  whole calendar cache is rebuilt with the new offset.
+- The same offset drives the killzones and the session factor, so news and sessions
+  can never disagree with each other.
+- `InpGmtOffsetHours` (default 99 = auto) pins it manually. Use it for backtests,
+  where `TimeGMT()` is not reliable, or if your terminal's own timezone is wrong.
+- On startup the journal prints the alignment so you can verify it in one line:
+  `Clock: server 2026.09.02 14:15 = GMT+2. Calendar events are published in GMT and
+  shifted by +2 h to server time.` The panel's news row also carries `[GMT+2]`.
+
+**CSV fallback format** — `YYYY.MM.DD HH:MM;CUR;IMPORTANCE;NAME`, one event per
+line, `#` for comments. **Times must be in GMT**, exactly like the MT5 calendar;
+the same offset is applied to them, so both paths behave identically:
+
+```
+# 2026.09.05 12:30;USD;3;Non-Farm Payrolls
+2026.09.05 12:30;USD;3;Non-Farm Payrolls
+2026.09.10 18:00;USD;3;FOMC Rate Decision
+```
+
+**Known limits of the alignment**
+
+- `TimeGMT()` reads the *terminal machine's* timezone settings. A VPS with a wrong
+  clock or timezone produces a wrong offset — check the startup line, and pin
+  `InpGmtOffsetHours` if it looks wrong.
+- The offset is rounded to whole hours. Brokers on a half-hour offset are not
+  supported by the auto-detection; set it manually (and note the input only takes
+  whole hours, so such a broker will be 30 minutes out on killzones).
+- Killzones are defined in fixed GMT windows (London 07:00–10:00, New York
+  12:00–15:00). They track the *broker's* DST automatically but not the US DST
+  transition, so the New York window is an approximation that runs about an hour
+  early in northern-hemisphere winter.
+- In the strategy tester the calendar is not served at all and `TimeGMT()` is
+  unreliable — supply the CSV and pin the offset.
+
+## 6. Files it writes (common files folder)
 
 | File | Purpose |
 |---|---|
 | `smc_agent_model.csv` | learned weights, bias, update count and replay memory. If the feature count ever changes (as it did when inducement was added), the loader detects the mismatch, warns, and restarts from the research priors |
 | `smc_agent_state.csv` | phase capital, trading days, streaks, equity peak |
 | `smc_agent_log.txt` | decision log, when `InpLogToFile` is on |
-| `smc_news.csv` | *optional input*: fallback calendar, `YYYY.MM.DD HH:MM;CUR;IMPORTANCE;NAME` |
+| `smc_news.csv` | *optional input*: fallback calendar in **GMT**, `YYYY.MM.DD HH:MM;CUR;IMPORTANCE;NAME` (see §5) |
 
 Delete the first two to start a phase from scratch (or set `InpResetModel`).
 
-## 6. Backtesting notes
+## 7. Backtesting notes
 
 - The MT5 **economic calendar is not served inside the strategy tester**. Either
-  supply `smc_news.csv` in the common folder or accept that the news factor is
-  neutral in tests. Live behaviour will differ around releases.
+  supply `smc_news.csv` in the common folder (GMT timestamps) or accept that the
+  news factor is neutral in tests. Live behaviour will differ around releases.
+- `TimeGMT()` is unreliable in the tester, so pin `InpGmtOffsetHours` to your
+  broker's real offset for any backtest you intend to trust on session timing.
 - Use **every tick based on real ticks** and a broker feed with realistic gold
   spreads. The spread gate and the execution factor are meaningful here.
 - The learning loop is stateful: a backtest continues from whatever model file
@@ -129,7 +198,7 @@ Delete the first two to start a phase from scratch (or set `InpResetModel`).
 - `OnTester` returns an FTMO-shaped criterion (profit discounted by relative equity
   drawdown, zero below 10 trades, negative if drawdown reached 10%).
 
-## 7. Operating notes and honest limitations
+## 8. Operating notes and honest limitations
 
 - **Two trades a week is a target, not a promise.** The frequency governor relaxes
   selectivity as the week progresses but stops at `InpMinProbFloor`. In a dead,

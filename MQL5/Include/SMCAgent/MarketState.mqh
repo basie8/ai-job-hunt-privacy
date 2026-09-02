@@ -273,7 +273,7 @@ public:
       ArraySetAsSeries(m,true);
       int cnt=CopyRates(m_symbol,PERIOD_M15,0,300,m);
       if(cnt<20) return(false);
-      datetime day0=SmcDayStart(TimeCurrent());
+      datetime day0=SmcDayStart(SmcNow());
       hi=-DBL_MAX; lo=DBL_MAX;
       for(int i=0;i<cnt;i++)
         {

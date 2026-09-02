@@ -35,6 +35,7 @@ private:
    string            m_csv;
    string            m_currencies[];
    CLogger          *m_log;
+   int               m_gmt;        // server-time minus GMT, supplied by the agent
 
    bool              CurrencyWatched(const string cur)
      {
@@ -83,8 +84,9 @@ private:
             else if(ev.importance==CALENDAR_IMPORTANCE_MODERATE) imp=2;
             else if(ev.importance==CALENDAR_IMPORTANCE_LOW) imp=1;
             else continue;                                    // importance NONE -> ignore
-            //--- calendar times are GMT, convert to server time
-            datetime srv=values[i].time+(datetime)(SmcServerGmtOffsetHours()*3600);
+            //--- MT5 publishes calendar values in GMT; every timestamp the
+            //--- agent works with is server time, so convert once here
+            datetime srv=values[i].time+(datetime)(m_gmt*3600);
             Push(srv,ev.name,m_currencies[c],imp);
             total++;
            }
@@ -105,8 +107,11 @@ private:
          string parts[];
          int k=StringSplit(line,';',parts);
          if(k<4) continue;
+         //--- CSV timestamps follow the same convention as the MT5
+         //--- calendar: they are GMT and are converted to server time here
          datetime t=StringToTime(parts[0]);
          if(t<=0) continue;
+         t+=(datetime)(m_gmt*3600);
          string cur=parts[1];
          int imp=(int)StringToInteger(parts[2]);
          if(!CurrencyWatched(cur)) continue;
@@ -119,11 +124,13 @@ private:
 
 public:
                      CNewsFilter(void): m_last_refresh(0), m_available(false), m_use_csv(false),
-                                        m_csv("smc_news.csv"), m_log(NULL) {}
+                                        m_csv("smc_news.csv"), m_log(NULL), m_gmt(0) {}
 
-   void              Init(const string symbol,CLogger *log,const string csv_fallback="smc_news.csv")
+   void              Init(const string symbol,CLogger *log,const int gmt_offset,
+                          const string csv_fallback="smc_news.csv")
      {
       m_log=log;
+      m_gmt=gmt_offset;
       m_csv=csv_fallback;
       //--- gold is priced in USD and reacts to USD macro first;
       //--- EUR / GBP releases move the dollar index as well.
@@ -142,13 +149,27 @@ public:
         }
      }
 
+   int               GmtOffset(void) const { return(m_gmt); }
+
+   //--- the agent re-detects the broker offset every day; a change
+   //--- (daylight saving) invalidates every cached event time
+   bool              SetGmtOffset(const int gmt_offset)
+     {
+      if(gmt_offset==m_gmt) return(false);
+      if(m_log!=NULL)
+         m_log.Warn(StringFormat("News: server offset changed GMT%+d -> GMT%+d, reloading the calendar",m_gmt,gmt_offset));
+      m_gmt=gmt_offset;
+      Refresh(true);
+      return(true);
+     }
+
    bool              Available(void) const { return(m_available); }
    bool              UsingCsv(void)  const { return(m_use_csv);   }
    int               Count(void)           { return(ArraySize(m_events)); }
 
    void              Refresh(const bool force=false)
      {
-      datetime now=TimeCurrent();
+      datetime now=SmcNow();
       if(!force && m_last_refresh>0 && now-m_last_refresh<3600) return;
       m_last_refresh=now;
       ArrayFree(m_events);

@@ -109,7 +109,7 @@ public:
    //--- daily / weekly rollover ---------------------------------------
    void              NewDayCheck(const bool force=false)
      {
-      datetime now=TimeCurrent();
+      datetime now=SmcNow();
       datetime anchor=ResetAnchor(now);
       if(force || anchor!=m_day_start)
         {
@@ -303,7 +303,7 @@ public:
      {
       m_day_trades++;
       m_week_trades++;
-      datetime d=SmcDayStart(TimeCurrent());
+      datetime d=SmcDayStart(SmcNow());
       if(d!=m_last_trade_day) { m_last_trade_day=d; m_trading_days++; SaveState(); }
      }
 

@@ -227,11 +227,28 @@ double SmcSquash(const double x,const double scale)
 //+------------------------------------------------------------------+
 //| Time helpers                                                     |
 //+------------------------------------------------------------------+
+//--- "now" on the trade server.
+//--- TimeCurrent() is the timestamp of the last known tick, so it goes stale
+//--- over weekends, holidays and quiet books. TimeTradeServer() is the
+//--- calculated current server time and keeps running while the market is
+//--- closed, which is what news timing and the FTMO daily reset need.
+datetime SmcNow()
+  {
+   datetime t=TimeTradeServer();
+   if(t<=0) t=TimeCurrent();
+   return(t);
+  }
+
+//--- broker server time minus GMT, rounded to the nearest hour.
+//--- Recomputed live, so a broker daylight-saving change is picked up
+//--- automatically. Returns 99 if it cannot be established.
 int SmcServerGmtOffsetHours()
   {
-   //--- broker server time minus GMT, rounded to the nearest hour
-   long diff=(long)TimeCurrent()-(long)TimeGMT();
-   double h=(double)diff/3600.0;
+   datetime srv=SmcNow();
+   datetime gmt=TimeGMT();
+   if(srv<=0 || gmt<=0) return(99);
+   double h=((double)((long)srv-(long)gmt))/3600.0;
+   if(MathAbs(h)>14.5) return(99);          // implausible: bad clock or tester
    return((int)MathRound(h));
   }
 

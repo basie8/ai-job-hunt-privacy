@@ -68,7 +68,7 @@ public:
       m_sl[k]=sl;
       m_tp1[k]=tp1;
       m_dir[k]=dir;
-      m_open[k]=TimeCurrent();
+      m_open[k]=SmcNow();
       m_partial[k]=false;
       m_be[k]=false;
       for(int i=0;i<m_n;i++) m_x[k*m_n+i]=(i<ArraySize(x)?x[i]:0.0);
@@ -153,7 +153,7 @@ public:
       ArrayResize(m_bars,k+1);
       ArrayResize(m_x,(k+1)*m_n);
       m_dir[k]=dir; m_entry[k]=entry; m_sl[k]=sl; m_tp[k]=tp;
-      m_time[k]=TimeCurrent(); m_bars[k]=0;
+      m_time[k]=SmcNow(); m_bars[k]=0;
       for(int i=0;i<m_n;i++) m_x[k*m_n+i]=(i<ArraySize(x)?x[i]:0.0);
      }
 

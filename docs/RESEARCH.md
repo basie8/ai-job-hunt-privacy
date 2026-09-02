@@ -170,12 +170,20 @@ from the literature shaped the implementation:
    watches USD first, with EUR and GBP included because they move the dollar index.
 2. **The calendar is not available in every context** (notably the strategy tester
    and some brokers), so a CSV fallback in the common files folder is supported.
+3. **The calendar publishes in GMT while everything else in an EA is server time.**
+   The documented correction is the difference between the trade server's timezone
+   and GMT (`TimeTradeServer() - TimeGMT()`), which is what the agent applies once
+   per cached event and re-detects daily so broker daylight-saving changes are
+   picked up automatically. `TimeTradeServer()` is used rather than `TimeCurrent()`
+   because the latter is the last tick's timestamp and stalls when the book is quiet.
 
 Sources:
 - <https://www.mql5.com/en/docs/calendar/calendarvaluehistory>
 - <https://www.mql5.com/en/articles/21235>
 - <https://www.mql5.com/en/articles/22580>
 - <https://www.mql5.com/en/articles/9874>
+- <https://www.mql5.com/en/book/common/timing/timing_gmt>
+- <https://www.mql5.com/en/docs/dateandtime/timegmt>
 
 ## 6. Machine learning approach
 

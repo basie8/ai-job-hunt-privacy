@@ -303,7 +303,7 @@ public:
         }
 
       //--- session killzones of the current day -------------------------
-      datetime day0=SmcDayStart(TimeCurrent());
+      datetime day0=SmcDayStart(SmcNow());
       for(int d=0;d<2;d++)
         {
          datetime base=day0-(datetime)(d*86400);
@@ -369,7 +369,7 @@ public:
       m_row=0;
 
       Row("h1",StringFormat("%s v%s   %s %s   %s",SMC_AGENT_NAME,SMC_AGENT_VERSION,ms.Symbol(),
-          EnumToString(ms.TfEntry()),TimeToString(TimeCurrent(),TIME_DATE|TIME_MINUTES)),m_c_accent,9);
+          EnumToString(ms.TfEntry()),TimeToString(SmcNow(),TIME_DATE|TIME_MINUTES)),m_c_accent,9);
 
       color mode_c=(mode=="LIVE"?m_c_bull:(mode=="LOCKED"?m_c_bear:m_c_accent));
       Row("h2",StringFormat("MODE %-10s  model %s  samples %d  acc %.0f%%  thr %.0f%%",

@@ -56,6 +56,7 @@ input double InpHardDailyPct     = 3.5;    // Flatten everything at this daily l
 input double InpSoftMaxPct       = 7.0;    // Protective overall drawdown %
 input double InpBaseRiskPct      = 0.5;    // Base risk per trade % of initial capital
 input int    InpDailyResetHour   = 0;      // Server hour of the FTMO daily reset (midnight CE(S)T)
+input int    InpGmtOffsetHours   = 99;     // Broker GMT offset in hours (99 = detect automatically)
 input int    InpMinTradingDays   = 4;      // Minimum trading days required by the phase
 
 input group "=== Agent behaviour ==="
@@ -144,6 +145,48 @@ void SetPriors()
   }
 
 //+------------------------------------------------------------------+
+//| Broker clock alignment.                                          |
+//|                                                                  |
+//| Every timestamp inside the agent is server time. The MT5 economic|
+//| calendar publishes its events in GMT, so the offset below is the |
+//| single conversion used for news, killzones and session scoring.  |
+//| It is re-detected every day, which is what makes a broker        |
+//| daylight-saving switch self-correcting.                          |
+//+------------------------------------------------------------------+
+int DetectGmtOffset()
+  {
+   if(InpGmtOffsetHours>=-14 && InpGmtOffsetHours<=14) return(InpGmtOffsetHours);
+   int auto_off=SmcServerGmtOffsetHours();
+   if(auto_off==99)
+     {
+      //--- clock unusable (bad terminal timezone, or the tester): keep the
+      //--- last good value rather than silently shifting every event
+      g_log.Warn("Server/GMT offset could not be established - keeping the previous value. Set InpGmtOffsetHours manually if this repeats.");
+      return(g_gmt);
+     }
+   return(auto_off);
+  }
+
+//+------------------------------------------------------------------+
+//| Re-detect the offset and push it everywhere that converts time    |
+//+------------------------------------------------------------------+
+void SyncBrokerClock(const bool announce=false)
+  {
+   int off=DetectGmtOffset();
+   if(off==g_gmt && !announce) return;
+   if(off!=g_gmt)
+      g_log.Warn(StringFormat("Broker clock re-aligned: GMT%+d -> GMT%+d (server %s / GMT %s)",
+                 g_gmt,off,TimeToString(SmcNow(),TIME_DATE|TIME_MINUTES),
+                 TimeToString(TimeGMT(),TIME_DATE|TIME_MINUTES)));
+   g_gmt=off;
+   g_conf.SetGmtOffset(g_gmt);
+   if(InpUseNews) g_news.SetGmtOffset(g_gmt);
+   if(announce)
+      g_log.Info(StringFormat("Clock: server %s = GMT%+d. Calendar events are published in GMT and shifted by %+d h to server time. Killzones: London 07:00-10:00 GMT, New York 12:00-15:00 GMT.",
+                 TimeToString(SmcNow(),TIME_DATE|TIME_MINUTES),g_gmt,g_gmt));
+  }
+
+//+------------------------------------------------------------------+
 double PhaseTarget()
   {
    if(InpTargetPct>0.0) return(InpTargetPct);
@@ -159,7 +202,7 @@ double AcceptanceThreshold()
    double thr=InpMinProbability;
 
    //--- how far into the trading week are we (Monday 00:00 -> Friday 21:00)
-   datetime now=TimeCurrent();
+   datetime now=SmcNow();
    datetime ws=SmcWeekStart(now);
    double   span=4.0*86400.0+21.0*3600.0;
    double   elapsed=SmcClamp(((double)now-(double)ws)/span,0.0,1.0);
@@ -183,10 +226,10 @@ double AcceptanceThreshold()
 string NewsLine()
   {
    if(!InpUseNews) return("calendar disabled");
-   string s=g_news.Describe(TimeCurrent(),InpNewsImportance);
+   string s=g_news.Describe(SmcNow(),InpNewsImportance);
    if(!g_news.Available()) s="calendar unavailable - "+s;
    else if(g_news.UsingCsv()) s="[csv] "+s;
-   return(s);
+   return(StringFormat("%s  [GMT%+d]",s,g_gmt));
   }
 
 //+------------------------------------------------------------------+
@@ -203,8 +246,9 @@ int OnInit()
    if(StringFind(sym,"XAU")<0 && StringFind(sym,"GOLD")<0)
       g_log.Warn("This agent was researched and calibrated for XAUUSD. It will still read any chart, but the news currency map and session profile assume gold.");
 
-   g_gmt=SmcServerGmtOffsetHours();
-   g_log.Info(StringFormat("Server time is GMT%+d - killzones and the daily reset are mapped to it",g_gmt));
+   g_gmt=DetectGmtOffset();
+   g_log.Info(StringFormat("Server time is GMT%+d (%s) - killzones, the calendar and the daily reset are mapped to it",
+              g_gmt,(InpGmtOffsetHours>=-14 && InpGmtOffsetHours<=14?"set manually":"auto-detected")));
 
    if(!g_ms.Init(_Symbol,(ENUM_TIMEFRAMES)Period()))
      {
@@ -221,7 +265,7 @@ int OnInit()
    if(InpResetModel) { g_model.Reset(); g_log.Warn("Stored model discarded on request - restarting from the research priors"); }
    else if(!g_model.Load()) g_log.Info("No stored model found - starting from the research priors and observing");
 
-   g_news.Init(_Symbol,GetPointer(g_log),InpNewsCsv);
+   g_news.Init(_Symbol,GetPointer(g_log),g_gmt,InpNewsCsv);
    if(InpUseNews) g_news.Refresh(true);
 
    CNewsFilter *news_ptr=NULL;
@@ -247,6 +291,7 @@ int OnInit()
 
    EventSetTimer(5);
    g_ready=true;
+   SyncBrokerClock(true);
    AnalyzeAll();
    g_conf.Evaluate(g_sig);
    g_threshold=AcceptanceThreshold();
@@ -396,7 +441,7 @@ void ManagePositions()
         }
 
       //--- 4 time stop: the raid never expanded
-      int bars_open=Bars(_Symbol,(ENUM_TIMEFRAMES)Period(),g_journal.Opened(i),TimeCurrent());
+      int bars_open=Bars(_Symbol,(ENUM_TIMEFRAMES)Period(),g_journal.Opened(i),SmcNow());
       if(bars_open>=stop_bars && r<0.5)
         {
          g_log.Think(StringFormat("MANAGE | #%s spent %d bars without expansion (%.2fR) - releasing the risk",IntegerToString((long)t),bars_open,r));
@@ -425,7 +470,7 @@ void RiskGuards()
      {
       SNewsEvent e;
       int mins=0;
-      if(g_news.NextEvent(TimeCurrent(),InpNewsImportance,e,mins) && mins<=InpNewsMinutesBefore+2 && mins>=0)
+      if(g_news.NextEvent(SmcNow(),InpNewsImportance,e,mins) && mins<=InpNewsMinutesBefore+2 && mins>=0)
         {
          g_exec.CloseAll(StringFormat("standing aside before %s (%s) in %d min",e.name,e.currency,mins));
          g_last_action=StringFormat("flat before %s",e.name);
@@ -588,6 +633,8 @@ void OnTimer()
   {
    if(!g_ready) return;
    g_risk.NewDayCheck();
+   //--- cheap and idempotent: only acts when the broker offset actually moves
+   SyncBrokerClock();
    RedrawPanel();
   }
 
