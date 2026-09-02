@@ -644,7 +644,7 @@ void HarvestClosedTrades()
       if(InpNotifyExits)
          Notify(StringFormat("closed %+.2f",profit),
                 StringFormat("day %+.2f%%  total %+.2f%%  equity %.2f",
-                g_risk.DayPnLPct(),g_risk.TotalPnLPct(),AccountInfoDouble(ACCOUNT_EQUITY)));
+                g_risk.DayPnLPct(),g_risk.TotalPnLPct(),g_risk.Equity()));
       g_log.Think(StringFormat("LEARN | real trade #%s closed at %.2f -> label %s | model acc %.0f%% after %d updates",
                   IntegerToString((long)t),profit,(y>0.5?"WIN":"LOSS"),g_model.Accuracy()*100.0,(int)g_model.Updates()));
       g_journal.Remove(i);
@@ -784,11 +784,11 @@ bool OnBarClose()
         {
          g_risk.SimAddPnL(sim_money);
          g_risk.OnTradeClosed(sim_money);
-         g_log.Think(StringFormat("DRY RUN| simulated result %.2f, equity now %.2f",sim_money,g_risk.Eq()));
+         g_log.Think(StringFormat("DRY RUN| simulated result %.2f, equity now %.2f",sim_money,g_risk.Equity()));
          if(InpNotifyExits)
             Notify(StringFormat("closed %+.2f",sim_money),
                    StringFormat("day %+.2f%%  total %+.2f%%  equity %.2f  - simulated",
-                   g_risk.DayPnLPct(),g_risk.TotalPnLPct(),g_risk.Eq()));
+                   g_risk.DayPnLPct(),g_risk.TotalPnLPct(),g_risk.Equity()));
         }
      }
 

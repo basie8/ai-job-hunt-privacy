@@ -2526,6 +2526,13 @@ public:
    string            CapitalSource(void) { return(AccountReady()?m_capital_source:m_capital_source+" - ACCOUNT NOT REPORTING"); }
    bool              Ready(void)   { return(AccountReady()); }
    bool              DryRun(void) const { return(m_sim); }
+   //--- Public view of the account. These honour the dry run simulation,
+   //--- so callers never have to know whether the number came from the
+   //--- terminal or from the simulated curve - and they replace direct
+   //--- AccountInfoDouble reads, which would show a real zero equity
+   //--- while the dry run believed it had capital.
+   double            Equity(void)  { return(Eq());  }
+   double            Balance(void) { return(Bal()); }
    //--- book a simulated result against the dry run equity curve
    void              SimAddPnL(const double money) { if(m_sim) m_sim_pnl+=money; }
    int               Phase(void)    const { return(m_phase);   }
@@ -4600,7 +4607,7 @@ public:
          risk.SoftDailyFloor(),risk.HardDailyFloor(),
          risk.RemainingDailyBudget(),risk.RemainingHardBudget()),m_c_dim);
       KV("CAPITAL",StringFormat("%.2f (%s)  eq %.2f  open risk %.0f",
-         risk.Initial(),risk.CapitalSource(),AccountInfoDouble(ACCOUNT_EQUITY),risk.OpenRiskMoney()),m_c_dim);
+         risk.Initial(),risk.CapitalSource(),risk.Equity(),risk.OpenRiskMoney()),m_c_dim);
       KV("NEWS",news_line,m_c_dim);
 
       //--- decision ---------------------------------------------------
@@ -5240,7 +5247,7 @@ void HarvestClosedTrades()
       if(InpNotifyExits)
          Notify(StringFormat("closed %+.2f",profit),
                 StringFormat("day %+.2f%%  total %+.2f%%  equity %.2f",
-                g_risk.DayPnLPct(),g_risk.TotalPnLPct(),AccountInfoDouble(ACCOUNT_EQUITY)));
+                g_risk.DayPnLPct(),g_risk.TotalPnLPct(),g_risk.Equity()));
       g_log.Think(StringFormat("LEARN | real trade #%s closed at %.2f -> label %s | model acc %.0f%% after %d updates",
                   IntegerToString((long)t),profit,(y>0.5?"WIN":"LOSS"),g_model.Accuracy()*100.0,(int)g_model.Updates()));
       g_journal.Remove(i);
@@ -5380,11 +5387,11 @@ bool OnBarClose()
         {
          g_risk.SimAddPnL(sim_money);
          g_risk.OnTradeClosed(sim_money);
-         g_log.Think(StringFormat("DRY RUN| simulated result %.2f, equity now %.2f",sim_money,g_risk.Eq()));
+         g_log.Think(StringFormat("DRY RUN| simulated result %.2f, equity now %.2f",sim_money,g_risk.Equity()));
          if(InpNotifyExits)
             Notify(StringFormat("closed %+.2f",sim_money),
                    StringFormat("day %+.2f%%  total %+.2f%%  equity %.2f  - simulated",
-                   g_risk.DayPnLPct(),g_risk.TotalPnLPct(),g_risk.Eq()));
+                   g_risk.DayPnLPct(),g_risk.TotalPnLPct(),g_risk.Equity()));
         }
      }
 

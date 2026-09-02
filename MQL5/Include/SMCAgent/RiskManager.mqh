@@ -199,6 +199,13 @@ public:
    string            CapitalSource(void) { return(AccountReady()?m_capital_source:m_capital_source+" - ACCOUNT NOT REPORTING"); }
    bool              Ready(void)   { return(AccountReady()); }
    bool              DryRun(void) const { return(m_sim); }
+   //--- Public view of the account. These honour the dry run simulation,
+   //--- so callers never have to know whether the number came from the
+   //--- terminal or from the simulated curve - and they replace direct
+   //--- AccountInfoDouble reads, which would show a real zero equity
+   //--- while the dry run believed it had capital.
+   double            Equity(void)  { return(Eq());  }
+   double            Balance(void) { return(Bal()); }
    //--- book a simulated result against the dry run equity curve
    void              SimAddPnL(const double money) { if(m_sim) m_sim_pnl+=money; }
    int               Phase(void)    const { return(m_phase);   }

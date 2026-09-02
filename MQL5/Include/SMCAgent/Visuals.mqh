@@ -641,7 +641,7 @@ public:
          risk.SoftDailyFloor(),risk.HardDailyFloor(),
          risk.RemainingDailyBudget(),risk.RemainingHardBudget()),m_c_dim);
       KV("CAPITAL",StringFormat("%.2f (%s)  eq %.2f  open risk %.0f",
-         risk.Initial(),risk.CapitalSource(),AccountInfoDouble(ACCOUNT_EQUITY),risk.OpenRiskMoney()),m_c_dim);
+         risk.Initial(),risk.CapitalSource(),risk.Equity(),risk.OpenRiskMoney()),m_c_dim);
       KV("NEWS",news_line,m_c_dim);
 
       //--- decision ---------------------------------------------------
