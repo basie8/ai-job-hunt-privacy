@@ -18,9 +18,45 @@ Copy the two folders into your MetaTrader 5 data folder
 Then in MetaEditor open `SMC_AI_Agent.mq5` and press **F7** (Compile). It has no
 external dependencies beyond the standard `Trade/Trade.mqh` library.
 
-Attach it to an **XAUUSD** chart. The recommended entry timeframe is **M15**
-(the agent then reads H1 and H4 automatically); M5 and H1 also work — the higher
-timeframes are chosen for you.
+### Which chart to attach it to
+
+**One chart only.** The agent is multi-timeframe internally — attaching a second
+copy on another period does not add analysis, it just doubles your risk.
+
+**Recommended: XAUUSD M15.** The chart period you choose becomes the *entry*
+timeframe, and the two higher ones are derived from it automatically:
+
+| Chart (entry) TF | Intermediate | Higher | Notes |
+|---|---|---|---|
+| M1 | M15 | H1 | too noisy for gold, spread dominates |
+| M5 | M30 | H4 | workable, more setups, tighter stops |
+| **M15** | **H1** | **H4** | **recommended** |
+| M30 | H4 | D1 | fewer, larger setups |
+| H1 | H4 | D1 | swing pace, may miss 2 trades/week |
+| H4 | D1 | W1 | too slow for a weekly cadence |
+
+On top of whichever hierarchy is chosen, the agent **always** reads three more
+series regardless of the chart period: **D1** for the previous day's high and low,
+**W1** for the previous week's, and **M15** for the accumulation ("Asian") range.
+So an M15 chart has the agent working across M15, H1, H4, D1 and W1 at once.
+
+Why M15 for gold: the stop distances it produces (roughly 1.5–4.5 median candles)
+are wide enough to survive gold's noise, small enough to size on a modest account,
+and the bar cadence lines up with the London and New York killzones — which is what
+makes the two-trades-a-week target realistic. On H1 the setups are better but
+rarer; on M5 the spread becomes a large fraction of the stop.
+
+The startup log states the hierarchy it picked:
+
+```
+Timeframes | entry PERIOD_M15, intermediate PERIOD_H1, higher PERIOD_H4. Daily and weekly levels from D1/W1, accumulation range from M15 - all read internally, attach to ONE chart only.
+```
+
+**Changing the chart period changes everything downstream** — the calibration, the
+swing sensitivity, the stop sizes and the setup population. The learned model is
+therefore stored per symbol *and* per timeframe
+(`smc_agent_model_<symbol>_<period>.csv`), so switching from M15 to H1 starts a
+fresh warm-up rather than carrying over weights learned on a different population.
 
 Enable **AutoTrading**, and in *Tools → Options → Expert Advisors* allow
 `Algo Trading`. The agent writes its model and state to the **common files** folder,

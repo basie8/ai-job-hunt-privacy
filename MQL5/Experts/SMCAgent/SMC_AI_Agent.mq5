@@ -433,13 +433,20 @@ int OnInit()
       return(INIT_FAILED);
      }
 
+   g_log.Info(StringFormat("Timeframes | entry %s, intermediate %s, higher %s. Daily and weekly levels from D1/W1, accumulation range from M15 - all read internally, attach to ONE chart only.",
+              EnumToString(g_ms.TfEntry()),EnumToString(g_ms.TfMid()),EnumToString(g_ms.TfHigh())));
+
    g_eng_e.SetLabel("entry");
    g_eng_m.SetLabel("mid");
    g_eng_h.SetLabel("high");
 
    SetPriors();
-   g_model.Init(F_COUNT,g_priors,GetPointer(g_log),
-                StringFormat("smc_agent_model_%s.csv",_Symbol),InpWarmupSamples,-0.35);
+   //--- The learned weights belong to a symbol AND a timeframe: setups on
+   //--- M5 and on H1 have different base rates, so a single file would let
+   //--- one contaminate the other if the chart period is ever changed.
+   string model_file=StringFormat("smc_agent_model_%s_%s.csv",_Symbol,
+                                  EnumToString((ENUM_TIMEFRAMES)Period()));
+   g_model.Init(F_COUNT,g_priors,GetPointer(g_log),model_file,InpWarmupSamples,-0.35);
    if(InpResetModel) { g_model.Reset(); g_log.Warn("Stored model discarded on request - restarting from the research priors"); }
    else if(!g_model.Load()) g_log.Info("No stored model found - starting from the research priors and observing");
 

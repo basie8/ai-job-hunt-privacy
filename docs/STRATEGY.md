@@ -55,8 +55,10 @@ and it is the one wrapped in the FTMO envelope.
 ## 1. What the agent reads (three timeframes)
 
 The chart timeframe is the **entry** timeframe. Two higher timeframes are picked
-automatically (M15 → H1 → H4, H1 → H4 → D1, …). Each one gets its own independent
-SMC engine, self-calibrated to its own candles:
+automatically (M15 → H1 → H4, H1 → H4 → D1, …), and D1, W1 and M15 are read as
+well for reference levels — five series in total from a single attached chart.
+Each of the three structural timeframes gets its own independent SMC engine,
+self-calibrated to its own candles:
 
 - swing structure and internal structure, with every **BOS** and **CHoCH**
 - **order blocks** — the last opposing candle before the displacement that broke
