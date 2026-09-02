@@ -28,6 +28,7 @@ it. The calibration runs on each bar close over the visible window
 | "Big candle" / displacement | measured against the 80th percentile of candle bodies |
 | Volume threshold | ratio to the median tick volume of the window |
 | Volatility regime | median TR of the last 20 bars ÷ median TR of the window |
+| Session windows in fixed GMT | exchange-local windows, US and EU daylight saving computed from the legislated rules and self-tested at start-up |
 | Minimum reward:risk | derived from the model's own probability (see §4) |
 
 The only numbers a user sets are **account, compliance and policy** values — risk
@@ -110,7 +111,7 @@ weight (see `RESEARCH.md`); the model owns the weight after warm-up.
 | 5 | Imbalance | 0.16 | order block stacked inside an unfilled FVG (or vice versa) |
 | 6 | Premium/discount | 0.20 | position of the entry inside the dealing range relative to equilibrium |
 | 7 | Displacement | 0.18 | largest body in the trade direction over the recent leg vs the 80th-percentile body |
-| 8 | Session | 0.12 | London killzone / NY overlap positive, Asian and late session negative, Friday close and weekend strongly negative |
+| 8 | Session | 0.12 | killzones evaluated in **exchange-local time** (London 07:00–10:00 Europe/London, New York 08:00–11:00 America/New_York, each with its own DST rule), Asian accumulation and late session negative, Friday close and weekend strongly negative |
 | 9 | Volatility regime | 0.10 | compressed tape and violent expansion both penalised |
 | 10 | Execution cost | 0.10 | spread as a fraction of the planned stop |
 | 11 | Reward:risk | 0.16 | R to the first unswept liquidity objective |

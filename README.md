@@ -22,6 +22,7 @@ MQL5/
   Experts/SMCAgent/SMC_AI_Agent.mq5     the agent
   Include/SMCAgent/
     Defs.mqh          shared types and the statistics helpers
+    TimeZones.mqh     exchange-local session timing, US/EU DST computed and self-tested
     MarketState.mqh   live chart read + self-calibration
     SmcEngine.mqh     structure, inducement, order blocks, imbalances, liquidity, sweeps
     Confluence.mqh    playbooks and the 17-factor reasoning layer

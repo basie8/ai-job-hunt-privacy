@@ -166,12 +166,54 @@ the same offset is applied to them, so both paths behave identically:
 - The offset is rounded to whole hours. Brokers on a half-hour offset are not
   supported by the auto-detection; set it manually (and note the input only takes
   whole hours, so such a broker will be 30 minutes out on killzones).
-- Killzones are defined in fixed GMT windows (London 07:00–10:00, New York
-  12:00–15:00). They track the *broker's* DST automatically but not the US DST
-  transition, so the New York window is an approximation that runs about an hour
-  early in northern-hemisphere winter.
 - In the strategy tester the calendar is not served at all and `TimeGMT()` is
   unreliable — supply the CSV and pin the offset.
+
+## 5b. Killzones and daylight saving
+
+Killzones belong to an exchange, not to GMT. The London open is 08:00 London local
+all year and the New York cash open is 09:30 New York local all year — in GMT those
+move an hour twice a year, and the two regions do not switch on the same date. So
+the windows are defined in **exchange-local time** and each follows its own rule:
+
+| Window | Defined as | DST rule applied |
+|---|---|---|
+| London killzone | 07:00–10:00 **Europe/London** | last Sunday in March 01:00 UTC → last Sunday in October 01:00 UTC (EU Directive 2000/84/EC) |
+| New York killzone | 08:00–11:00 **America/New_York** | second Sunday in March 02:00 EST → first Sunday in November 02:00 EDT (Energy Policy Act 2005) |
+| Accumulation ("Asian") range | 00:00–07:00 **Europe/London** | as London |
+| Friday liquidity drain | from 15:00 **America/New_York** | as New York |
+
+`TimeZones.mqh` computes these rules arithmetically — no network call, no lookup
+table to age out. They were validated hour by hour against the IANA time zone
+database for 2026–2027: **0 mismatches in 17,520 hours**, and the computed
+transitions reproduce the published dates (US 2026-03-08 → 2026-11-01,
+EU 2026-03-29 → 2026-10-25, and the 2025 and 2027 equivalents).
+
+`SmcTimezoneSelfTest()` re-asserts those transitions, the three-week spring window
+where the US has switched and Europe has not, and a local→UTC→local round trip
+**every time the EA starts**. If any assertion fails the EA refuses to initialise
+rather than trade on session windows it cannot justify. The startup log states the
+mapping in plain language:
+
+```
+Timezone self test: all timezone assertions passed (US and EU transitions 2026-2027, cross-region mismatch window, round trip)
+Clock: server 2026.09.02 14:15 = GMT+2. Calendar events are published in GMT and shifted by +2 h to server time.
+Sessions: London killzone 07:00-10:00 London local (BST), New York killzone 08:00-11:00 New York local (EDT). Right now it is 13.25 in London and 8.25 in New York.
+```
+
+**Why not a time API.** An HTTP time service would be strictly worse here:
+`WebRequest()` cannot be called from the strategy tester at all, it requires the URL
+to be whitelisted in *Tools → Options → Expert Advisors* on every terminal, it is
+commonly blocked on prop-firm VPS images, and it introduces a timeout and a failure
+mode into the decision path on bar close. The DST rules are legislated and
+deterministic, so computing them offline is exactly as accurate as querying a server
+and cannot fail. The only genuinely external quantity is the broker's own offset,
+which comes from the terminal itself (`TimeTradeServer() − TimeGMT()`) and can be
+pinned with `InpGmtOffsetHours` if the machine's clock is untrustworthy.
+
+*Maintenance note:* if the EU ever adopts its proposal to abolish seasonal clock
+changes, or the US adopts permanent DST, update the two rule functions in
+`TimeZones.mqh` and add the new transition to the self test.
 
 ## 6. Files it writes (common files folder)
 

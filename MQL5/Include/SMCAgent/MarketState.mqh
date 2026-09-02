@@ -10,6 +10,7 @@
 #define __SMC_MARKETSTATE_MQH__
 
 #include "Defs.mqh"
+#include "TimeZones.mqh"
 
 #define SMC_CAL_BARS   400   // size of the observation window used for calibration
 #define SMC_HIST_BARS  1200  // how much history is pulled for structure mapping
@@ -266,21 +267,29 @@ public:
       return(true);
      }
 
-   //--- accumulation ("asian") range of the current day, GMT 00-07 ---
+   //--- Accumulation ("asian") range: the hours before London opens.
+   //--- Anchored to London local 00:00-07:00 rather than to fixed GMT,
+   //--- so it keeps its meaning across a daylight saving change.
    bool              AsianRange(const int gmt_offset,double &hi,double &lo)
      {
       MqlRates m[];
       ArraySetAsSeries(m,true);
-      int cnt=CopyRates(m_symbol,PERIOD_M15,0,300,m);
+      int cnt=CopyRates(m_symbol,PERIOD_M15,0,400,m);
       if(cnt<20) return(false);
-      datetime day0=SmcDayStart(SmcNow());
+      datetime now_utc=SmcServerToUtc(SmcNow(),gmt_offset);
+      datetime today_local=SmcZoneDayStart(TZ_LONDON,now_utc);
       hi=-DBL_MAX; lo=DBL_MAX;
       for(int i=0;i<cnt;i++)
         {
-         if(m[i].time<day0-86400) break;
-         double gh=SmcGmtHourF(m[i].time,gmt_offset);
-         if(m[i].time<day0) continue;                 // only today's accumulation
-         if(gh>=0.0 && gh<7.0)
+         datetime b_utc=SmcServerToUtc(m[i].time,gmt_offset);
+         datetime b_loc=SmcUtcToZone(TZ_LONDON,b_utc);
+         datetime b_day=SmcDayStart(b_loc);
+         if(b_day>today_local) continue;               // future session, ignore
+         if(b_day<today_local) break;                  // walked past today's accumulation
+         MqlDateTime dt;
+         TimeToStruct(b_loc,dt);
+         double lh=dt.hour+dt.min/60.0;
+         if(lh>=0.0 && lh<7.0)
            {
             hi=MathMax(hi,m[i].high);
             lo=MathMin(lo,m[i].low);

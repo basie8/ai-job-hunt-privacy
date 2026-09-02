@@ -13,6 +13,7 @@
 #define __SMC_VISUALS_MQH__
 
 #include "Defs.mqh"
+#include "TimeZones.mqh"
 #include "MarketState.mqh"
 #include "SmcEngine.mqh"
 #include "Confluence.mqh"
@@ -302,26 +303,27 @@ public:
               StringFormat(" RAID %s (q=%.2f)",eng.SweepPool(),eng.SweepQuality()),c,7);
         }
 
-      //--- session killzones of the current day -------------------------
-      datetime day0=SmcDayStart(SmcNow());
+      //--- session killzones, each in the local time of its own exchange
+      datetime now_utc=SmcServerToUtc(SmcNow(),gmt);
       for(int d=0;d<2;d++)
         {
-         datetime base=day0-(datetime)(d*86400);
-         DrawKz(StringFormat("K_L%d",d),base,7,10,gmt,C'30,42,60');
-         DrawKz(StringFormat("K_N%d",d),base,12,15,gmt,C'46,36,60');
+         datetime ldn_day=SmcShift(SmcZoneDayStart(TZ_LONDON,now_utc),-(long)d*86400);
+         datetime ny_day =SmcShift(SmcZoneDayStart(TZ_NY,now_utc),    -(long)d*86400);
+         DrawKz(StringFormat("K_L%d",d),TZ_LONDON,ldn_day,7.0,10.0,gmt,C'30,42,60');
+         DrawKz(StringFormat("K_N%d",d),TZ_NY,    ny_day, 8.0,11.0,gmt,C'46,36,60');
         }
       ChartRedraw(m_chart);
      }
 
-   void              DrawKz(const string id,const datetime day0,const double gmt_from,const double gmt_to,
-                            const int gmt,const color clr)
+   //--- an exchange-local window on a local day, drawn in server time
+   void              DrawKz(const string id,const int zone,const datetime local_day,
+                            const double from_h,const double to_h,const int gmt,const color clr)
      {
-      //--- convert a GMT window into server time for this day
-      datetime t1=day0+(datetime)((int)((gmt_from+gmt)*3600));
-      datetime t2=day0+(datetime)((int)((gmt_to  +gmt)*3600));
+      datetime t1=0,t2=0;
+      SmcZoneWindowToServer(zone,local_day,from_h,to_h,gmt,t1,t2);
       double hi=ChartGetDouble(m_chart,CHART_PRICE_MAX);
       double lo=ChartGetDouble(m_chart,CHART_PRICE_MIN);
-      if(hi<=lo) return;
+      if(hi<=lo || t2<=t1) return;
       Box(id,t1,hi,t2,lo,clr,true,STYLE_SOLID,1);
      }
 

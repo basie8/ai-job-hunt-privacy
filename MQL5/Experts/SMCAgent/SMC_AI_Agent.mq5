@@ -32,6 +32,7 @@
 #property description "XAUUSD Smart Money Concepts agent - live chart reading, adaptive confluence, FTMO 2-step risk envelope"
 
 #include <SMCAgent/Defs.mqh>
+#include <SMCAgent/TimeZones.mqh>
 #include <SMCAgent/Logger.mqh>
 #include <SMCAgent/MarketState.mqh>
 #include <SMCAgent/SmcEngine.mqh>
@@ -182,8 +183,15 @@ void SyncBrokerClock(const bool announce=false)
    g_conf.SetGmtOffset(g_gmt);
    if(InpUseNews) g_news.SetGmtOffset(g_gmt);
    if(announce)
-      g_log.Info(StringFormat("Clock: server %s = GMT%+d. Calendar events are published in GMT and shifted by %+d h to server time. Killzones: London 07:00-10:00 GMT, New York 12:00-15:00 GMT.",
+     {
+      datetime utc=SmcServerToUtc(SmcNow(),g_gmt);
+      g_log.Info(StringFormat("Clock: server %s = GMT%+d. Calendar events are published in GMT and shifted by %+d h to server time.",
                  TimeToString(SmcNow(),TIME_DATE|TIME_MINUTES),g_gmt,g_gmt));
+      g_log.Info(StringFormat("Sessions: London killzone 07:00-10:00 %s local (%s), New York killzone 08:00-11:00 %s local (%s). Right now it is %.2f in London and %.2f in New York.",
+                 SmcZoneName(TZ_LONDON),SmcZoneAbbr(TZ_LONDON,utc),
+                 SmcZoneName(TZ_NY),SmcZoneAbbr(TZ_NY,utc),
+                 SmcZoneHourF(TZ_LONDON,utc),SmcZoneHourF(TZ_NY,utc)));
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -245,6 +253,17 @@ int OnInit()
    StringToUpper(sym);
    if(StringFind(sym,"XAU")<0 && StringFind(sym,"GOLD")<0)
       g_log.Warn("This agent was researched and calibrated for XAUUSD. It will still read any chart, but the news currency map and session profile assume gold.");
+
+   //--- the daylight saving rules are computed, not fetched: prove them
+   //--- against known transition dates before anything else runs
+   string tz_report="";
+   if(SmcTimezoneSelfTest(tz_report)) g_log.Info("Timezone self test: "+tz_report);
+   else
+     {
+      g_log.Err("Timezone self test FAILED: "+tz_report);
+      g_log.Err("Session windows cannot be trusted - refusing to start. Update TimeZones.mqh or pin InpGmtOffsetHours and disable session scoring.");
+      return(INIT_FAILED);
+     }
 
    g_gmt=DetectGmtOffset();
    g_log.Info(StringFormat("Server time is GMT%+d (%s) - killzones, the calendar and the daily reset are mapped to it",

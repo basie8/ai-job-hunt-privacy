@@ -93,20 +93,31 @@ private:
    double            Orient(const double bullish_score,const int dir)
      { return(dir==DIR_BEAR?-bullish_score:bullish_score); }
 
-   //--- session / killzone quality for gold ---------------------------
+   //--- Session / killzone quality for gold.
+   //--- Windows are expressed in the local time of the exchange that
+   //--- owns them, so each one follows its own daylight saving rule and
+   //--- stays correct through the weeks when the US and Europe disagree.
    double            SessionScore(const datetime t,string &label)
      {
-      double gh=SmcGmtHourF(t,m_gmt);
-      int dow=SmcDayOfWeek(t);
+      datetime utc=SmcServerToUtc(t,m_gmt);
+      double ny =SmcZoneHourF(TZ_NY,utc);        // America/New_York
+      double ld =SmcZoneHourF(TZ_LONDON,utc);    // Europe/London
+      int    dow=SmcZoneDow(TZ_LONDON,utc);
+
+      bool london_kz=(ld>=7.0  && ld<10.0);      // brackets the 08:00 London open
+      bool ny_kz    =(ny>=8.0  && ny<11.0);      // 08:30 data prints and the 09:30 cash open
+
       double s=0.0;
-      if(gh>=7.0 && gh<10.0)        { s= 1.00; label="London killzone"; }
-      else if(gh>=12.0 && gh<15.0)  { s= 1.00; label="New York killzone / London overlap"; }
-      else if(gh>=10.0 && gh<12.0)  { s= 0.30; label="London late morning"; }
-      else if(gh>=15.0 && gh<17.0)  { s= 0.35; label="New York afternoon"; }
-      else if(gh>=0.0  && gh<7.0)   { s=-0.35; label="Asian accumulation"; }
+      if(london_kz && ny_kz)        { s= 1.00; label=StringFormat("London/NY overlap (%.2f LDN / %.2f NY)",ld,ny); }
+      else if(ny_kz)                { s= 1.00; label=StringFormat("New York killzone (%.2f NY)",ny); }
+      else if(london_kz)            { s= 1.00; label=StringFormat("London killzone (%.2f LDN)",ld); }
+      else if(ld>=10.0 && ld<12.0)  { s= 0.30; label="London late morning"; }
+      else if(ny>=11.0 && ny<14.0)  { s= 0.35; label="New York afternoon"; }
+      else if(ld>=0.0  && ld<7.0)   { s=-0.35; label="Asian accumulation (pre-London)"; }
       else                          { s=-0.70; label="illiquid late session"; }
-      if(dow==5 && gh>=15.0) { s=MathMin(s,-0.60); label="Friday close - liquidity draining"; }
-      if(dow==1 && gh<6.0)   { s=MathMin(s, 0.00); label="Monday pre-London"; }
+
+      if(dow==5 && ny>=15.0) { s=MathMin(s,-0.60); label="Friday close - liquidity draining"; }
+      if(dow==1 && ld<6.0)   { s=MathMin(s, 0.00); label="Monday pre-London"; }
       if(dow==0 || dow==6)   { s=-1.00; label="weekend"; }
       return(s);
      }
