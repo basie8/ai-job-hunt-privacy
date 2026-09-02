@@ -2388,9 +2388,15 @@ private:
    double            m_peak_equity;
    string            m_state_file;
    string            m_capital_source;
+   //--- dry run: the agent runs its whole pipeline against a simulated
+   //--- balance so it can be exercised on an unfunded or disconnected
+   //--- terminal. Nothing is ever sent to the broker in this mode.
+   bool              m_sim;
+   double            m_sim_capital;
+   double            m_sim_pnl;
 
-   double            Bal(void)  { return(AccountInfoDouble(ACCOUNT_BALANCE)); }
-   double            Eq(void)   { return(AccountInfoDouble(ACCOUNT_EQUITY));  }
+   double            Bal(void)  { return(m_sim?m_sim_capital+m_sim_pnl:AccountInfoDouble(ACCOUNT_BALANCE)); }
+   double            Eq(void)   { return(m_sim?m_sim_capital+m_sim_pnl:AccountInfoDouble(ACCOUNT_EQUITY));  }
 
    //--- Is the terminal actually reporting an account?
    //--- A disconnected or unfunded terminal returns 0 for balance and
@@ -2400,6 +2406,7 @@ private:
    //--- refuses to judge until the account reports something usable.
    bool              AccountReady(void)
      {
+      if(m_sim) return(m_sim_capital>0.0 && m_initial>0.0);
       return(Bal()>0.0 && Eq()>0.0 && m_initial>0.0);
      }
 
@@ -2439,13 +2446,15 @@ public:
                                          m_day_trades(0), m_day_locked(false), m_lock_reason(""),
                                          m_loss_streak(0), m_win_streak(0), m_trading_days(0), m_last_trade_day(0),
                                          m_week_trades(0), m_week_start(0), m_peak_equity(0),
-                                         m_state_file("smc_agent_state.csv"), m_capital_source("") {}
+                                         m_state_file("smc_agent_state.csv"), m_capital_source(""),
+                                         m_sim(false), m_sim_capital(0), m_sim_pnl(0) {}
 
    void              Init(const string symbol,const long magic,CLogger *log,const double initial_capital,
                           const int phase,const double target_pct,const double daily_pct,const double max_pct,
                           const double soft_daily_pct,const double hard_daily_pct,const double soft_max_pct,
                           const double base_risk_pct,const int reset_hour,const int min_days,
-                          const string state_file,const string capital_source="")
+                          const string state_file,const string capital_source="",
+                          const bool dry_run=false,const double dry_capital=0.0)
      {
       m_symbol=symbol; m_magic=magic; m_log=log;
       m_phase=phase;
@@ -2460,7 +2469,16 @@ public:
       m_min_days=min_days;
       m_state_file=state_file;
       m_capital_source=capital_source;
-      m_initial=(initial_capital>0.0?initial_capital:Bal());
+      m_sim=dry_run;
+      m_sim_capital=(dry_run?(dry_capital>0.0?dry_capital:100000.0):0.0);
+      m_sim_pnl=0.0;
+      if(m_sim)
+        {
+         m_initial=m_sim_capital;
+         m_capital_source="DRY RUN - simulated";
+        }
+      else
+         m_initial=(initial_capital>0.0?initial_capital:Bal());
       m_peak_equity=Eq();
       if(m_log!=NULL && !AccountReady())
          m_log.Err(StringFormat("Account data unusable: balance %.2f, equity %.2f, phase capital %.2f. The agent will read the chart and draw, but will not trade until the terminal reports a funded account. Check that the terminal is logged in to a trade server with a positive balance.",
@@ -2506,7 +2524,10 @@ public:
    //--- current state --------------------------------------------------
    double            Initial(void)  const { return(m_initial); }
    string            CapitalSource(void) { return(AccountReady()?m_capital_source:m_capital_source+" - ACCOUNT NOT REPORTING"); }
-   bool              Ready(void) { return(AccountReady()); }
+   bool              Ready(void)   { return(AccountReady()); }
+   bool              DryRun(void) const { return(m_sim); }
+   //--- book a simulated result against the dry run equity curve
+   void              SimAddPnL(const double money) { if(m_sim) m_sim_pnl+=money; }
    int               Phase(void)    const { return(m_phase);   }
    double            DayRef(void)   const { return(m_day_ref); }
    double            DayPnL(void)   { return(AccountReady()?Eq()-m_day_ref:0.0); }
@@ -2638,10 +2659,10 @@ public:
       //--- clamping down to vmax must never land below vmin (broken spec)
       if(lots<vmin) return(0.0);
 
-      //--- margin sanity check
+      //--- margin sanity check (needs a live account, so not in a dry run)
       double margin=0.0;
       double price=SymbolInfoDouble(m_symbol,SYMBOL_ASK);
-      if(OrderCalcMargin(ORDER_TYPE_BUY,m_symbol,lots,price,margin))
+      if(!m_sim && OrderCalcMargin(ORDER_TYPE_BUY,m_symbol,lots,price,margin))
         {
          double free_margin=AccountInfoDouble(ACCOUNT_MARGIN_FREE);
          while(lots>=vmin && margin>free_margin*0.35)
@@ -3698,6 +3719,7 @@ private:
    double            m_entry[];
    double            m_sl[];
    double            m_tp[];
+   double            m_lots[];      // >0 for a dry run trade, 0 for an observation
    int               m_dir[];
    datetime          m_time[];
    int               m_bars[];
@@ -3712,10 +3734,12 @@ public:
 
    int               Count(void) { return(ArraySize(m_dir)); }
 
-   void              Add(const double &x[],const double entry,const double sl,const double tp,const int dir)
+   void              Add(const double &x[],const double entry,const double sl,const double tp,const int dir,
+                         const double lots=0.0)
      {
       if(ArraySize(m_dir)>=VB_MAX) Remove(0);
       int k=ArraySize(m_dir);
+      ArrayResize(m_lots,k+1);
       ArrayResize(m_dir,k+1);
       ArrayResize(m_entry,k+1);
       ArrayResize(m_sl,k+1);
@@ -3723,7 +3747,7 @@ public:
       ArrayResize(m_time,k+1);
       ArrayResize(m_bars,k+1);
       ArrayResize(m_x,(k+1)*m_n);
-      m_dir[k]=dir; m_entry[k]=entry; m_sl[k]=sl; m_tp[k]=tp;
+      m_dir[k]=dir; m_entry[k]=entry; m_sl[k]=sl; m_tp[k]=tp; m_lots[k]=lots;
       m_time[k]=SmcNow(); m_bars[k]=0;
       for(int i=0;i<m_n;i++) m_x[k*m_n+i]=(i<ArraySize(x)?x[i]:0.0);
      }
@@ -3733,6 +3757,7 @@ public:
       int k=ArraySize(m_dir);
       if(i<0 || i>=k) return;
       ArrayRemove(m_x,i*m_n,m_n);
+      ArrayRemove(m_lots,i,1);
       ArrayRemove(m_dir,i,1);
       ArrayRemove(m_entry,i,1);
       ArrayRemove(m_sl,i,1);
@@ -3742,7 +3767,10 @@ public:
      }
 
    //--- resolve every paper setup against the last closed bar ---------
-   int               Resolve(const double bar_high,const double bar_low,COnlineLearner *model)
+   //--- value_per_price is what one full price unit is worth per 1.00 lot,
+   //--- so a dry run trade can be marked to money exactly as a real one is
+   int               Resolve(const double bar_high,const double bar_low,COnlineLearner *model,
+                             const double value_per_price,double &money_out)
      {
       int resolved=0;
       for(int i=ArraySize(m_dir)-1;i>=0;i--)
@@ -3761,7 +3789,14 @@ public:
             double xb[];
             ArrayResize(xb,m_n);
             for(int f=0;f<m_n;f++) xb[f]=m_x[i*m_n+f];
-            if(model!=NULL) model.Learn(xb,y,0.60);        // paper trades count less than real ones
+            //--- a dry run trade is a full observation, not a discounted one
+            double weight=(m_lots[i]>0.0?1.00:0.60);
+            if(model!=NULL) model.Learn(xb,y,weight);
+            if(m_lots[i]>0.0 && value_per_price>0.0)
+              {
+               double exit_px=(y>0.5?m_tp[i]:m_sl[i]);
+               money_out+=(exit_px-m_entry[i])*m_dir[i]*m_lots[i]*value_per_price;
+              }        // paper trades count less than real ones
             if(m_log!=NULL)
                m_log.Debug(StringFormat("Observation resolved: %s -> %s after %d bars",
                            SmcDirShort(m_dir[i]),(y>0.5?"objective":"invalidated"),m_bars[i]));
@@ -4628,6 +4663,10 @@ input double InpMinProbFloor     = 0.55;   // Never accept below this probabilit
 input int    InpTargetTradesWeek = 2;      // Minimum trades per week the agent aims for
 input int    InpWarmupSamples    = 25;     // Resolved setups observed before the model votes
 input bool   InpVirtualLearning  = true;   // Keep learning from setups that were not traded
+
+input group "=== Dry run ==="
+input bool   InpDryRun           = false;  // Dry run: full pipeline, orders logged not sent (works with no account)
+input double InpDryRunCapital    = 100000; // Assumed phase capital while dry running
 input bool   InpResetModel       = false;  // Discard the stored model on start
 
 input group "=== Trade management ==="
@@ -5032,7 +5071,11 @@ int OnInit()
 
    g_risk.Init(_Symbol,InpMagic,GetPointer(g_log),capital,InpPhase,PhaseTarget(),
                InpDailyLossPct,InpMaxLossPct,InpSoftDailyPct,InpHardDailyPct,InpSoftMaxPct,
-               InpBaseRiskPct,InpDailyResetHour,InpMinTradingDays,state_file,cap_source);
+               InpBaseRiskPct,InpDailyResetHour,InpMinTradingDays,state_file,cap_source,
+               InpDryRun,InpDryRunCapital);
+   if(InpDryRun)
+      g_log.Warn(StringFormat("DRY RUN ACTIVE: simulating %.2f of capital. The agent will size and log every trade it would take, mark them to market against real candles, and learn from the outcome - but NOTHING is sent to the broker.",
+                 InpDryRunCapital));
 
    g_log.Info(StringFormat("Phase capital %.2f (%s). Balance now %.2f, equity %.2f.",
               g_risk.Initial(),cap_source,AccountInfoDouble(ACCOUNT_BALANCE),AccountInfoDouble(ACCOUNT_EQUITY)));
@@ -5115,6 +5158,7 @@ void Redraw()
 //+------------------------------------------------------------------+
 string ModeString()
   {
+   if(g_risk.DryRun())    return("DRY RUN");
    if(!g_risk.Ready())    return("NO ACCOUNT");
    if(g_risk.DayLocked()) return("LOCKED");
    if(!g_model.IsWarm())  return("WARM-UP");
@@ -5277,10 +5321,18 @@ bool OnBarClose()
    if(InpUseNews) g_news.Refresh(false);
 
    //--- resolve the observation book against the bar that just closed
-   if(InpVirtualLearning)
+   if(InpVirtualLearning || InpDryRun)
      {
-      int done=g_vbook.Resolve(g_ms.EHigh(1),g_ms.ELow(1),GetPointer(g_model));
+      double sim_money=0.0;
+      double value_per_price=g_risk.LossPerLot(1.0);
+      int done=g_vbook.Resolve(g_ms.EHigh(1),g_ms.ELow(1),GetPointer(g_model),value_per_price,sim_money);
       if(done>0) g_model.Save();
+      if(InpDryRun && MathAbs(sim_money)>0.0)
+        {
+         g_risk.SimAddPnL(sim_money);
+         g_risk.OnTradeClosed(sim_money);
+         g_log.Think(StringFormat("DRY RUN| simulated result %.2f, equity now %.2f",sim_money,g_risk.Eq()));
+        }
      }
 
    HarvestClosedTrades();
@@ -5380,6 +5432,26 @@ bool OnBarClose()
 
    //--- execute ---------------------------------------------------------
    string comment=StringFormat("SMCAI %s p%.0f",(g_sig.dir==DIR_BULL?"L":"S"),g_sig.prob*100.0);
+
+   if(InpDryRun)
+     {
+      //--- everything a live entry does, except touching the broker. The
+      //--- trade is marked to market against real candles from here, so
+      //--- the equity curve, the FTMO floors and the model all move as
+      //--- they would live.
+      g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,lots);
+      g_risk.OnTradeOpened();
+      g_last_signal=g_sig.bar_time;
+      g_size_skips=0;
+      g_last_action=StringFormat("DRY RUN %s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry);
+      g_log.Think(StringFormat("DRY RUN| WOULD OPEN %s %.2f lots @ %.2f  sl %.2f  tp %.2f  risk %.2f  (nothing sent)",
+                  SmcDirShort(g_sig.dir),lots,g_sig.entry,g_sig.sl,g_sig.tp1,
+                  MathAbs(g_sig.entry-g_sig.sl)*lots*g_risk.LossPerLot(1.0)));
+      g_vis.DrawSignal(g_sig,g_ms.ETime(1));
+      Redraw();
+      return(true);
+     }
+
    if(g_exec.Open(g_sig.dir,lots,g_sig.sl,g_sig.tp2,comment))
      {
       ulong ticket=0,posid=0;

@@ -61,9 +61,15 @@ private:
    double            m_peak_equity;
    string            m_state_file;
    string            m_capital_source;
+   //--- dry run: the agent runs its whole pipeline against a simulated
+   //--- balance so it can be exercised on an unfunded or disconnected
+   //--- terminal. Nothing is ever sent to the broker in this mode.
+   bool              m_sim;
+   double            m_sim_capital;
+   double            m_sim_pnl;
 
-   double            Bal(void)  { return(AccountInfoDouble(ACCOUNT_BALANCE)); }
-   double            Eq(void)   { return(AccountInfoDouble(ACCOUNT_EQUITY));  }
+   double            Bal(void)  { return(m_sim?m_sim_capital+m_sim_pnl:AccountInfoDouble(ACCOUNT_BALANCE)); }
+   double            Eq(void)   { return(m_sim?m_sim_capital+m_sim_pnl:AccountInfoDouble(ACCOUNT_EQUITY));  }
 
    //--- Is the terminal actually reporting an account?
    //--- A disconnected or unfunded terminal returns 0 for balance and
@@ -73,6 +79,7 @@ private:
    //--- refuses to judge until the account reports something usable.
    bool              AccountReady(void)
      {
+      if(m_sim) return(m_sim_capital>0.0 && m_initial>0.0);
       return(Bal()>0.0 && Eq()>0.0 && m_initial>0.0);
      }
 
@@ -112,13 +119,15 @@ public:
                                          m_day_trades(0), m_day_locked(false), m_lock_reason(""),
                                          m_loss_streak(0), m_win_streak(0), m_trading_days(0), m_last_trade_day(0),
                                          m_week_trades(0), m_week_start(0), m_peak_equity(0),
-                                         m_state_file("smc_agent_state.csv"), m_capital_source("") {}
+                                         m_state_file("smc_agent_state.csv"), m_capital_source(""),
+                                         m_sim(false), m_sim_capital(0), m_sim_pnl(0) {}
 
    void              Init(const string symbol,const long magic,CLogger *log,const double initial_capital,
                           const int phase,const double target_pct,const double daily_pct,const double max_pct,
                           const double soft_daily_pct,const double hard_daily_pct,const double soft_max_pct,
                           const double base_risk_pct,const int reset_hour,const int min_days,
-                          const string state_file,const string capital_source="")
+                          const string state_file,const string capital_source="",
+                          const bool dry_run=false,const double dry_capital=0.0)
      {
       m_symbol=symbol; m_magic=magic; m_log=log;
       m_phase=phase;
@@ -133,7 +142,16 @@ public:
       m_min_days=min_days;
       m_state_file=state_file;
       m_capital_source=capital_source;
-      m_initial=(initial_capital>0.0?initial_capital:Bal());
+      m_sim=dry_run;
+      m_sim_capital=(dry_run?(dry_capital>0.0?dry_capital:100000.0):0.0);
+      m_sim_pnl=0.0;
+      if(m_sim)
+        {
+         m_initial=m_sim_capital;
+         m_capital_source="DRY RUN - simulated";
+        }
+      else
+         m_initial=(initial_capital>0.0?initial_capital:Bal());
       m_peak_equity=Eq();
       if(m_log!=NULL && !AccountReady())
          m_log.Err(StringFormat("Account data unusable: balance %.2f, equity %.2f, phase capital %.2f. The agent will read the chart and draw, but will not trade until the terminal reports a funded account. Check that the terminal is logged in to a trade server with a positive balance.",
@@ -179,7 +197,10 @@ public:
    //--- current state --------------------------------------------------
    double            Initial(void)  const { return(m_initial); }
    string            CapitalSource(void) { return(AccountReady()?m_capital_source:m_capital_source+" - ACCOUNT NOT REPORTING"); }
-   bool              Ready(void) { return(AccountReady()); }
+   bool              Ready(void)   { return(AccountReady()); }
+   bool              DryRun(void) const { return(m_sim); }
+   //--- book a simulated result against the dry run equity curve
+   void              SimAddPnL(const double money) { if(m_sim) m_sim_pnl+=money; }
    int               Phase(void)    const { return(m_phase);   }
    double            DayRef(void)   const { return(m_day_ref); }
    double            DayPnL(void)   { return(AccountReady()?Eq()-m_day_ref:0.0); }
@@ -311,10 +332,10 @@ public:
       //--- clamping down to vmax must never land below vmin (broken spec)
       if(lots<vmin) return(0.0);
 
-      //--- margin sanity check
+      //--- margin sanity check (needs a live account, so not in a dry run)
       double margin=0.0;
       double price=SymbolInfoDouble(m_symbol,SYMBOL_ASK);
-      if(OrderCalcMargin(ORDER_TYPE_BUY,m_symbol,lots,price,margin))
+      if(!m_sim && OrderCalcMargin(ORDER_TYPE_BUY,m_symbol,lots,price,margin))
         {
          double free_margin=AccountInfoDouble(ACCOUNT_MARGIN_FREE);
          while(lots>=vmin && margin>free_margin*0.35)

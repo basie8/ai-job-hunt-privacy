@@ -67,6 +67,10 @@ input double InpMinProbFloor     = 0.55;   // Never accept below this probabilit
 input int    InpTargetTradesWeek = 2;      // Minimum trades per week the agent aims for
 input int    InpWarmupSamples    = 25;     // Resolved setups observed before the model votes
 input bool   InpVirtualLearning  = true;   // Keep learning from setups that were not traded
+
+input group "=== Dry run ==="
+input bool   InpDryRun           = false;  // Dry run: full pipeline, orders logged not sent (works with no account)
+input double InpDryRunCapital    = 100000; // Assumed phase capital while dry running
 input bool   InpResetModel       = false;  // Discard the stored model on start
 
 input group "=== Trade management ==="
@@ -471,7 +475,11 @@ int OnInit()
 
    g_risk.Init(_Symbol,InpMagic,GetPointer(g_log),capital,InpPhase,PhaseTarget(),
                InpDailyLossPct,InpMaxLossPct,InpSoftDailyPct,InpHardDailyPct,InpSoftMaxPct,
-               InpBaseRiskPct,InpDailyResetHour,InpMinTradingDays,state_file,cap_source);
+               InpBaseRiskPct,InpDailyResetHour,InpMinTradingDays,state_file,cap_source,
+               InpDryRun,InpDryRunCapital);
+   if(InpDryRun)
+      g_log.Warn(StringFormat("DRY RUN ACTIVE: simulating %.2f of capital. The agent will size and log every trade it would take, mark them to market against real candles, and learn from the outcome - but NOTHING is sent to the broker.",
+                 InpDryRunCapital));
 
    g_log.Info(StringFormat("Phase capital %.2f (%s). Balance now %.2f, equity %.2f.",
               g_risk.Initial(),cap_source,AccountInfoDouble(ACCOUNT_BALANCE),AccountInfoDouble(ACCOUNT_EQUITY)));
@@ -554,6 +562,7 @@ void Redraw()
 //+------------------------------------------------------------------+
 string ModeString()
   {
+   if(g_risk.DryRun())    return("DRY RUN");
    if(!g_risk.Ready())    return("NO ACCOUNT");
    if(g_risk.DayLocked()) return("LOCKED");
    if(!g_model.IsWarm())  return("WARM-UP");
@@ -716,10 +725,18 @@ bool OnBarClose()
    if(InpUseNews) g_news.Refresh(false);
 
    //--- resolve the observation book against the bar that just closed
-   if(InpVirtualLearning)
+   if(InpVirtualLearning || InpDryRun)
      {
-      int done=g_vbook.Resolve(g_ms.EHigh(1),g_ms.ELow(1),GetPointer(g_model));
+      double sim_money=0.0;
+      double value_per_price=g_risk.LossPerLot(1.0);
+      int done=g_vbook.Resolve(g_ms.EHigh(1),g_ms.ELow(1),GetPointer(g_model),value_per_price,sim_money);
       if(done>0) g_model.Save();
+      if(InpDryRun && MathAbs(sim_money)>0.0)
+        {
+         g_risk.SimAddPnL(sim_money);
+         g_risk.OnTradeClosed(sim_money);
+         g_log.Think(StringFormat("DRY RUN| simulated result %.2f, equity now %.2f",sim_money,g_risk.Eq()));
+        }
      }
 
    HarvestClosedTrades();
@@ -819,6 +836,26 @@ bool OnBarClose()
 
    //--- execute ---------------------------------------------------------
    string comment=StringFormat("SMCAI %s p%.0f",(g_sig.dir==DIR_BULL?"L":"S"),g_sig.prob*100.0);
+
+   if(InpDryRun)
+     {
+      //--- everything a live entry does, except touching the broker. The
+      //--- trade is marked to market against real candles from here, so
+      //--- the equity curve, the FTMO floors and the model all move as
+      //--- they would live.
+      g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,lots);
+      g_risk.OnTradeOpened();
+      g_last_signal=g_sig.bar_time;
+      g_size_skips=0;
+      g_last_action=StringFormat("DRY RUN %s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry);
+      g_log.Think(StringFormat("DRY RUN| WOULD OPEN %s %.2f lots @ %.2f  sl %.2f  tp %.2f  risk %.2f  (nothing sent)",
+                  SmcDirShort(g_sig.dir),lots,g_sig.entry,g_sig.sl,g_sig.tp1,
+                  MathAbs(g_sig.entry-g_sig.sl)*lots*g_risk.LossPerLot(1.0)));
+      g_vis.DrawSignal(g_sig,g_ms.ETime(1));
+      Redraw();
+      return(true);
+     }
+
    if(g_exec.Open(g_sig.dir,lots,g_sig.sl,g_sig.tp2,comment))
      {
       ulong ticket=0,posid=0;

@@ -217,6 +217,34 @@ policy and display settings.
 | `InpVirtualLearning` | true | learn from setups that were skipped |
 | `InpResetModel` | false | discard the stored model and restart from the priors |
 
+### Dry run
+
+| Input | Default | Notes |
+|---|---|---|
+| `InpDryRun` | false | Run the entire pipeline and **log** every trade it would take instead of sending it. Works on an unfunded or disconnected terminal |
+| `InpDryRunCapital` | 100000 | Phase capital to assume while dry running |
+
+A dry run is not a paper-trade toy: the agent sizes each trade exactly as it
+would live, marks it to market against real candles, moves a simulated equity
+curve, applies the FTMO floors to that curve, counts trading days, and trains the
+model on the outcome at full weight. The only difference is that nothing reaches
+the broker.
+
+```
+DRY RUN| WOULD OPEN BUY 0.42 lots @ 4333.55  sl 4321.35  tp 4358.90  risk 512.40  (nothing sent)
+DRY RUN| simulated result +1234.56, equity now 101234.56
+```
+
+Use it to exercise the agent on an account with no equity, to watch the decision
+logic on a fresh install before funding, or to sanity check sizing against your
+broker's contract specs. The panel shows `MODE  DRY RUN` throughout so a dry run
+can never be mistaken for live trading.
+
+**Note on forcing live orders instead:** there is deliberately no switch to send
+real orders on a zero-equity account. The server rejects them for want of margin,
+so it would produce a log full of `TRADE_RETCODE_NO_MONEY` and teach you nothing
+a dry run does not.
+
 ### Trade management, news, visuals
 See the input groups in the EA — partial/break-even/trail R multiples, the news
 window and importance filter, the CSV fallback name, panel position and log level

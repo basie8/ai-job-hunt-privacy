@@ -138,6 +138,7 @@ private:
    double            m_entry[];
    double            m_sl[];
    double            m_tp[];
+   double            m_lots[];      // >0 for a dry run trade, 0 for an observation
    int               m_dir[];
    datetime          m_time[];
    int               m_bars[];
@@ -152,10 +153,12 @@ public:
 
    int               Count(void) { return(ArraySize(m_dir)); }
 
-   void              Add(const double &x[],const double entry,const double sl,const double tp,const int dir)
+   void              Add(const double &x[],const double entry,const double sl,const double tp,const int dir,
+                         const double lots=0.0)
      {
       if(ArraySize(m_dir)>=VB_MAX) Remove(0);
       int k=ArraySize(m_dir);
+      ArrayResize(m_lots,k+1);
       ArrayResize(m_dir,k+1);
       ArrayResize(m_entry,k+1);
       ArrayResize(m_sl,k+1);
@@ -163,7 +166,7 @@ public:
       ArrayResize(m_time,k+1);
       ArrayResize(m_bars,k+1);
       ArrayResize(m_x,(k+1)*m_n);
-      m_dir[k]=dir; m_entry[k]=entry; m_sl[k]=sl; m_tp[k]=tp;
+      m_dir[k]=dir; m_entry[k]=entry; m_sl[k]=sl; m_tp[k]=tp; m_lots[k]=lots;
       m_time[k]=SmcNow(); m_bars[k]=0;
       for(int i=0;i<m_n;i++) m_x[k*m_n+i]=(i<ArraySize(x)?x[i]:0.0);
      }
@@ -173,6 +176,7 @@ public:
       int k=ArraySize(m_dir);
       if(i<0 || i>=k) return;
       ArrayRemove(m_x,i*m_n,m_n);
+      ArrayRemove(m_lots,i,1);
       ArrayRemove(m_dir,i,1);
       ArrayRemove(m_entry,i,1);
       ArrayRemove(m_sl,i,1);
@@ -182,7 +186,10 @@ public:
      }
 
    //--- resolve every paper setup against the last closed bar ---------
-   int               Resolve(const double bar_high,const double bar_low,COnlineLearner *model)
+   //--- value_per_price is what one full price unit is worth per 1.00 lot,
+   //--- so a dry run trade can be marked to money exactly as a real one is
+   int               Resolve(const double bar_high,const double bar_low,COnlineLearner *model,
+                             const double value_per_price,double &money_out)
      {
       int resolved=0;
       for(int i=ArraySize(m_dir)-1;i>=0;i--)
@@ -201,7 +208,14 @@ public:
             double xb[];
             ArrayResize(xb,m_n);
             for(int f=0;f<m_n;f++) xb[f]=m_x[i*m_n+f];
-            if(model!=NULL) model.Learn(xb,y,0.60);        // paper trades count less than real ones
+            //--- a dry run trade is a full observation, not a discounted one
+            double weight=(m_lots[i]>0.0?1.00:0.60);
+            if(model!=NULL) model.Learn(xb,y,weight);
+            if(m_lots[i]>0.0 && value_per_price>0.0)
+              {
+               double exit_px=(y>0.5?m_tp[i]:m_sl[i]);
+               money_out+=(exit_px-m_entry[i])*m_dir[i]*m_lots[i]*value_per_price;
+              }        // paper trades count less than real ones
             if(m_log!=NULL)
                m_log.Debug(StringFormat("Observation resolved: %s -> %s after %d bars",
                            SmcDirShort(m_dir[i]),(y>0.5?"objective":"invalidated"),m_bars[i]));
