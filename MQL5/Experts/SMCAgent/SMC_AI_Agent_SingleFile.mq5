@@ -4064,6 +4064,72 @@ private:
       ObjectSetInteger(m_chart,n,OBJPROP_WIDTH,size);
      }
 
+   //--- Measure the font rather than assume it. Estimating pixels per
+   //--- character is what made the panel overflow its own background:
+   //--- MetaTrader renders a point size, and how wide that lands depends
+   //--- on the font and the screen. TextGetSize reports the real thing.
+   //--- Also verifies the font is actually monospace - if it is not, the
+   //--- columns cannot line up and a fixed grid is the wrong tool.
+   void              MeasureFont(void)
+     {
+      string probe="";
+      for(int i=0;i<m_cols;i++) probe+="0";
+      uint w=0,h=0;
+      TextSetFont(m_font_name,m_font);
+      if(!TextGetSize(probe,w,h) || w==0 || h==0)
+        {
+         //--- measurement unavailable: fall back to a conservative guess
+         m_row_h=(int)MathRound(m_font*1.9);
+         m_width=(int)MathRound(m_cols*(m_font*0.72))+18;
+         return;
+        }
+      m_width=(int)w+16;
+      m_row_h=(int)h+2;
+
+      //--- Never let the panel run off the chart. If the measured width
+      //--- does not fit, drop columns until it does rather than spilling
+      //--- text over the candles.
+      long chart_w=ChartGetInteger(m_chart,CHART_WIDTH_IN_PIXELS);
+      if(chart_w>200)
+        {
+         double per_char=(double)w/(double)m_cols;
+         int room=(int)(chart_w-m_x-14);
+         if(per_char>0.0 && m_width>room)
+           {
+            int fit_cols=(int)MathFloor(room/per_char);
+            m_cols=(int)MathMax(44,MathMin(m_cols,fit_cols));
+            probe="";
+            for(int i=0;i<m_cols;i++) probe+="0";
+            TextGetSize(probe,w,h);
+            m_width=(int)w+16;
+            Print(StringFormat("SMC AI Agent: panel narrowed to %d columns to fit a %d px chart.",m_cols,(int)chart_w));
+           }
+        }
+
+      //--- monospace check: a narrow and a wide glyph must measure equal
+      uint wn=0,hn=0,ww=0,hw=0;
+      TextGetSize("iiiiiiiiii",wn,hn);
+      TextGetSize("WWWWWWWWWW",ww,hw);
+      if(wn!=ww)
+        {
+         TextSetFont("Courier New",m_font);
+         uint wn2=0,hn2=0,ww2=0,hw2=0;
+         TextGetSize("iiiiiiiiii",wn2,hn2);
+         TextGetSize("WWWWWWWWWW",ww2,hw2);
+         if(wn2==ww2)
+           {
+            m_font_name="Courier New";
+            TextSetFont(m_font_name,m_font);
+            TextGetSize(probe,w,h);
+            m_width=(int)w+16;
+            m_row_h=(int)h+2;
+            Print("SMC AI Agent: Consolas is not monospace on this machine - panel switched to Courier New.");
+           }
+         else
+            Print("SMC AI Agent: no monospace font found; panel columns may not line up. Set a monospace font in Visuals.mqh (m_font_name).");
+        }
+     }
+
    //--- exactly w characters: padded with spaces or truncated with ".."
    string            Fit(const string src,const int w)
      {
@@ -4172,10 +4238,7 @@ public:
       m_font=(int)MathMax(6,MathMin(14,font_size));
       m_compact=compact;
       m_cols=(compact?54:78);
-      //--- Consolas is monospace: one character is close to 0.60 of the
-      //--- point size in width, and a row needs about 1.6x its height.
-      m_row_h=(int)MathRound(m_font*1.65);
-      m_width=(int)MathRound(m_cols*(m_font*0.60))+18;
+      MeasureFont();
      }
 
    void              Clear(void) { ObjectsDeleteAll(m_chart,VIS_PREFIX,m_sub,-1); ChartRedraw(m_chart); }
@@ -4358,13 +4421,15 @@ public:
                                const string news_line,const int gmt)
      {
       if(!m_draw_panel) return;
+      //--- MetaTrader paints foreground objects in creation order, and the
+      //--- chart layer is rebuilt after this panel was first created - so
+      //--- order blocks, structure labels and liquidity text ended up drawn
+      //--- across it. Rebuilding the whole panel each render makes it the
+      //--- newest set of objects, and therefore always on top. Within the
+      //--- rebuild the background is created first so the rows sit on it.
+      DeleteGroup("P_");
       m_row=0;
       int W=m_cols;
-      //--- Create the background FIRST. MT5 draws foreground objects in
-      //--- creation order, so a rectangle created after the labels paints
-      //--- straight over them - the panel goes solid black. Sized from the
-      //--- previous render here, corrected to the exact height at the end;
-      //--- the second call only updates properties and cannot reorder it.
       Panel("P_BG",m_x,m_y,m_width,m_last_rows*m_row_h+12,m_c_panel,C'60,64,74');
       datetime utc=SmcServerToUtc(SmcNow(),gmt);
 
@@ -4429,8 +4494,8 @@ public:
         }
 
       color sc=(total>0?m_c_bull:m_c_bear);
-      KV("SCORE",StringFormat("%+0.3f weighted  ->  probability %.1f%%  (bias %+0.2f)",
-         total,sig.prob*100.0,model.Bias()),sc);
+      KV("SCORE",StringFormat("%+0.3f weighted  ->  probability %s  (bias %+0.2f)",
+         total,(sig.prob>0.0?StringFormat("%.1f%%",sig.prob*100.0):"n/a"),model.Bias()),sc);
 
       //--- risk -------------------------------------------------------
       Row(Rule("RISK",W),m_c_dim);
@@ -4467,11 +4532,7 @@ public:
 
       KV("ACTION",StringFormat("%s   open %d",last_action,open_positions),m_c_accent);
 
-      //--- blank whatever the previous, longer render left behind
       int used=m_row;
-      for(int r=used;r<PANEL_MAX_ROWS;r++)
-         Label("P_r"+IntegerToString(r),m_x+8,m_y+6+r*m_row_h,"",m_c_dim,m_font);
-
       m_last_rows=used;
       Panel("P_BG",m_x,m_y,m_width,used*m_row_h+12,m_c_panel,C'60,64,74');
       ChartRedraw(m_chart);
