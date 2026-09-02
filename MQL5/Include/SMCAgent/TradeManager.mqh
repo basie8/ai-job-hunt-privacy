@@ -289,9 +289,14 @@ public:
       double step=SymbolInfoDouble(m_symbol,SYMBOL_VOLUME_STEP);
       double vmin=SymbolInfoDouble(m_symbol,SYMBOL_VOLUME_MIN);
       if(step<=0.0) step=0.01;
-      double v=MathFloor(volume/step)*step;
-      v=NormalizeDouble(v,2);
+      int vd=0; double t=step;
+      while(t<1.0-1e-9 && vd<8) { t*=10.0; vd++; }
+      double v=MathFloor(volume/step+1e-9)*step;
+      v=NormalizeDouble(v,vd);
       if(v<vmin) return(false);
+      //--- never close so much that the remainder falls below the minimum
+      double remain=NormalizeDouble(PositionGetDouble(POSITION_VOLUME)-v,vd);
+      if(remain>0.0 && remain<vmin) return(false);
       return(m_trade.PositionClosePartial(ticket,v));
      }
 

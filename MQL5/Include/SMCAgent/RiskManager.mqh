@@ -69,6 +69,15 @@ private:
    //--- MT5 publishes separate profit and loss tick values; for gold on
    //--- some accounts they differ, and sizing a stop off the profit value
    //--- understates the loss. Always size risk off the loss value.
+   //--- decimals implied by the broker's volume step (0.01 -> 2, 0.001 -> 3)
+   int               VolumeDigits(const double step)
+     {
+      int d=0;
+      double v=step;
+      while(v<1.0-1e-9 && d<8) { v*=10.0; d++; }
+      return(d);
+     }
+
    double            TickValueLoss(void)
      {
       double v=SymbolInfoDouble(m_symbol,SYMBOL_TRADE_TICK_VALUE_LOSS);
@@ -251,8 +260,9 @@ public:
       double vmax=SymbolInfoDouble(m_symbol,SYMBOL_VOLUME_MAX);
       double vstep=SymbolInfoDouble(m_symbol,SYMBOL_VOLUME_STEP);
       if(vstep<=0.0) vstep=0.01;
-      lots=MathFloor(lots/vstep)*vstep;
-      lots=NormalizeDouble(lots,2);
+      int vd=VolumeDigits(vstep);
+      lots=MathFloor(lots/vstep+1e-9)*vstep;
+      lots=NormalizeDouble(lots,vd);
       if(lots<vmin) return(0.0);           // cannot size compliantly -> skip the trade
       if(lots>vmax) lots=vmax;
 
@@ -264,13 +274,45 @@ public:
          double free_margin=AccountInfoDouble(ACCOUNT_MARGIN_FREE);
          while(lots>=vmin && margin>free_margin*0.35)
            {
-            lots=NormalizeDouble(lots-vstep,2);
+            lots=NormalizeDouble(lots-vstep,vd);
             if(lots<vmin) return(0.0);
             if(!OrderCalcMargin(ORDER_TYPE_BUY,m_symbol,lots,price,margin)) break;
            }
         }
       return(lots);
      }
+
+   //--- what a stop of this size costs, per 1.00 lot -----------------------
+   double            LossPerLot(const double sl_distance)
+     {
+      double tick_val=TickValueLoss();
+      double tick_sz =SymbolInfoDouble(m_symbol,SYMBOL_TRADE_TICK_SIZE);
+      if(tick_sz<=0.0 || tick_val<=0.0 || sl_distance<=0.0) return(0.0);
+      return((sl_distance/tick_sz)*tick_val);
+     }
+
+   //--- Can this account trade this stop at all?
+   //--- A structural stop does not shrink with the account: it sits where
+   //--- the idea is invalidated. Only the position size scales, and the
+   //--- broker's minimum lot puts a hard floor under how small that gets.
+   //--- lots_wanted < minimum lot means every setup would be skipped.
+   bool              SizingFeasible(const double sl_distance,double &lots_wanted,double &min_lot_risk,
+                                    double &min_lot_pct,double &risk_pct_needed)
+     {
+      lots_wanted=0.0; min_lot_risk=0.0; min_lot_pct=0.0; risk_pct_needed=0.0;
+      double per_lot=LossPerLot(sl_distance);
+      if(per_lot<=0.0) return(false);
+      double vmin=SymbolInfoDouble(m_symbol,SYMBOL_VOLUME_MIN);
+      if(vmin<=0.0) vmin=0.01;
+      double budget=m_initial*m_base_risk_pct/100.0;
+      lots_wanted =budget/per_lot;
+      min_lot_risk=per_lot*vmin;
+      min_lot_pct =SmcSafeDiv(min_lot_risk,m_initial,0.0)*100.0;
+      risk_pct_needed=min_lot_pct;
+      return(lots_wanted>=vmin);
+     }
+
+   double            BaseRiskPct(void) const { return(m_base_risk_pct); }
 
    //--- worst case check before sending an order -------------------------
    bool              WorstCaseAcceptable(const double lots,const double sl_distance,string &reason)

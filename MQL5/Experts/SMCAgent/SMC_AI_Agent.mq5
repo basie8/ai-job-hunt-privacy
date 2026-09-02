@@ -111,6 +111,7 @@ CTradeJournal  g_journal;
 CVirtualBook   g_vbook;
 CVisuals       g_vis;
 
+int            g_size_skips    = 0;      // consecutive setups skipped for lot size
 datetime       g_last_bar      = 0;
 datetime       g_last_signal   = 0;
 string         g_last_action   = "starting up";
@@ -291,6 +292,57 @@ double DetectInitialCapital(string &source)
   }
 
 //+------------------------------------------------------------------+
+//| Can this account actually trade this instrument at this risk?     |
+//|                                                                  |
+//| Everything monetary scales with the phase capital - floors,       |
+//| targets, the per-trade budget and therefore the lot size. What    |
+//| does NOT scale is the stop: it is placed where the idea is        |
+//| invalidated, from structure and live volatility, and is the same  |
+//| distance on a 1,000 account as on a 100,000 one. The broker's     |
+//| minimum lot then puts a hard floor under the smallest risk that   |
+//| can be expressed. On a small account that floor can exceed the    |
+//| risk budget, in which case every setup is skipped - correctly,    |
+//| but silently. This says so out loud, once, at start-up.           |
+//+------------------------------------------------------------------+
+void ReportSizingFeasibility()
+  {
+   double unit=g_eng_e.Unit();
+   if(unit<=0.0) { g_log.Warn("Sizing check skipped: volatility not calibrated yet."); return; }
+
+   double typical=unit*1.85;                 // representative structural stop
+   double deepest=unit*4.50;                 // the widest the agent will accept
+   double vmin=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
+   double budget=g_risk.Initial()*g_risk.BaseRiskPct()/100.0;
+
+   double want=0,minrisk=0,minpct=0,needpct=0;
+   bool ok=g_risk.SizingFeasible(typical,want,minrisk,minpct,needpct);
+
+   g_log.Info(StringFormat("Sizing | phase capital %.2f, risk budget %.2f (%.2f%%). Typical stop %.2f, deepest accepted %.2f.",
+              g_risk.Initial(),budget,g_risk.BaseRiskPct(),typical,deepest));
+   g_log.Info(StringFormat("Sizing | one minimum lot (%.2f) risks %.2f on that stop = %.2f%% of phase capital. Agent wants %.4f lots.",
+              vmin,minrisk,minpct,want));
+
+   if(!ok)
+     {
+      double need_capital=(vmin>0.0?minrisk/(g_risk.BaseRiskPct()/100.0):0.0);
+      g_log.Err(StringFormat("Sizing | NOT TRADEABLE at this risk: the smallest position the broker allows risks %.2f%% but the budget is %.2f%%. Every setup will be skipped.",
+                minpct,g_risk.BaseRiskPct()));
+      g_log.Err(StringFormat("Sizing | Fix it one of two ways: raise InpBaseRiskPct to at least %.2f%%, or run this strategy on at least %.0f of capital (about %.0f for usable granularity).",
+                needpct,need_capital,need_capital*2.0));
+      g_log.Err("Sizing | The agent will NOT raise your risk on its own - that decision is yours.");
+     }
+   else
+     {
+      double granularity=(vmin>0.0?want/vmin:0.0);
+      if(granularity<2.0)
+         g_log.Warn(StringFormat("Sizing | workable but coarse: only %.1f lot steps fit inside the risk budget, so real risk per trade will sit noticeably below target. %.0f of capital would give comfortable granularity.",
+                    granularity,g_risk.Initial()*2.0/MathMax(granularity,0.01)));
+      else
+         g_log.Info(StringFormat("Sizing | comfortable: %.1f lot steps fit inside the risk budget.",granularity));
+     }
+  }
+
+//+------------------------------------------------------------------+
 double PhaseTarget()
   {
    if(InpTargetPct>0.0) return(InpTargetPct);
@@ -422,6 +474,7 @@ int OnInit()
    g_ready=true;
    SyncBrokerClock(true);
    AnalyzeAll();
+   ReportSizingFeasibility();
    g_conf.Evaluate(g_sig);
    g_threshold=AcceptanceThreshold();
    Redraw();
@@ -710,7 +763,19 @@ bool OnBarClose()
      {
       double money=g_risk.RiskMoney(g_sig.prob);
       lots=g_risk.Lots(money,risk_dist);
-      if(lots<=0.0) { take=false; block="compliant position size rounds below the minimum lot"; }
+      if(lots<=0.0)
+        {
+         take=false;
+         block="compliant position size rounds below the minimum lot";
+         g_size_skips++;
+         if(g_size_skips==3 || (g_size_skips>3 && g_size_skips%20==0))
+           {
+            double want=0,minrisk=0,minpct=0,needpct=0;
+            g_risk.SizingFeasible(risk_dist,want,minrisk,minpct,needpct);
+            g_log.Err(StringFormat("Sizing | %d setups in a row skipped because the position cannot be sized. One minimum lot risks %.2f%% of capital against a %.2f%% budget on a %.2f stop. Raise InpBaseRiskPct to >= %.2f%% or use a larger account - the agent will not do it for you.",
+                      g_size_skips,minpct,g_risk.BaseRiskPct(),risk_dist,needpct));
+           }
+        }
       else
         {
          string wc="";
@@ -750,6 +815,7 @@ bool OnBarClose()
         }
       if(ticket>0)
         {
+         g_size_skips=0;
          g_journal.Add(ticket,posid,x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir);
          g_risk.OnTradeOpened();
          g_last_signal=g_sig.bar_time;

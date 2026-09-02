@@ -156,6 +156,72 @@ the correct 110,000 target.
   (`smc_agent_model_<symbol>.csv`), so two challenges running side by side cannot
   inherit each other's capital, trading days or streaks.
 
+## 4c. What scales with account size — and what cannot
+
+**Scales exactly, automatically, from the detected phase capital:**
+
+| Quantity | How |
+|---|---|
+| Daily / overall floors, protective floors | percentages of phase capital |
+| Phase profit target | percentage of phase capital |
+| Per-trade risk budget | `capital × InpBaseRiskPct%`, then conviction, loss-streak and target-progress scaling |
+| Remaining-budget caps | ⅓ of what is left to the soft stop, ⅕ to the hard floor |
+| **Lot size** | `risk money ÷ (stop distance × value per lot)` — recomputed for every trade |
+| Worst-case pre-trade check | scales with the lot size |
+
+A 1,000, a 10,000 and a 100,000 account produce the same decisions and the same
+stop and target *prices*; only the volume differs.
+
+**Does not scale — by design:**
+
+Stop and target distances. The stop sits where the idea is invalidated (order
+block boundary, sweep extreme, untaken inducement, plus a volatility buffer) and
+the target sits at the next unswept liquidity pool. Those are properties of the
+chart, not of your balance. Making the stop tighter because the account is small
+would not reduce risk, it would just lose more often.
+
+**The hard floor: minimum lot size**
+
+Because the stop distance is fixed by the market, the broker's minimum lot puts a
+floor under the smallest risk that can be expressed. On XAUUSD (100 oz contract,
+0.01 minimum lot, $1 per $1 move per 0.01 lot) one minimum lot on a $15 stop risks
+$15 — and that is the same $15 on every account:
+
+| Phase capital | $15 stop at 0.01 lot | Lots wanted at 0.5% risk | Result |
+|---|---|---|---|
+| 1,000 | **1.50%** of capital | 0.0033 | **every setup skipped** |
+| 5,000 | 0.30% | 0.0167 | works, coarse |
+| 10,000 | 0.15% | 0.0333 | works |
+| 25,000 | 0.06% | 0.0833 | comfortable |
+| 100,000 | 0.015% | 0.3333 | comfortable |
+
+At 0.5% risk with typical gold stops the practical minimum is roughly **3,000–5,000
+of capital to place a trade at all, and 6,000–10,000 for usable granularity**. A
+1,000 account can only trade this strategy at ~1.5% risk per trade, which is a
+different risk profile than the one this agent was designed around — that is your
+decision to make, not one the agent will make for you.
+
+**The agent tells you at start-up** rather than silently skipping trades forever.
+It measures your broker's real contract specs and the current volatility and prints
+a verdict:
+
+```
+Sizing | phase capital 10000.00, risk budget 50.00 (0.50%). Typical stop 15.20, deepest accepted 36.98.
+Sizing | one minimum lot (0.01) risks 15.20 on that stop = 0.15% of phase capital. Agent wants 0.0329 lots.
+Sizing | comfortable: 3.3 lot steps fit inside the risk budget.
+```
+
+and on an account that cannot support it:
+
+```
+Sizing | NOT TRADEABLE at this risk: the smallest position the broker allows risks 1.52% but the budget is 0.50%. Every setup will be skipped.
+Sizing | Fix it one of two ways: raise InpBaseRiskPct to at least 1.52%, or run this strategy on at least 3040 of capital (about 6080 for usable granularity).
+Sizing | The agent will NOT raise your risk on its own - that decision is yours.
+```
+
+If it still happens at run time, three consecutive skips trigger the same message
+with the live numbers, so a silently idle agent is impossible.
+
 ## 5. Time, news sources and broker-clock alignment
 
 **Where the news comes from.** One primary source and one fallback:
