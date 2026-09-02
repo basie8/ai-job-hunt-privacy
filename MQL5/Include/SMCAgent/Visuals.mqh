@@ -37,6 +37,7 @@ private:
    int               m_font;
    int               m_cols;        // panel width measured in characters
    bool              m_compact;
+   int               m_last_rows;   // height of the previous render, in rows
    string            m_font_name;
 
    color             m_c_bull;
@@ -242,7 +243,8 @@ private:
 public:
                      CVisuals(void): m_chart(0), m_sub(0), m_draw_chart(true), m_draw_panel(true),
                                      m_x(8), m_y(20), m_row_h(13), m_width(470), m_font(8),
-                                     m_cols(78), m_compact(false), m_font_name("Consolas"), m_row(0)
+                                     m_cols(78), m_compact(false), m_last_rows(34),
+                                     m_font_name("Consolas"), m_row(0)
      {
       m_c_bull=C'46,204,113';
       m_c_bear=C'231,76,60';
@@ -261,6 +263,11 @@ public:
                           const bool compact=false)
      {
       m_chart=chart_id;
+      //--- An earlier build of the agent used different object names for
+      //--- the panel rows. If it did not deinitialise cleanly those labels
+      //--- are still on the chart and would show through underneath this
+      //--- panel, so start from a blank slate every time.
+      ObjectsDeleteAll(m_chart,VIS_PREFIX,m_sub,-1);
       m_draw_chart=draw_chart;
       m_draw_panel=draw_panel;
       m_x=panel_x;
@@ -456,6 +463,12 @@ public:
       if(!m_draw_panel) return;
       m_row=0;
       int W=m_cols;
+      //--- Create the background FIRST. MT5 draws foreground objects in
+      //--- creation order, so a rectangle created after the labels paints
+      //--- straight over them - the panel goes solid black. Sized from the
+      //--- previous render here, corrected to the exact height at the end;
+      //--- the second call only updates properties and cannot reorder it.
+      Panel("P_BG",m_x,m_y,m_width,m_last_rows*m_row_h+12,m_c_panel,C'60,64,74');
       datetime utc=SmcServerToUtc(SmcNow(),gmt);
 
       //--- title ------------------------------------------------------
@@ -562,6 +575,7 @@ public:
       for(int r=used;r<PANEL_MAX_ROWS;r++)
          Label("P_r"+IntegerToString(r),m_x+8,m_y+6+r*m_row_h,"",m_c_dim,m_font);
 
+      m_last_rows=used;
       Panel("P_BG",m_x,m_y,m_width,used*m_row_h+12,m_c_panel,C'60,64,74');
       ChartRedraw(m_chart);
      }
