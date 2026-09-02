@@ -60,9 +60,17 @@ no fixed technical parameter drives a decision.
 
 Validate the reads here, then trade the MQL5 build.
 
+## Known Pine constraints handled in the code
+
+- **A function may not assign to a global.** The model's mutable scalars (learned
+  bias, update count, scored, correct) therefore live inside a `ST` array:
+  mutating the contents of a global object is allowed, rebinding the name is not.
+  The weight vector `W`, the feature vector `X` and the zone/pool collections are
+  arrays for the same reason.
+
 ## Not verified
 
-This script has **not been compiled in the Pine Editor** and has not been
-backtested. Structure, bracket balance, indentation, function resolution and
+This script has been compiled far enough to clear `CE10088`, but has **not been
+fully compiled or backtested.** Structure, bracket balance, indentation, function resolution and
 input references were checked statically. Expect to clear a diagnostic or two on
 first paste.
