@@ -65,6 +65,17 @@ private:
    double            Bal(void)  { return(AccountInfoDouble(ACCOUNT_BALANCE)); }
    double            Eq(void)   { return(AccountInfoDouble(ACCOUNT_EQUITY));  }
 
+   //--- Is the terminal actually reporting an account?
+   //--- A disconnected or unfunded terminal returns 0 for balance and
+   //--- equity. Compared against the floors that reads as "equity is far
+   //--- below the overall floor", so the agent flattened and locked the
+   //--- day over a number that was never real. Every guard below now
+   //--- refuses to judge until the account reports something usable.
+   bool              AccountReady(void)
+     {
+      return(Bal()>0.0 && Eq()>0.0 && m_initial>0.0);
+     }
+
    //--- Value of one tick per lot when the trade goes AGAINST us.
    //--- MT5 publishes separate profit and loss tick values; for gold on
    //--- some accounts they differ, and sizing a stop off the profit value
@@ -124,6 +135,9 @@ public:
       m_capital_source=capital_source;
       m_initial=(initial_capital>0.0?initial_capital:Bal());
       m_peak_equity=Eq();
+      if(m_log!=NULL && !AccountReady())
+         m_log.Err(StringFormat("Account data unusable: balance %.2f, equity %.2f, phase capital %.2f. The agent will read the chart and draw, but will not trade until the terminal reports a funded account. Check that the terminal is logged in to a trade server with a positive balance.",
+                   Bal(),Eq(),m_initial));
       LoadState();
       NewDayCheck(true);
      }
@@ -164,12 +178,13 @@ public:
 
    //--- current state --------------------------------------------------
    double            Initial(void)  const { return(m_initial); }
-   string            CapitalSource(void) const { return(m_capital_source); }
+   string            CapitalSource(void) { return(AccountReady()?m_capital_source:m_capital_source+" - ACCOUNT NOT REPORTING"); }
+   bool              Ready(void) { return(AccountReady()); }
    int               Phase(void)    const { return(m_phase);   }
    double            DayRef(void)   const { return(m_day_ref); }
-   double            DayPnL(void)   { return(Eq()-m_day_ref); }
+   double            DayPnL(void)   { return(AccountReady()?Eq()-m_day_ref:0.0); }
    double            DayPnLPct(void){ return(SmcSafeDiv(DayPnL(),m_initial,0.0)*100.0); }
-   double            TotalPnLPct(void) { return(SmcSafeDiv(Eq()-m_initial,m_initial,0.0)*100.0); }
+   double            TotalPnLPct(void) { return(AccountReady()?SmcSafeDiv(Eq()-m_initial,m_initial,0.0)*100.0:0.0); }
    double            TargetProgress(void) { return(SmcClamp(SmcSafeDiv(Eq()-m_initial,m_initial*m_target_pct/100.0,0.0),0.0,2.0)); }
    int               DayTrades(void)const { return(m_day_trades); }
    int               WeekTrades(void)const{ return(m_week_trades); }
@@ -191,6 +206,11 @@ public:
    //--- must every open position be flattened right now? ---------------
    bool              MustFlatten(string &reason)
      {
+      if(!AccountReady())
+        {
+         reason="";
+         return(false);          // cannot judge a floor without an account
+        }
       double e=Eq();
       if(e<=HardDailyFloor())
         { reason=StringFormat("equity %.2f hit the hard daily floor %.2f",e,HardDailyFloor()); return(true); }
@@ -204,6 +224,13 @@ public:
    bool              CanOpen(string &reason)
      {
       NewDayCheck();
+      if(!AccountReady())
+        {
+         //--- deliberately does NOT lock the day: this clears by itself
+         //--- the moment the terminal reports the account again
+         reason=StringFormat("terminal is not reporting an account (balance %.2f, equity %.2f)",Bal(),Eq());
+         return(false);
+        }
       if(m_day_locked) { reason="day locked: "+m_lock_reason; return(false); }
       double e=Eq();
       if(e<=SoftDailyFloor())

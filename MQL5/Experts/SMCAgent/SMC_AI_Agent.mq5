@@ -554,6 +554,7 @@ void Redraw()
 //+------------------------------------------------------------------+
 string ModeString()
   {
+   if(!g_risk.Ready())    return("NO ACCOUNT");
    if(g_risk.DayLocked()) return("LOCKED");
    if(!g_model.IsWarm())  return("WARM-UP");
    return("LIVE");
