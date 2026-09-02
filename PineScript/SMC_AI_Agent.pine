@@ -1,0 +1,1181 @@
+// © SMC AI Agent
+//@version=6
+// =====================================================================
+//  SMC AI Agent - TradingView port of the MQL5 expert advisor
+//
+//  Same strategy, same seven steps, same reasoning layer:
+//    structure -> liquidity -> test of the liquidity zone -> inducement
+//    -> imbalance -> order block -> execution
+//
+//  Same design rule: no fixed technical parameter drives a decision.
+//  Every threshold is derived at run time from the distribution of the
+//  candles that are actually on the chart.
+//
+//  DIFFERENCES FROM THE MQL5 VERSION - read these before trusting a result
+//  ---------------------------------------------------------------------
+//  BETTER HERE:
+//    * Session windows use TradingView's IANA timezone database directly
+//      ("Europe/London", "America/New_York"), so daylight saving is exact
+//      without the hand-rolled rules the MQL5 build needs.
+//    * The strategy tester gives an equity curve and trade list for free.
+//
+//  WORSE HERE - genuine limitations, not oversights:
+//    * NO PERSISTENCE. Pine cannot write files, so the learned model is
+//      rebuilt from the research priors every time the script compiles or
+//      the chart reloads. It learns forward through a backtest and then
+//      forgets. The MQL5 build keeps its weights across restarts.
+//    * NO ECONOMIC CALENDAR. Pine has no news feed. High impact releases
+//      must be typed into the input below as a date list, or the news
+//      factor stays neutral. The MQL5 build reads the MT5 calendar.
+//    * NO REAL ACCOUNT. The FTMO envelope runs against strategy.equity,
+//      which is the tester's simulated equity. It proves the logic; it
+//      does not protect a funded account.
+//    * The higher timeframe bias is a compact structure read rather than
+//      the full three-engine analysis the MQL5 build runs.
+// =====================================================================
+
+strategy("SMC AI Agent - XAUUSD FTMO",
+     shorttitle       = "SMC AI",
+     overlay          = true,
+     initial_capital  = 100000,
+     currency         = currency.USD,
+     default_qty_type = strategy.fixed,
+     default_qty_value= 1,
+     pyramiding       = 0,
+     commission_type  = strategy.commission.cash_per_order,
+     commission_value = 3.5,
+     slippage         = 3,
+     calc_on_every_tick = false,
+     max_boxes_count  = 500,
+     max_lines_count  = 500,
+     max_labels_count = 500)
+
+// ---------------------------------------------------------------------
+// Inputs - account, compliance and policy only. No indicator periods.
+// ---------------------------------------------------------------------
+gF = "FTMO 2-step compliance"
+i_phase        = input.int   (1,    "Phase (1 = Challenge 10%, 2 = Verification 5%)", minval=1, maxval=2, group=gF)
+i_dailyPct     = input.float (5.0,  "FTMO maximum daily loss %",      group=gF)
+i_maxPct       = input.float (10.0, "FTMO maximum overall loss %",    group=gF)
+i_softDailyPct = input.float (2.5,  "Stop for the day at daily loss %", group=gF)
+i_hardDailyPct = input.float (3.5,  "Flatten everything at daily loss %", group=gF)
+i_softMaxPct   = input.float (7.0,  "Protective overall drawdown %",  group=gF)
+i_riskPct      = input.float (0.5,  "Base risk per trade %",          group=gF, step=0.05)
+i_ftmoTz       = input.string("Europe/Berlin", "Daily reset timezone (FTMO uses CE(S)T)", group=gF)
+i_minDays      = input.int   (4,    "Minimum trading days in the phase", group=gF)
+
+gA = "Agent behaviour"
+i_minProb      = input.float (0.62, "Acceptance probability at full selectivity", group=gA, step=0.01)
+i_probFloor    = input.float (0.55, "Never accept below this probability", group=gA, step=0.01)
+i_tradesWeek   = input.int   (2,    "Target trades per week",         group=gA)
+i_warmup       = input.int   (25,   "Resolved setups before the model votes", group=gA)
+i_virtual      = input.bool  (true, "Keep learning from setups that were not taken", group=gA)
+
+gM = "Trade management"
+i_partialR     = input.float (1.0,  "Take partial at this R",         group=gM, step=0.1)
+i_partialPct   = input.float (50.0, "Percent closed at that point",   group=gM)
+i_beR          = input.float (1.0,  "Move stop to break even at this R", group=gM, step=0.1)
+i_trailR       = input.float (1.5,  "Structural trail after this R",  group=gM, step=0.1)
+i_timeStop     = input.int   (0,    "Give up after N bars without expansion (0 = adaptive)", group=gM)
+
+gN = "News (no calendar in Pine - supply your own)"
+i_useNews      = input.bool  (true, "Block entries around listed releases", group=gN)
+i_newsBefore   = input.int   (15,   "Minutes before",                 group=gN)
+i_newsAfter    = input.int   (10,   "Minutes after",                  group=gN)
+i_newsList     = input.text_area("", "High impact releases, one per line: YYYY-MM-DD HH:MM (UTC)", group=gN)
+
+gV = "Visuals"
+i_showZones    = input.bool  (true, "Order blocks and imbalances",    group=gV)
+i_showStruct   = input.bool  (true, "BOS / CHoCH",                    group=gV)
+i_showLiq      = input.bool  (true, "Liquidity pools and inducement", group=gV)
+i_showRange    = input.bool  (true, "Premium / discount",             group=gV)
+i_showKz       = input.bool  (true, "Killzone shading",               group=gV)
+i_showPanel    = input.bool  (true, "Decision panel",                 group=gV)
+
+// ---------------------------------------------------------------------
+// Colours
+// ---------------------------------------------------------------------
+cBull     = color.new(#26a69a, 0)
+cBear     = color.new(#ef5350, 0)
+cBullFill = color.new(#26a69a, 85)
+cBearFill = color.new(#ef5350, 85)
+cFvgBull  = color.new(#2962ff, 88)
+cFvgBear  = color.new(#ff9800, 88)
+cAccent   = color.new(#f1c40f, 0)
+cDim      = color.new(#787b86, 0)
+cPanelBg  = color.new(#12141a, 10)
+cText     = color.new(#dcdde1, 0)
+
+// =====================================================================
+//  1. SELF CALIBRATION
+//     Everything a normal strategy would hard-code is measured here from
+//     the candles on the chart. Closed bars only - the forming bar is
+//     incomplete and would drag every statistic towards zero.
+// =====================================================================
+CAL = 400                                   // observation window
+
+tr1        = math.max(high[1] - low[1], math.max(math.abs(high[1] - close[2]), math.abs(low[1] - close[2])))
+body1      = math.abs(close[1] - open[1])
+
+unit       = ta.percentile_linear_interpolation(tr1,   CAL, 50)   // "one normal candle"
+bodyP80    = ta.percentile_linear_interpolation(body1, CAL, 80)
+volMed     = ta.percentile_linear_interpolation(volume[1], CAL, 50)
+trRecent   = ta.percentile_linear_interpolation(tr1,   20,  50)
+volRegime  = unit > 0 ? trRecent / unit : 1.0
+
+// significant imbalance: 70th percentile of the gaps actually present
+var array<float> gapPool = array.new<float>()
+gapUp   = low[2]  - high[4]
+gapDn   = low[4]  - high[2]
+gapRaw  = math.max(gapUp, gapDn)
+if gapRaw > 0
+    array.push(gapPool, gapRaw)
+    if array.size(gapPool) > 200
+        array.shift(gapPool)
+gapThr = array.size(gapPool) > 10 ? array.percentile_linear_interpolation(gapPool, 70) : unit * 0.35
+
+// ---------------------------------------------------------------------
+// Adaptive swing sensitivity: pick the pivot length whose pivot density
+// matches the market's own rhythm (~1 pivot every 8 candles). Counted
+// incrementally so it costs nothing per bar.
+// ---------------------------------------------------------------------
+f_ph(int len) =>
+    bool ok = true
+    for i = 1 to len
+        if high[len] <= high[len - i] or high[len] < high[len + i]
+            ok := false
+            break
+    ok
+
+f_pl(int len) =>
+    bool ok = true
+    for i = 1 to len
+        if low[len] >= low[len - i] or low[len] > low[len + i]
+            ok := false
+            break
+    ok
+
+d2 = math.sum(f_ph(2) or f_pl(2) ? 1.0 : 0.0, CAL) / CAL
+d3 = math.sum(f_ph(3) or f_pl(3) ? 1.0 : 0.0, CAL) / CAL
+d4 = math.sum(f_ph(4) or f_pl(4) ? 1.0 : 0.0, CAL) / CAL
+d5 = math.sum(f_ph(5) or f_pl(5) ? 1.0 : 0.0, CAL) / CAL
+d6 = math.sum(f_ph(6) or f_pl(6) ? 1.0 : 0.0, CAL) / CAL
+
+var int pivLen = 3
+if bar_index % 100 == 0 and bar_index > CAL
+    float best = 1e9
+    int   bl   = 3
+    if math.abs(d2 - 0.125) < best
+        best := math.abs(d2 - 0.125)
+        bl   := 2
+    if math.abs(d3 - 0.125) < best
+        best := math.abs(d3 - 0.125)
+        bl   := 3
+    if math.abs(d4 - 0.125) < best
+        best := math.abs(d4 - 0.125)
+        bl   := 4
+    if math.abs(d5 - 0.125) < best
+        best := math.abs(d5 - 0.125)
+        bl   := 5
+    if math.abs(d6 - 0.125) < best
+        best := math.abs(d6 - 0.125)
+        bl   := 6
+    pivLen := bl
+int intLen = math.max(1, int(math.floor(pivLen / 2.0)))
+
+// pivot confirmation at the adaptive length (series length is fine here)
+f_phN(int len) =>
+    bool ok = bar_index > len * 2
+    if ok
+        for i = 1 to len
+            if high[len] <= high[len - i] or high[len] < high[len + i]
+                ok := false
+                break
+    ok
+
+f_plN(int len) =>
+    bool ok = bar_index > len * 2
+    if ok
+        for i = 1 to len
+            if low[len] >= low[len - i] or low[len] > low[len + i]
+                ok := false
+                break
+    ok
+
+swingPH = f_phN(pivLen)
+swingPL = f_plN(pivLen)
+intPH   = f_phN(intLen)
+intPL   = f_plN(intLen)
+
+// =====================================================================
+//  2. TYPES
+// =====================================================================
+type Zone
+    int   kind          // 0 = order block, 1 = fair value gap
+    int   dir           // 1 bull (demand), -1 bear (supply)
+    float top
+    float bottom
+    int   startBar
+    int   activeBar     // price displaced away here; mitigation counts from here
+    bool  mitigated
+    bool  broken
+    float strength
+    float idm           // inducement guarding this zone (na = none)
+    bool  idmTaken
+    box   bx
+    label lb
+
+type Pool
+    string name
+    int    dir          // 1 = buy-side (above), -1 = sell-side (below)
+    float  price
+    int    startBar
+    bool   swept
+    line   ln
+    label  lb
+
+var array<Zone> zones = array.new<Zone>()
+var array<Pool> pools = array.new<Pool>()
+
+// =====================================================================
+//  3. HIGHER TIMEFRAME BIAS
+//     Same hierarchy the MQL5 build derives from the chart period.
+// =====================================================================
+f_adaptLen(int win) =>
+    a2 = math.sum(f_ph(2) or f_pl(2) ? 1.0 : 0.0, win) / win
+    a3 = math.sum(f_ph(3) or f_pl(3) ? 1.0 : 0.0, win) / win
+    a4 = math.sum(f_ph(4) or f_pl(4) ? 1.0 : 0.0, win) / win
+    a5 = math.sum(f_ph(5) or f_pl(5) ? 1.0 : 0.0, win) / win
+    float best = 1e9
+    int   bl   = 3
+    if math.abs(a2 - 0.125) < best
+        best := math.abs(a2 - 0.125)
+        bl   := 2
+    if math.abs(a3 - 0.125) < best
+        best := math.abs(a3 - 0.125)
+        bl   := 3
+    if math.abs(a4 - 0.125) < best
+        best := math.abs(a4 - 0.125)
+        bl   := 4
+    if math.abs(a5 - 0.125) < best
+        best := math.abs(a5 - 0.125)
+        bl   := 5
+    bl
+
+// compact swing-structure read, evaluated on whatever series it is given
+f_biasEngine() =>
+    int L = f_adaptLen(200)
+    var float bh = na
+    var float bl2 = na
+    var int   tr = 0
+    if f_phN(L)
+        bh := high[L]
+    if f_plN(L)
+        bl2 := low[L]
+    if not na(bh) and close > bh
+        tr := 1
+        bh := na
+    if not na(bl2) and close < bl2
+        tr := -1
+        bl2 := na
+    tr
+
+tfMid = switch timeframe.period
+    "1"   => "15"
+    "5"   => "30"
+    "15"  => "60"
+    "30"  => "240"
+    "60"  => "240"
+    "240" => "1D"
+    => "1D"
+
+tfHigh = switch timeframe.period
+    "1"   => "60"
+    "5"   => "240"
+    "15"  => "240"
+    "30"  => "1D"
+    "60"  => "1D"
+    "240" => "1W"
+    => "1W"
+
+biasMid  = request.security(syminfo.tickerid, tfMid,  f_biasEngine(), lookahead=barmerge.lookahead_off)
+biasHigh = request.security(syminfo.tickerid, tfHigh, f_biasEngine(), lookahead=barmerge.lookahead_off)
+
+// completed higher timeframe levels - [1] plus lookahead_on is the
+// non-repainting idiom for a value that is already closed
+pdh = request.security(syminfo.tickerid, "1D", high[1], lookahead=barmerge.lookahead_on)
+pdl = request.security(syminfo.tickerid, "1D", low[1],  lookahead=barmerge.lookahead_on)
+pwh = request.security(syminfo.tickerid, "1W", high[1], lookahead=barmerge.lookahead_on)
+pwl = request.security(syminfo.tickerid, "1W", low[1],  lookahead=barmerge.lookahead_on)
+
+// =====================================================================
+//  4. SESSIONS - TradingView resolves daylight saving from the IANA
+//     database, so these are exact all year in both regions.
+// =====================================================================
+inAsia   = not na(time(timeframe.period, "0000-0700", "Europe/London"))
+inLdnKz  = not na(time(timeframe.period, "0700-1000", "Europe/London"))
+inNyKz   = not na(time(timeframe.period, "0800-1100", "America/New_York"))
+inLdnLate= not na(time(timeframe.period, "1000-1200", "Europe/London"))
+inNyPm   = not na(time(timeframe.period, "1100-1400", "America/New_York"))
+nyFriPm  = not na(time(timeframe.period, "1500-1700", "America/New_York")) and dayofweek(time, "America/New_York") == dayofweek.friday
+
+var float asiaH = na
+var float asiaL = na
+if inAsia and not inAsia[1]
+    asiaH := high
+    asiaL := low
+else if inAsia
+    asiaH := math.max(nz(asiaH, high), high)
+    asiaL := math.min(nz(asiaL, low),  low)
+
+// =====================================================================
+//  5. MARKET STRUCTURE - BOS / CHoCH on swing and internal structure
+// =====================================================================
+var float sHigh    = na
+var int   sHighBar = na
+var float sLow     = na
+var int   sLowBar  = na
+var int   trend    = 0
+var int   iTrend   = 0
+var float iHigh    = na
+var float iLow     = na
+var int   lastChochBar = na
+var int   lastChochDir = 0
+var int   lastBosBar   = na
+var int   lastBosDir   = 0
+
+if swingPH
+    sHigh    := high[pivLen]
+    sHighBar := bar_index - pivLen
+if swingPL
+    sLow    := low[pivLen]
+    sLowBar := bar_index - pivLen
+if intPH
+    iHigh := high[intLen]
+if intPL
+    iLow  := low[intLen]
+
+// --- order block builder: the last opposing candle before the
+// --- displacement that broke structure, plus its inducement
+f_buildOB(int dir, int originBar) =>
+    int look = math.min(bar_index - originBar, 60)
+    int obIdx = 0
+    if dir == 1
+        int lowestIdx = 0
+        for j = 0 to look
+            if low[j] < low[lowestIdx]
+                lowestIdx := j
+        obIdx := lowestIdx
+        for j = lowestIdx to math.min(lowestIdx + 3, look)
+            if close[j] < open[j]
+                obIdx := j
+                break
+    else
+        int highestIdx = 0
+        for j = 0 to look
+            if high[j] > high[highestIdx]
+                highestIdx := j
+        obIdx := highestIdx
+        for j = highestIdx to math.min(highestIdx + 3, look)
+            if close[j] > open[j]
+                obIdx := j
+                break
+    // inducement: the first valid pullback inside the leg that broke
+    float idm = na
+    if obIdx > 1
+        for j = obIdx - 1 to 1
+            if dir == 1
+                bool isLow = true
+                for k = 1 to intLen
+                    if j + k > look or j - k < 0 or low[j] >= low[j - k] or low[j] > low[j + k]
+                        isLow := false
+                        break
+                if isLow
+                    idm := low[j]
+                    break
+            else
+                bool isHigh = true
+                for k = 1 to intLen
+                    if j + k > look or j - k < 0 or high[j] <= high[j - k] or high[j] < high[j + k]
+                        isHigh := false
+                        break
+                if isHigh
+                    idm := high[j]
+                    break
+    [obIdx, idm]
+
+f_pushZone(int kind, int dir, float top, float bottom, int startBar, int activeBar, float strength, float idm) =>
+    if top > bottom
+        color fill = kind == 1 ? (dir == 1 ? cFvgBull : cFvgBear) : (dir == 1 ? cBullFill : cBearFill)
+        box bx = na
+        label lb = na
+        if i_showZones
+            bx := box.new(startBar, top, bar_index + 8, bottom, border_color=color.new(dir == 1 ? cBull : cBear, 60), bgcolor=fill, border_width=1)
+            lb := label.new(startBar, top, (kind == 1 ? "FVG" : "OB") + (dir == 1 ? " +" : " -"), style=label.style_label_down, size=size.tiny, color=color.new(color.black, 100), textcolor=dir == 1 ? cBull : cBear)
+        array.push(zones, Zone.new(kind, dir, top, bottom, startBar, activeBar, false, false, strength, idm, false, bx, lb))
+        if array.size(zones) > 40
+            Zone old = array.shift(zones)
+            box.delete(old.bx)
+            label.delete(old.lb)
+
+// --- swing structure breaks
+bool bosUp   = not na(sHigh) and close > sHigh
+bool bosDown = not na(sLow)  and close < sLow
+
+if bosUp
+    bool isChoch = trend == -1
+    if i_showStruct
+        line.new(sHighBar, sHigh, bar_index, sHigh, color=cBull, style=isChoch ? line.style_dashed : line.style_solid, width=2)
+        label.new(bar_index, sHigh, isChoch ? "CHoCH" : "BOS", style=label.style_label_down, size=size.tiny, color=color.new(color.black, 100), textcolor=cBull)
+    [obIdx, idm] = f_buildOB(1, sHighBar)
+    float disp = unit > 0 ? math.abs(close - low[obIdx]) / unit : 0.0
+    float vr   = volMed > 0 ? volume[obIdx] / volMed : 1.0
+    float wid  = unit > 0 ? math.max(0.0, 1.0 - (high[obIdx] - low[obIdx]) / (unit * 3.0)) : 0.0
+    float st   = math.min(1.0, 0.40 * math.min(disp / 3.0, 1.0) + 0.25 + 0.20 * math.min(math.max((vr - 1.0) / 1.5, 0.0), 1.0) + 0.15 * wid)
+    f_pushZone(0, 1, high[obIdx], low[obIdx], bar_index - obIdx, bar_index, st, idm)
+    if isChoch
+        lastChochBar := bar_index
+        lastChochDir := 1
+    else
+        lastBosBar := bar_index
+        lastBosDir := 1
+    trend := 1
+    sHigh := na
+
+if bosDown
+    bool isChoch = trend == 1
+    if i_showStruct
+        line.new(sLowBar, sLow, bar_index, sLow, color=cBear, style=isChoch ? line.style_dashed : line.style_solid, width=2)
+        label.new(bar_index, sLow, isChoch ? "CHoCH" : "BOS", style=label.style_label_up, size=size.tiny, color=color.new(color.black, 100), textcolor=cBear)
+    [obIdx, idm] = f_buildOB(-1, sLowBar)
+    float disp = unit > 0 ? math.abs(close - high[obIdx]) / unit : 0.0
+    float vr   = volMed > 0 ? volume[obIdx] / volMed : 1.0
+    float wid  = unit > 0 ? math.max(0.0, 1.0 - (high[obIdx] - low[obIdx]) / (unit * 3.0)) : 0.0
+    float st   = math.min(1.0, 0.40 * math.min(disp / 3.0, 1.0) + 0.25 + 0.20 * math.min(math.max((vr - 1.0) / 1.5, 0.0), 1.0) + 0.15 * wid)
+    f_pushZone(0, -1, high[obIdx], low[obIdx], bar_index - obIdx, bar_index, st, idm)
+    if isChoch
+        lastChochBar := bar_index
+        lastChochDir := -1
+    else
+        lastBosBar := bar_index
+        lastBosDir := -1
+    trend := -1
+    sLow := na
+
+// --- internal structure (used only as a softer confirmation)
+if not na(iHigh) and close > iHigh
+    iTrend := 1
+    iHigh  := na
+if not na(iLow) and close < iLow
+    iTrend := -1
+    iLow   := na
+
+// =====================================================================
+//  6. IMBALANCES
+// =====================================================================
+if low[1] - high[3] >= gapThr
+    f_pushZone(1, 1, low[1], high[3], bar_index - 3, bar_index - 1, 0.6, na)
+if low[3] - high[1] >= gapThr
+    f_pushZone(1, -1, low[3], high[1], bar_index - 3, bar_index - 1, 0.6, na)
+
+// =====================================================================
+//  7. ZONE MAINTENANCE - mitigation, invalidation, inducement state
+//     Mitigation only counts once price has displaced away from the
+//     zone, otherwise the candle that created it marks it as tapped.
+// =====================================================================
+if array.size(zones) > 0
+    for zi = array.size(zones) - 1 to 0
+        Zone z = array.get(zones, zi)
+        if bar_index > z.activeBar
+            if z.dir == 1
+                if not na(z.idm) and low < z.idm
+                    z.idmTaken := true
+                if low <= z.top
+                    z.mitigated := true
+                if close < z.bottom
+                    z.broken := true
+            else
+                if not na(z.idm) and high > z.idm
+                    z.idmTaken := true
+                if high >= z.bottom
+                    z.mitigated := true
+                if close > z.top
+                    z.broken := true
+        if z.broken
+            box.delete(z.bx)
+            label.delete(z.lb)
+            array.remove(zones, zi)
+        else if i_showZones and not na(z.bx)
+            box.set_right(z.bx, bar_index + 8)
+            if z.mitigated
+                box.set_bgcolor(z.bx, color.new(z.dir == 1 ? cBull : cBear, 93))
+
+// =====================================================================
+//  8. LIQUIDITY POOLS AND STOP RAIDS
+// =====================================================================
+f_pushPool(string nm, int dir, float price, float weight) =>
+    bool dup = false
+    if array.size(pools) > 0
+        for pi = 0 to array.size(pools) - 1
+            Pool p = array.get(pools, pi)
+            if p.name == nm and math.abs(p.price - price) < unit * 0.05
+                dup := true
+                break
+    if not dup and not na(price)
+        line ln = na
+        label lb = na
+        if i_showLiq
+            ln := line.new(bar_index, price, bar_index + 8, price, color=color.new(dir == 1 ? cBear : cBull, 40), style=line.style_dashed)
+            lb := label.new(bar_index + 8, price, " " + nm, style=label.style_none, size=size.tiny, textcolor=color.new(dir == 1 ? cBear : cBull, 30))
+        array.push(pools, Pool.new(nm, dir, price, bar_index, false, ln, lb))
+        if array.size(pools) > 30
+            Pool old = array.shift(pools)
+            line.delete(old.ln)
+            label.delete(old.lb)
+
+// equal highs / lows: two swings of the same kind at the same price
+var float prevSwingH = na
+var float prevSwingL = na
+if swingPH
+    if not na(prevSwingH) and math.abs(high[pivLen] - prevSwingH) <= unit * 0.15
+        f_pushPool("EQH", 1, (high[pivLen] + prevSwingH) / 2, 0.85)
+    else
+        f_pushPool("SWING-H", 1, high[pivLen], 0.55)
+    prevSwingH := high[pivLen]
+if swingPL
+    if not na(prevSwingL) and math.abs(low[pivLen] - prevSwingL) <= unit * 0.15
+        f_pushPool("EQL", -1, (low[pivLen] + prevSwingL) / 2, 0.85)
+    else
+        f_pushPool("SWING-L", -1, low[pivLen], 0.55)
+    prevSwingL := low[pivLen]
+
+if ta.change(pdh) != 0
+    f_pushPool("PDH", 1, pdh, 1.0)
+    f_pushPool("PDL", -1, pdl, 1.0)
+if ta.change(pwh) != 0
+    f_pushPool("PWH", 1, pwh, 0.95)
+    f_pushPool("PWL", -1, pwl, 0.95)
+if inAsia[1] and not inAsia
+    f_pushPool("ASIA-H", 1, asiaH, 0.90)
+    f_pushPool("ASIA-L", -1, asiaL, 0.90)
+
+// --- raid on the bar that just closed
+var int   sweepBar  = na
+var int   sweepDir  = 0
+var float sweepExtr = na
+var float sweepQual = 0.0
+var string sweepPool = ""
+
+if array.size(pools) > 0
+    for pi = 0 to array.size(pools) - 1
+        Pool p = array.get(pools, pi)
+        if not p.swept
+            float rng = math.max(high - low, syminfo.mintick)
+            if p.dir == 1 and high > p.price and close < p.price
+                p.swept   := true
+                sweepBar  := bar_index
+                sweepDir  := -1
+                sweepExtr := high
+                sweepQual := math.min((high - math.max(close, open)) / rng, 1.0)
+                sweepPool := p.name
+                if i_showLiq and not na(p.ln)
+                    line.set_color(p.ln, cDim)
+            if p.dir == -1 and low < p.price and close > p.price
+                p.swept   := true
+                sweepBar  := bar_index
+                sweepDir  := 1
+                sweepExtr := low
+                sweepQual := math.min((math.min(close, open) - low) / rng, 1.0)
+                sweepPool := p.name
+                if i_showLiq and not na(p.ln)
+                    line.set_color(p.ln, cDim)
+        if i_showLiq and not na(p.ln)
+            line.set_x2(p.ln, bar_index + 8)
+            label.set_x(p.lb, bar_index + 8)
+
+int sweepAge = na(sweepBar) ? 9999 : bar_index - sweepBar
+bool sweepFresh = sweepAge <= math.max(pivLen * 4, 4)
+
+// =====================================================================
+//  9. DEALING RANGE - premium / equilibrium / discount
+// =====================================================================
+var float rangeHi = na
+var float rangeLo = na
+rangeHi := swingPH ? high[pivLen] : math.max(nz(rangeHi, high), high)
+rangeLo := swingPL ? low[pivLen]  : math.min(nz(rangeLo, low),  low)
+float rangeEq  = (rangeHi + rangeLo) / 2
+float rangePos = rangeHi > rangeLo ? math.min(math.max((close - rangeLo) / (rangeHi - rangeLo), 0.0), 1.0) : 0.5
+
+// =====================================================================
+// 10. ONLINE MODEL - logistic regression anchored to research priors
+//     Pine cannot persist this. It warms up through the chart's history
+//     and is rebuilt from the priors on every recompile.
+// =====================================================================
+NF = 17
+var array<float> W = array.new<float>(NF, 0.0)
+var array<float> PR = array.new<float>(NF, 0.0)
+var array<float> X = array.new<float>(NF, 0.0)
+var float bias0 = -0.35
+var float wbias = -0.35
+var int   updates = 0
+var int   correct = 0
+var int   scored  = 0
+var bool  primed  = false
+
+if not primed
+    array.set(PR, 0,  0.26)   // HTF structure
+    array.set(PR, 1,  0.18)   // mid structure
+    array.set(PR, 2,  0.30)   // entry structure
+    array.set(PR, 3,  0.28)   // liquidity raid
+    array.set(PR, 4,  0.22)   // order block quality
+    array.set(PR, 5,  0.16)   // imbalance confluence
+    array.set(PR, 6,  0.20)   // premium / discount
+    array.set(PR, 7,  0.18)   // displacement
+    array.set(PR, 8,  0.12)   // session
+    array.set(PR, 9,  0.10)   // volatility regime
+    array.set(PR, 10, 0.10)   // execution cost
+    array.set(PR, 11, 0.16)   // reward to risk
+    array.set(PR, 12, 0.14)   // key levels
+    array.set(PR, 13, 0.14)   // confirmation candle
+    array.set(PR, 14, 0.08)   // participation
+    array.set(PR, 15, 0.16)   // news context
+    array.set(PR, 16, 0.20)   // inducement
+    for i = 0 to NF - 1
+        array.set(W, i, array.get(PR, i))
+    primed := true
+
+f_sigmoid(float x) => x > 30 ? 1.0 : x < -30 ? 0.0 : 1.0 / (1.0 + math.exp(-x))
+
+f_score() =>
+    float s = wbias
+    for i = 0 to NF - 1
+        s += array.get(W, i) * array.get(X, i)
+    s
+
+f_priorScore() =>
+    float s = bias0
+    for i = 0 to NF - 1
+        s += array.get(PR, i) * array.get(X, i)
+    s
+
+f_prob() =>
+    float pl = f_sigmoid(f_score())
+    float pp = f_sigmoid(f_priorScore())
+    float k  = math.min(updates / math.max(i_warmup, 1), 1.0)
+    pp * (1.0 - k) + pl * k
+
+f_learn(array<float> xv, float y, float sw) =>
+    float s = wbias
+    for i = 0 to NF - 1
+        s += array.get(W, i) * array.get(xv, i)
+    float p   = f_sigmoid(s)
+    float err = p - y
+    float lr  = 0.06 / math.sqrt(1.0 + updates * 0.05)
+    for i = 0 to NF - 1
+        float g = err * array.get(xv, i) * sw + 0.010 * (array.get(W, i) - array.get(PR, i))
+        array.set(W, i, math.min(math.max(array.get(W, i) - lr * g, -4.0), 4.0))
+    wbias := math.min(math.max(wbias - lr * err * sw, -2.0), 2.0)
+    updates += 1
+    scored  += 1
+    if (p >= 0.5 and y > 0.5) or (p < 0.5 and y < 0.5)
+        correct += 1
+
+// =====================================================================
+// 11. HELPERS - zone selection, objectives, news
+// =====================================================================
+f_findZone(int dir, float price, float reach) =>
+    Zone best = na
+    float bestSc = -1.0
+    if array.size(zones) > 0
+        for zi = 0 to array.size(zones) - 1
+            Zone z = array.get(zones, zi)
+            if z.dir == dir and not z.broken and price <= z.top + reach and price >= z.bottom - reach
+                float fresh = z.mitigated ? 0.55 : 1.0
+                float dist  = math.abs(price - (z.top + z.bottom) / 2)
+                float prox  = math.max(0.0, 1.0 - dist / math.max(reach, unit))
+                float sc    = z.strength * fresh * (0.6 + 0.4 * prox)
+                if sc > bestSc
+                    bestSc := sc
+                    best   := z
+    best
+
+f_overlaps(int dir, int kind, float top, float bottom) =>
+    bool found = false
+    if array.size(zones) > 0
+        for zi = 0 to array.size(zones) - 1
+            Zone z = array.get(zones, zi)
+            if z.dir == dir and z.kind == kind and not z.broken and z.bottom <= top and z.top >= bottom
+                found := true
+                break
+    found
+
+f_nextTarget(int dir, float price, float minDist) =>
+    float t = na
+    string nm = ""
+    float bestD = 1e18
+    if array.size(pools) > 0
+        for pi = 0 to array.size(pools) - 1
+            Pool p = array.get(pools, pi)
+            if not p.swept
+                if dir == 1 and p.price > price + minDist and (p.price - price) < bestD
+                    bestD := p.price - price
+                    t     := p.price
+                    nm    := p.name
+                if dir == -1 and p.price < price - minDist and (price - p.price) < bestD
+                    bestD := price - p.price
+                    t     := p.price
+                    nm    := p.name
+    [t, nm]
+
+// --- user supplied release times, parsed once (Pine has no calendar)
+var array<int> newsTs = array.new<int>()
+if barstate.isfirst and i_useNews and str.length(i_newsList) > 3
+    array<string> rows = str.split(i_newsList, "\n")
+    for ri = 0 to array.size(rows) - 1
+        string s = array.get(rows, ri)
+        if str.length(s) >= 16
+            float y  = str.tonumber(str.substring(s, 0, 4))
+            float mo = str.tonumber(str.substring(s, 5, 7))
+            float d  = str.tonumber(str.substring(s, 8, 10))
+            float hh = str.tonumber(str.substring(s, 11, 13))
+            float mm = str.tonumber(str.substring(s, 14, 16))
+            if not na(y) and not na(mo) and not na(d) and not na(hh) and not na(mm)
+                array.push(newsTs, timestamp("UTC", int(y), int(mo), int(d), int(hh), int(mm)))
+
+f_newsState() =>
+    bool blackout = false
+    int  minsTo   = 99999
+    if i_useNews and array.size(newsTs) > 0
+        for ni = 0 to array.size(newsTs) - 1
+            int diff = int((array.get(newsTs, ni) - time) / 60000)
+            if diff <= i_newsBefore and diff >= -i_newsAfter
+                blackout := true
+            if diff >= 0 and diff < minsTo
+                minsTo := diff
+    [blackout, minsTo]
+
+[newsBlackout, newsMins] = f_newsState()
+
+// =====================================================================
+// 12. DIRECTIONAL HYPOTHESIS - the three researched playbooks
+// =====================================================================
+int    dir      = 0
+string playbook = "none"
+string why      = ""
+
+bool chochOk = not na(lastChochBar) and not na(sweepBar) and lastChochDir == sweepDir and lastChochBar >= sweepBar
+bool bosOk   = not na(lastBosBar)   and not na(sweepBar) and lastBosDir   == sweepDir and lastBosBar   >= sweepBar
+
+if sweepFresh and sweepDir != 0 and (chochOk or bosOk or iTrend == sweepDir)
+    dir      := sweepDir
+    playbook := newsMins < 60 and newsMins >= 0 ? "B - post-release raid" : "A - liquidity raid + CHoCH"
+    why      := (dir == 1 ? "sell-side" : "buy-side") + " liquidity taken at " + sweepPool + " then structure shifted"
+
+if dir == 0 and trend != 0 and trend == biasHigh and lastBosDir == trend
+    Zone probe = f_findZone(trend, close, unit * 0.6)
+    if not na(probe)
+        dir      := trend
+        playbook := "C - trend continuation into origin"
+        why      := "BOS with higher timeframe agreement, price back inside the origin zone"
+
+// =====================================================================
+// 13. SIGNAL CONSTRUCTION
+// =====================================================================
+float entryP = na
+float slP    = na
+float tp1P   = na
+float tp2P   = na
+float rr1    = 0.0
+float rr2    = 0.0
+float riskD  = 0.0
+string tgtNm = ""
+bool  haveSig = false
+Zone  useZone = na
+string vetoTxt = ""
+
+if dir != 0
+    useZone := f_findZone(dir, close, unit * 0.75)
+    float zTop = na
+    float zBot = na
+    float zStr = 0.45
+    float zIdm = na
+    bool  zIdmTaken = false
+    int   zKind = 0
+    if not na(useZone)
+        zTop := useZone.top
+        zBot := useZone.bottom
+        zStr := useZone.strength
+        zIdm := useZone.idm
+        zIdmTaken := useZone.idmTaken
+        zKind := useZone.kind
+    else if not na(sweepExtr)
+        zTop := dir == 1 ? sweepExtr + unit * 0.6 : sweepExtr
+        zBot := dir == 1 ? sweepExtr : sweepExtr - unit * 0.6
+
+    if not na(zTop)
+        entryP := close
+        float buffer = unit * 0.35
+        if dir == 1
+            slP := math.min(zBot, nz(sweepExtr, zBot)) - buffer
+            slP := math.min(slP, low - buffer)
+            if not na(zIdm) and not zIdmTaken
+                slP := math.min(slP, zIdm - buffer)
+        else
+            slP := math.max(zTop, nz(sweepExtr, zTop)) + buffer
+            slP := math.max(slP, high + buffer)
+            if not na(zIdm) and not zIdmTaken
+                slP := math.max(slP, zIdm + buffer)
+        riskD := math.abs(entryP - slP)
+
+        if riskD > 0 and riskD <= unit * 4.5
+            [t1, n1] = f_nextTarget(dir, entryP, riskD * 1.2)
+            tp1P := t1
+            tgtNm := n1
+            if na(tp1P)
+                tp1P := dir == 1 ? rangeHi : rangeLo
+                tgtNm := "range extreme"
+            if not na(tp1P) and ((dir == 1 and tp1P > entryP) or (dir == -1 and tp1P < entryP))
+                tp2P := dir == 1 ? entryP + (tp1P - entryP) * 1.8 : entryP - (entryP - tp1P) * 1.8
+                rr1 := math.abs(tp1P - entryP) / riskD
+                rr2 := math.abs(tp2P - entryP) / riskD
+                haveSig := true
+            else
+                vetoTxt := "no unswept liquidity to target"
+        else
+            vetoTxt := riskD <= 0 ? "degenerate stop" : "invalidation too deep for this volatility"
+
+// =====================================================================
+// 14. THE 17 CONFLUENCE FACTORS - measured for the proposed direction
+// =====================================================================
+f_orient(float bullScore, int d) => d == -1 ? -bullScore : bullScore
+f_clamp(float v) => math.min(math.max(v, -1.0), 1.0)
+
+int d0 = dir == 0 ? 1 : dir
+
+// 0/1 higher and intermediate timeframe narrative
+array.set(X, 0, biasHigh == 0 ? 0.0 : f_orient(biasHigh == 1 ? 0.9 : -0.9, d0))
+array.set(X, 1, biasMid  == 0 ? 0.0 : f_orient(biasMid  == 1 ? 0.9 : -0.9, d0))
+// 2 entry structure
+float fStruct = chochOk ? 1.0 : bosOk ? 0.7 : iTrend == d0 ? 0.4 : -0.5
+array.set(X, 2, f_clamp(trend == d0 ? fStruct + 0.2 : fStruct))
+// 3 liquidity raid
+float fSweep = sweepFresh and sweepDir == d0 ? f_clamp(0.35 + sweepQual * 1.2) * math.max(0.10, 1.0 - sweepAge / math.max(pivLen * 4.0, 4.0)) : -0.35
+array.set(X, 3, f_clamp(fSweep))
+// 4 order block quality
+float zs   = 0.45
+bool  zMit = false
+int   zKindF = 0
+float zTopF = close
+float zBotF = close
+float zIdmF = na
+bool  zIdmT = false
+if not na(useZone)
+    zs     := useZone.strength
+    zMit   := useZone.mitigated
+    zKindF := useZone.kind
+    zTopF  := useZone.top
+    zBotF  := useZone.bottom
+    zIdmF  := useZone.idm
+    zIdmT  := useZone.idmTaken
+array.set(X, 4, f_clamp(zs * 2.0 - 0.6 - (zMit ? 0.25 : 0.0)))
+// 5 imbalance confluence
+bool ovFvg = not na(useZone) and f_overlaps(d0, 1, zTopF, zBotF)
+bool ovOb  = not na(useZone) and f_overlaps(d0, 0, zTopF, zBotF)
+array.set(X, 5, zKindF == 0 and ovFvg ? 1.0 : zKindF == 1 and ovOb ? 0.9 : -0.30)
+// 6 premium / discount
+array.set(X, 6, f_clamp(d0 == 1 ? (0.5 - rangePos) * 3.0 : (rangePos - 0.5) * 3.0))
+// 7 displacement
+float leg = 0.0
+for j = 1 to math.max(3, pivLen * 2)
+    float b = math.abs(close[j] - open[j])
+    if (d0 == 1 and close[j] > open[j]) or (d0 == -1 and close[j] < open[j])
+        leg := math.max(leg, b)
+array.set(X, 7, f_clamp(bodyP80 > 0 ? leg / bodyP80 - 0.6 : 0.0))
+// 8 session
+float fSess = inLdnKz and inNyKz ? 1.0 : inNyKz ? 1.0 : inLdnKz ? 1.0 : inLdnLate ? 0.3 : inNyPm ? 0.35 : inAsia ? -0.35 : -0.7
+fSess := nyFriPm ? math.min(fSess, -0.6) : fSess
+array.set(X, 8, fSess)
+// 9 volatility regime
+array.set(X, 9, volRegime < 0.55 ? -0.85 : volRegime < 0.80 ? -0.35 : volRegime <= 1.80 ? f_clamp((volRegime - 0.80) / 0.6) : volRegime <= 2.60 ? 0.35 : -0.45)
+// 10 execution cost - Pine has no live spread, so the tester's slippage
+//    and commission stand in for it and this factor stays neutral
+array.set(X, 10, 0.0)
+// 11 reward to risk
+array.set(X, 11, f_clamp((rr1 - 1.5) / 1.5))
+// 12 key level confluence
+float zMid = na(useZone) ? close : (zTopF + zBotF) / 2
+float dKey = math.min(math.min(math.abs(zMid - nz(pdh, close)), math.abs(zMid - nz(pdl, close))), math.min(math.abs(zMid - nz(asiaH, close)), math.abs(zMid - nz(asiaL, close))))
+array.set(X, 12, unit > 0 ? math.max(-0.5, math.min(1.0, 1.0 - (dKey / unit) / 1.5)) : 0.0)
+// 13 confirmation candle
+float rng1 = math.max(high - low, syminfo.mintick)
+float cpos = (close - low) / rng1
+float wick = d0 == 1 ? (math.min(close, open) - low) / rng1 : (high - math.max(close, open)) / rng1
+array.set(X, 13, f_clamp((d0 == 1 ? (cpos - 0.5) * 2.0 : (0.5 - cpos) * 2.0) * 0.7 + wick * 0.6))
+// 14 participation
+array.set(X, 14, f_clamp(volMed > 0 ? (volume / volMed - 1.0) / 1.2 : 0.0))
+// 15 news context
+array.set(X, 15, newsBlackout ? -1.0 : newsMins <= 45 ? -0.55 : newsMins <= 120 ? -0.15 : 0.10)
+// 16 inducement: has the trap in front of the zone been sprung
+float fIdm = 0.15
+if not na(useZone) and not na(zIdmF)
+    fIdm := zIdmT ? 1.0 : (str.startswith(playbook, "C") ? -0.90 : -0.45)
+array.set(X, 16, fIdm)
+
+float prob    = f_prob()
+float rawScr  = f_score()
+float rrNeed  = math.max(1.30, (1.0 - prob) / math.max(prob, 0.01) * 1.80)
+
+// =====================================================================
+// 15. FTMO RISK ENVELOPE
+//     Layered: soft stop ends the day, hard floor flattens, the firm's
+//     5% and 10% limits are never approached.
+// =====================================================================
+float capital = strategy.initial_capital
+float balance = strategy.initial_capital + strategy.netprofit
+float equity  = strategy.equity
+float targetPct = i_phase >= 2 ? 5.0 : 10.0
+
+bool newDay  = ta.change(dayofmonth(time, i_ftmoTz)) != 0
+bool newWeek = ta.change(weekofyear(time, i_ftmoTz)) != 0
+
+var float dayRef      = na
+var bool  dayLocked   = false
+var int   tradingDays = 0
+var int   lastTradeDay= na
+var int   weekTrades  = 0
+var int   lossStreak  = 0
+var string lockReason = ""
+
+if na(dayRef) or newDay
+    dayRef     := math.min(balance, equity)
+    dayLocked  := false
+    lockReason := ""
+if newWeek
+    weekTrades := 0
+
+float softDaily = dayRef - capital * math.min(i_softDailyPct, i_dailyPct * 0.7) / 100
+float hardDaily = dayRef - capital * math.min(i_hardDailyPct, i_dailyPct * 0.8) / 100
+float ftmoDaily = dayRef - capital * i_dailyPct / 100
+float softMax   = capital - capital * math.min(i_softMaxPct, i_maxPct * 0.8) / 100
+float ftmoMax   = capital - capital * i_maxPct / 100
+float targetEq  = capital + capital * targetPct / 100
+
+float remDaily = math.max(equity - softDaily, 0.0)
+float remHard  = math.max(equity - math.max(hardDaily, softMax), 0.0)
+float progress = math.min(math.max((equity - capital) / math.max(capital * targetPct / 100, 1), 0.0), 2.0)
+
+// hard guard - flatten and lock
+if strategy.position_size != 0 and (equity <= hardDaily or equity <= softMax)
+    strategy.close_all(comment="risk floor")
+    dayLocked  := true
+    lockReason := equity <= hardDaily ? "hard daily floor" : "protective overall floor"
+if equity <= softDaily and not dayLocked
+    dayLocked  := true
+    lockReason := "soft daily stop"
+
+// per-trade budget
+float conv    = math.min(math.max(0.5 + (prob - 0.55) * 2.8, 0.45), 1.35)
+float strkM   = lossStreak == 1 ? 0.75 : lossStreak == 2 ? 0.55 : lossStreak >= 3 ? 0.40 : 1.0
+float progM   = progress >= 0.90 ? 0.45 : progress >= 0.70 ? 0.65 : 1.0
+float riskMoney = math.max(math.min(capital * i_riskPct / 100 * conv * strkM * progM, math.min(remDaily / 3.0, remHard / 5.0)), 0.0)
+// qty is in instrument units here, not MT5 lots - 1 unit of XAUUSD is
+// one ounce, so 0.01 lots in MetaTrader equals 1 unit on TradingView
+float qty = riskD > 0 and syminfo.pointvalue > 0 ? riskMoney / (riskD * syminfo.pointvalue) : 0.0
+
+// =====================================================================
+// 16. FREQUENCY GOVERNOR
+// =====================================================================
+float wkElapsed = math.min(math.max((dayofweek(time, i_ftmoTz) == dayofweek.sunday ? 6 : dayofweek(time, i_ftmoTz) - 2 + hour(time, i_ftmoTz) / 24.0) / 4.875, 0.0), 1.0)
+float thr = i_minProb - math.min(math.max(i_tradesWeek * wkElapsed - weekTrades, 0.0) * 0.035, 0.10)
+thr += math.min(lossStreak * 0.02, 0.06)
+thr += remDaily < capital * i_softDailyPct / 100 * 0.5 ? 0.03 : 0.0
+thr += progress > 0.85 ? 0.04 : 0.0
+thr := math.min(math.max(thr, i_probFloor), 0.90)
+
+// =====================================================================
+// 17. GATES AND EXECUTION
+// =====================================================================
+var array<float> pendX  = array.new<float>(NF, 0.0)
+var bool  pendValid = false
+var float npAtEntry = na
+var float entryPx   = na
+var float stopPx    = na
+var float tp1Px     = na
+var float tp2Px     = na
+var int   entryBar  = na
+var int   entryDir  = 0
+var float entryRisk = na
+var bool  bePlaced  = false
+var string lastAction = "starting up"
+
+bool inPos = strategy.position_size != 0
+
+if haveSig and not inPos
+    if rr1 < rrNeed
+        vetoTxt := str.format("reward {0,number,#.##}R below the {1,number,#.##}R a {2,number,#}% setup must earn", rr1, rrNeed, prob * 100)
+    else if newsBlackout
+        vetoTxt := "inside a release window"
+    else if prob < thr
+        vetoTxt := str.format("probability {0,number,#}% below the {1,number,#}% required now", prob * 100, thr * 100)
+    else if dayLocked
+        vetoTxt := "day locked: " + lockReason
+    else if equity >= targetEq and tradingDays >= i_minDays
+        vetoTxt := "phase target reached - capital preservation"
+    else if qty <= 0
+        vetoTxt := "position size rounds to zero"
+    else if equity - (riskD * 1.25 * qty * syminfo.pointvalue) <= math.max(hardDaily, softMax)
+        vetoTxt := "worst case would breach a floor"
+    else
+        // ---- take the trade
+        if dir == 1
+            strategy.entry("L", strategy.long, qty=qty, comment=playbook)
+        else
+            strategy.entry("S", strategy.short, qty=qty, comment=playbook)
+        for i = 0 to NF - 1
+            array.set(pendX, i, array.get(X, i))
+        pendValid := true
+        npAtEntry := strategy.netprofit
+        entryPx   := entryP
+        stopPx    := slP
+        tp1Px     := tp1P
+        tp2Px     := tp2P
+        entryBar  := bar_index
+        entryDir  := dir
+        entryRisk := riskD
+        bePlaced  := false
+        weekTrades += 1
+        int dnum = year(time, i_ftmoTz) * 1000 + dayofyear(time, i_ftmoTz)
+        if na(lastTradeDay) or lastTradeDay != dnum
+            lastTradeDay := dnum
+            tradingDays  += 1
+        lastAction := (dir == 1 ? "BUY " : "SELL ") + str.tostring(qty, "#.##") + " @ " + str.tostring(entryP, format.mintick)
+        if i_showZones
+            label.new(bar_index, dir == 1 ? low - unit : high + unit, (dir == 1 ? "▲ " : "▼ ") + str.tostring(prob * 100, "#") + "%", style=dir == 1 ? label.style_label_up : label.style_label_down, size=size.small, color=color.new(dir == 1 ? cBull : cBear, 20), textcolor=color.white)
+
+if haveSig and not inPos and vetoTxt != ""
+    lastAction := "stood aside - " + vetoTxt
+
+// ---- in-trade management: partial, break even, structural trail, time stop
+if inPos and not na(entryPx)
+    float er   = math.max(nz(entryRisk, syminfo.mintick), syminfo.mintick)
+    float rNow = entryDir == 1 ? (close - entryPx) / er : (entryPx - close) / er
+    if not bePlaced and rNow >= i_beR
+        stopPx   := entryDir == 1 ? math.max(stopPx, entryPx) : math.min(stopPx, entryPx)
+        bePlaced := true
+    if rNow >= i_trailR
+        float trail = entryDir == 1 ? close - unit * 1.2 : close + unit * 1.2
+        stopPx := entryDir == 1 ? math.max(stopPx, trail) : math.min(stopPx, trail)
+    int stopBars = i_timeStop > 0 ? i_timeStop : math.max(15, pivLen * 8)
+    if bar_index - entryBar >= stopBars and rNow < 0.5
+        strategy.close_all(comment="time stop")
+        lastAction := "released - no expansion"
+    else
+        string fromId  = entryDir == 1 ? "L" : "S"
+        float  partialAt = entryDir == 1 ? entryPx + i_partialR * er : entryPx - i_partialR * er
+        strategy.exit("TP1", from_entry=fromId, qty_percent=i_partialPct, limit=partialAt, stop=stopPx)
+        strategy.exit("TP2", from_entry=fromId, limit=tp2Px, stop=stopPx)
+
+// =====================================================================
+// 18. LEARNING FEEDBACK
+// =====================================================================
+if pendValid and strategy.position_size == 0 and strategy.position_size[1] != 0
+    float pnl = strategy.netprofit - nz(npAtEntry, strategy.netprofit)
+    f_learn(pendX, pnl > 0 ? 1.0 : 0.0, 1.0)
+    lossStreak := pnl < 0 ? lossStreak + 1 : 0
+    pendValid  := false
+    entryPx    := na
+
+// ---- paper book: keep learning from setups that were not taken
+var matrix<float> vX = matrix.new<float>(0, NF)
+var array<int>   vDir  = array.new<int>()
+var array<float> vEnt  = array.new<float>()
+var array<float> vSl   = array.new<float>()
+var array<float> vTp   = array.new<float>()
+var array<int>   vAge  = array.new<int>()
+
+if i_virtual and haveSig and vetoTxt != "" and not inPos and array.size(vDir) < 40
+    matrix.add_row(vX, matrix.rows(vX), array.copy(X))
+    array.push(vDir, dir)
+    array.push(vEnt, entryP)
+    array.push(vSl,  slP)
+    array.push(vTp,  tp1P)
+    array.push(vAge, 0)
+
+if array.size(vDir) > 0
+    for vi = array.size(vDir) - 1 to 0
+        array.set(vAge, vi, array.get(vAge, vi) + 1)
+        int   vd = array.get(vDir, vi)
+        float vs = array.get(vSl, vi)
+        float vt = array.get(vTp, vi)
+        bool hitSl = vd == 1 ? low <= vs : high >= vs
+        bool hitTp = vd == 1 ? high >= vt : low <= vt
+        float y = -1.0
+        if hitSl
+            y := 0.0
+        else if hitTp
+            y := 1.0
+        else if array.get(vAge, vi) > 120
+            y := 0.0
+        if y >= 0.0
+            f_learn(matrix.row(vX, vi), y, 0.60)
+            matrix.remove_row(vX, vi)
+            array.remove(vDir, vi)
+            array.remove(vEnt, vi)
+            array.remove(vSl, vi)
+            array.remove(vTp, vi)
+            array.remove(vAge, vi)
+
+// =====================================================================
+// 19. VISUALS
+// =====================================================================
+bgcolor(i_showKz and inLdnKz ? color.new(#2962ff, 94) : i_showKz and inNyKz ? color.new(#9c27b0, 94) : na, title="Killzone")
+
+var line eqLine = na
+if i_showRange and rangeHi > rangeLo
+    line.delete(eqLine)
+    eqLine := line.new(bar_index - 1, rangeEq, bar_index + 8, rangeEq, color=cAccent, style=line.style_dotted)
+
+plot(i_showRange and rangeHi > rangeLo ? rangeHi : na, "Range high", cBear, 1, plot.style_linebr)
+plot(i_showRange and rangeHi > rangeLo ? rangeLo : na, "Range low",  cBull, 1, plot.style_linebr)
+
+// ---- decision panel
+var table pnl = table.new(position.top_left, 2, 26, bgcolor=cPanelBg, border_width=1, border_color=color.new(#3c4049, 0))
+f_row(int r, string k, string v, color c) =>
+    table.cell(pnl, 0, r, k, text_color=cDim,  text_size=size.tiny, text_halign=text.align_left)
+    table.cell(pnl, 1, r, v, text_color=c,     text_size=size.tiny, text_halign=text.align_left)
+
+if i_showPanel and barstate.islast
+    string mode = dayLocked ? "LOCKED" : updates >= i_warmup ? "LIVE" : "WARM-UP " + str.tostring(updates) + "/" + str.tostring(i_warmup)
+    f_row(0,  "SMC AI AGENT", syminfo.ticker + "  " + timeframe.period, cAccent)
+    f_row(1,  "Mode",      mode, dayLocked ? cBear : updates >= i_warmup ? cBull : cAccent)
+    f_row(2,  "Structure", str.tostring(tfHigh) + " " + (biasHigh == 1 ? "BULL" : biasHigh == -1 ? "BEAR" : "-") + " | " + str.tostring(tfMid) + " " + (biasMid == 1 ? "BULL" : biasMid == -1 ? "BEAR" : "-") + " | entry " + (trend == 1 ? "BULL" : trend == -1 ? "BEAR" : "-"), cText)
+    f_row(3,  "Playbook",  playbook, cText)
+    f_row(4,  "Raid",      na(sweepBar) ? "none" : sweepPool + " " + str.tostring(sweepAge) + " bars ago (q " + str.tostring(sweepQual, "#.##") + ")", cText)
+    f_row(5,  "Range",     str.tostring(rangeLo, format.mintick) + " - " + str.tostring(rangeHi, format.mintick) + "  at " + str.tostring(rangePos * 100, "#") + "% (" + (rangePos > 0.5 ? "premium" : "discount") + ")", cDim)
+    f_row(6,  "Pivot len", str.tostring(pivLen) + "  unit " + str.tostring(unit, format.mintick) + "  vol regime " + str.tostring(volRegime, "#.##") + "x", cDim)
+    f_row(7,  "── FACTORS", "score x weight", cAccent)
+    f_row(8,  "HTF / Mid",     str.tostring(array.get(X,0), "#.##") + " / " + str.tostring(array.get(X,1), "#.##"), cText)
+    f_row(9,  "Structure",     str.tostring(array.get(X,2), "#.##"), array.get(X,2) > 0 ? cBull : cBear)
+    f_row(10, "Liquidity raid",str.tostring(array.get(X,3), "#.##"), array.get(X,3) > 0 ? cBull : cBear)
+    f_row(11, "Order block",   str.tostring(array.get(X,4), "#.##"), array.get(X,4) > 0 ? cBull : cBear)
+    f_row(12, "Imbalance",     str.tostring(array.get(X,5), "#.##"), array.get(X,5) > 0 ? cBull : cBear)
+    f_row(13, "Prem/discount", str.tostring(array.get(X,6), "#.##"), array.get(X,6) > 0 ? cBull : cBear)
+    f_row(14, "Inducement",    str.tostring(array.get(X,16), "#.##"), array.get(X,16) > 0 ? cBull : cBear)
+    f_row(15, "Session",       str.tostring(array.get(X,8), "#.##"), array.get(X,8) > 0 ? cBull : cBear)
+    f_row(16, "Reward:risk",   str.tostring(rr1, "#.##") + "R  needs " + str.tostring(rrNeed, "#.##") + "R", rr1 >= rrNeed ? cBull : cBear)
+    f_row(17, "── MODEL", "", cAccent)
+    f_row(18, "Probability",   str.tostring(prob * 100, "#.#") + "%  vs threshold " + str.tostring(thr * 100, "#.#") + "%", prob >= thr ? cBull : cDim)
+    f_row(19, "Learning",      str.tostring(updates) + " updates, accuracy " + (scored > 0 ? str.tostring(correct * 100.0 / scored, "#") + "%" : "-") + ", paper " + str.tostring(array.size(vDir)), cDim)
+    f_row(20, "── FTMO P" + str.tostring(i_phase), "", cAccent)
+    f_row(21, "Day",           str.tostring((equity - dayRef) / capital * 100, "#.##") + "%  soft " + str.tostring(softDaily, format.mintick) + "  hard " + str.tostring(hardDaily, format.mintick), equity >= dayRef ? cBull : cBear)
+    f_row(22, "Total",         str.tostring((equity - capital) / capital * 100, "#.##") + "%  target " + str.tostring(progress * 100, "#") + "%  days " + str.tostring(tradingDays) + "/" + str.tostring(i_minDays), cText)
+    f_row(23, "Budget",        "soft stop in " + str.tostring(remDaily, "#.##") + "  hard in " + str.tostring(remHard, "#.##") + "  week trades " + str.tostring(weekTrades), cDim)
+    f_row(24, "Signal",        haveSig and vetoTxt == "" ? (dir == 1 ? "BUY" : "SELL") + " sl " + str.tostring(slP, format.mintick) + " tp " + str.tostring(tp1P, format.mintick) : "none - " + (vetoTxt != "" ? vetoTxt : "no qualified setup"), haveSig and vetoTxt == "" ? cBull : cDim)
+    f_row(25, "Action",        lastAction, cAccent)
+
+// =====================================================================
+// 20. ALERTS
+// =====================================================================
+alertcondition(haveSig and dir ==  1 and prob >= thr, "SMC AI long",  "SMC AI: long setup qualified")
+alertcondition(haveSig and dir == -1 and prob >= thr, "SMC AI short", "SMC AI: short setup qualified")
+alertcondition(dayLocked and not dayLocked[1],        "SMC AI locked","SMC AI: risk envelope locked the trading day")

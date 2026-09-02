@@ -32,11 +32,18 @@ MQL5/
     NewsFilter.mqh    MT5 economic calendar with CSV fallback
     Visuals.mqh       chart drawing and the live decision panel
     Logger.mqh        structured console/journal logging
+PineScript/
+  SMC_AI_Agent.pine   TradingView port of the same strategy (see its README)
 docs/
   RESEARCH.md   what the design is based on, with sources
   STRATEGY.md   the full decision specification
   USER_GUIDE.md install, inputs, panel legend, backtesting, limitations
 ```
+
+A TradingView port of the same strategy lives in
+[PineScript/](PineScript/) — same seven steps and same reasoning layer, useful for
+visual validation and fast research, but it cannot persist its learning or read an
+economic calendar. Trade the MQL5 build; research with the Pine one.
 
 **Start here:** [docs/USER_GUIDE.md](docs/USER_GUIDE.md) ·
 [docs/STRATEGY.md](docs/STRATEGY.md) · [docs/RESEARCH.md](docs/RESEARCH.md)
