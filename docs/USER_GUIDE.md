@@ -78,7 +78,7 @@ policy and display settings.
 ### FTMO 2-step compliance
 | Input | Default | Notes |
 |---|---|---|
-| `InpInitialCapital` | 0 | 0 = use the current balance as the phase capital |
+| `InpInitialCapital` | 0 | 0 = detect automatically from the account's opening deposit (see §4b). Set it explicitly if the account was funded in stages or the phase is already under way |
 | `InpPhase` | 1 | 1 = Challenge (10% target), 2 = Verification (5%) |
 | `InpTargetPct` | 0 | 0 = derive from the phase |
 | `InpDailyLossPct` | 5.0 | the FTMO limit — informational, never approached |
@@ -106,6 +106,55 @@ policy and display settings.
 See the input groups in the EA — partial/break-even/trail R multiples, the news
 window and importance filter, the CSV fallback name, panel position and log level
 (`3` = full decision log, `4` = adds observation-book detail).
+
+## 4b. How the account size is determined
+
+Every FTMO limit is a percentage of the capital the phase **started** with, not of
+the balance right now — so getting this number right is the difference between the
+agent's floors matching the firm's and sitting below them.
+
+With `InpInitialCapital = 0` (default) the agent resolves it in this order:
+
+1. **The account's opening deposit.** It scans the account's own deal history for
+   the earliest balance operation (`DEAL_TYPE_BALANCE`, a credit) and uses that
+   amount. This is the authoritative starting capital and is what the prop firm's
+   own limits key off.
+2. **The current balance**, only if no balance operation exists in history. If the
+   account already has closed trades, this is flagged as a **warning**, because on
+   an account that is already under way it makes every floor wrong.
+
+Setting `InpInitialCapital` explicitly always wins and is the right move if your
+account was funded in stages, or you are attaching the agent mid-phase to a
+terminal whose history has been trimmed.
+
+**Why the fallback is dangerous.** Attach the agent to a 100,000 challenge that is
+already 3% down and the naive answer, "capital = balance = 97,000", produces:
+
+```
+agent overall floor  = 97,000 - 10%  = 87,300
+FTMO closes the account at              90,000
+-> the agent would keep trading 2,700 BELOW the real breach point
+   and would chase a 106,700 target instead of 110,000
+```
+
+Reading the opening deposit instead gives 100,000, a floor of exactly 90,000, and
+the correct 110,000 target.
+
+**Guards around it**
+
+- Start-up logs the number and where it came from:
+  `Phase capital 100000.00 (detected from the opening deposit of 2026.08.15). Balance now 97000.00, equity 97000.00.`
+- The panel carries a `CAPITAL` row with the same information, live.
+- If equity is already below the phase's overall floor at start-up, that is logged
+  as an **error** — the account looks breached and the capital figure should be
+  checked before trading.
+- The stored state file may only **confirm** the detected capital (within 1%). A
+  materially different stored value is ignored with a warning instead of silently
+  redefining the floors.
+- State files are now named per account and symbol
+  (`smc_agent_state_<login>_<symbol>.csv`) and the model per symbol
+  (`smc_agent_model_<symbol>.csv`), so two challenges running side by side cannot
+  inherit each other's capital, trading days or streaks.
 
 ## 5. Time, news sources and broker-clock alignment
 
@@ -264,8 +313,8 @@ server time, so the "this PC" column is not meaningful there.
 
 | File | Purpose |
 |---|---|
-| `smc_agent_model.csv` | learned weights, bias, update count and replay memory. If the feature count ever changes (as it did when inducement was added), the loader detects the mismatch, warns, and restarts from the research priors |
-| `smc_agent_state.csv` | phase capital, trading days, streaks, equity peak |
+| `smc_agent_model_<symbol>.csv` | learned weights, bias, update count and replay memory. If the feature count ever changes (as it did when inducement was added), the loader detects the mismatch, warns, and restarts from the research priors |
+| `smc_agent_state_<login>_<symbol>.csv` | phase capital, trading days, streaks, equity peak — one per account and symbol |
 | `smc_agent_log.txt` | decision log, when `InpLogToFile` is on |
 | `smc_news.csv` | *optional input*: fallback calendar in **GMT**, `YYYY.MM.DD HH:MM;CUR;IMPORTANCE;NAME` (see §5) |
 

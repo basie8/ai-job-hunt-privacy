@@ -60,6 +60,7 @@ private:
 
    double            m_peak_equity;
    string            m_state_file;
+   string            m_capital_source;
 
    double            Bal(void)  { return(AccountInfoDouble(ACCOUNT_BALANCE)); }
    double            Eq(void)   { return(AccountInfoDouble(ACCOUNT_EQUITY));  }
@@ -91,13 +92,13 @@ public:
                                          m_day_trades(0), m_day_locked(false), m_lock_reason(""),
                                          m_loss_streak(0), m_win_streak(0), m_trading_days(0), m_last_trade_day(0),
                                          m_week_trades(0), m_week_start(0), m_peak_equity(0),
-                                         m_state_file("smc_agent_state.csv") {}
+                                         m_state_file("smc_agent_state.csv"), m_capital_source("") {}
 
    void              Init(const string symbol,const long magic,CLogger *log,const double initial_capital,
                           const int phase,const double target_pct,const double daily_pct,const double max_pct,
                           const double soft_daily_pct,const double hard_daily_pct,const double soft_max_pct,
                           const double base_risk_pct,const int reset_hour,const int min_days,
-                          const string state_file)
+                          const string state_file,const string capital_source="")
      {
       m_symbol=symbol; m_magic=magic; m_log=log;
       m_phase=phase;
@@ -111,6 +112,7 @@ public:
       m_reset_hour=reset_hour;
       m_min_days=min_days;
       m_state_file=state_file;
+      m_capital_source=capital_source;
       m_initial=(initial_capital>0.0?initial_capital:Bal());
       m_peak_equity=Eq();
       LoadState();
@@ -153,6 +155,7 @@ public:
 
    //--- current state --------------------------------------------------
    double            Initial(void)  const { return(m_initial); }
+   string            CapitalSource(void) const { return(m_capital_source); }
    int               Phase(void)    const { return(m_phase);   }
    double            DayRef(void)   const { return(m_day_ref); }
    double            DayPnL(void)   { return(Eq()-m_day_ref); }
@@ -354,8 +357,20 @@ public:
          if(k<2) k=StringSplit(line,'\t',p);
          if(k>=7 && p[0]=="SMC_AGENT_STATE")
            {
+            //--- The phase capital is authoritative from detection, not from
+            //--- the state file. A stored value may only CONFIRM it (same
+            //--- account, restarted); a materially different one means this
+            //--- state belongs to another account or another phase and must
+            //--- not silently redefine the floors.
             double init=StringToDouble(p[1]);
-            if(init>0.0 && MathAbs(init-m_initial)/MathMax(init,1.0)<0.5) m_initial=init;
+            if(init>0.0)
+              {
+               double drift=MathAbs(init-m_initial)/MathMax(m_initial,1.0);
+               if(drift<0.01) m_initial=init;                 // same capital, keep the stored precision
+               else if(m_log!=NULL)
+                  m_log.Warn(StringFormat("Stored phase capital %.2f does not match the detected %.2f - ignoring the stored value and keeping the detected one. Delete %s if this is a new phase.",
+                             init,m_initial,m_state_file));
+              }
             m_trading_days=(int)StringToInteger(p[2]);
             m_last_trade_day=(datetime)StringToInteger(p[3]);
             m_loss_streak=(int)StringToInteger(p[4]);

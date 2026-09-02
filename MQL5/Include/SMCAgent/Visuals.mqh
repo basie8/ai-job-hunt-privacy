@@ -368,7 +368,7 @@ public:
                                const string news_line,const int gmt)
      {
       if(!m_draw_panel) return;
-      int rows=15+F_COUNT;
+      int rows=16+F_COUNT;
       int h=rows*m_row_h+22;
       Panel("P_BG",m_x,m_y,m_width,h,m_c_panel,C'60,64,74');
       m_row=0;
@@ -436,6 +436,8 @@ public:
           risk.TradingDays(),risk.MinDays()),dc,8);
       Row("r2",StringFormat("BUDGET     soft stop in %.2f  hard floor in %.2f  open risk %.2f  week trades %d",
           risk.RemainingDailyBudget(),risk.RemainingHardBudget(),risk.OpenRiskMoney(),risk.WeekTrades()),m_c_dim,8);
+      Row("r2b",StringFormat("CAPITAL    phase %.2f (%s)  balance %.2f  equity %.2f",
+          risk.Initial(),risk.CapitalSource(),AccountInfoDouble(ACCOUNT_BALANCE),AccountInfoDouble(ACCOUNT_EQUITY)),m_c_dim,8);
       Row("r3",StringFormat("NEWS       %s",news_line),m_c_dim,8);
 
       //--- decision -----------------------------------------------------

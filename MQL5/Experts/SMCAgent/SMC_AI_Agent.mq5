@@ -47,7 +47,7 @@
 //| Inputs - account and compliance only, no technical parameters    |
 //+------------------------------------------------------------------+
 input group "=== FTMO 2-step compliance ==="
-input double InpInitialCapital   = 0.0;    // Initial simulated capital (0 = current balance)
+input double InpInitialCapital   = 0.0;    // Initial simulated capital (0 = detect from the account)
 input int    InpPhase            = 1;      // Phase: 1 = Challenge (10%), 2 = Verification (5%)
 input double InpTargetPct        = 0.0;    // Profit target % (0 = 10 in phase 1 / 5 in phase 2)
 input double InpDailyLossPct     = 5.0;    // FTMO maximum daily loss %
@@ -229,6 +229,68 @@ void AnnounceClocks()
   }
 
 //+------------------------------------------------------------------+
+//| Phase capital.                                                    |
+//|                                                                  |
+//| Every FTMO limit is a percentage of the capital the phase STARTED |
+//| with, not of the balance right now. Using the current balance is  |
+//| only safe on day one: attach the agent when the account is        |
+//| already 3% down and "10% of the current balance" sits well below  |
+//| the level the firm actually closes the account at.                |
+//|                                                                  |
+//| So the opening deposit is read from the account's own history -   |
+//| the first balance operation - and the live balance is used only   |
+//| as a last resort, with a warning when that is demonstrably unsafe.|
+//+------------------------------------------------------------------+
+double DetectInitialCapital(string &source)
+  {
+   if(InpInitialCapital>0.0)
+     {
+      source="set manually";
+      return(InpInitialCapital);
+     }
+
+   double deposit=0.0;
+   datetime first=0;
+   int closed_trades=0;
+   if(HistorySelect(0,SmcNow()))
+     {
+      int deals=HistoryDealsTotal();
+      for(int i=0;i<deals;i++)
+        {
+         ulong d=HistoryDealGetTicket(i);
+         if(d==0) continue;
+         long type=HistoryDealGetInteger(d,DEAL_TYPE);
+         if(type==DEAL_TYPE_BALANCE)
+           {
+            double v=HistoryDealGetDouble(d,DEAL_PROFIT);
+            if(v<=0.0) continue;                                  // deposits, not withdrawals
+            datetime t=(datetime)HistoryDealGetInteger(d,DEAL_TIME);
+            if(first==0 || t<first) { first=t; deposit=v; }
+           }
+         else if(type==DEAL_TYPE_BUY || type==DEAL_TYPE_SELL)
+           {
+            if(HistoryDealGetInteger(d,DEAL_ENTRY)==DEAL_ENTRY_OUT) closed_trades++;
+           }
+        }
+     }
+
+   if(deposit>0.0)
+     {
+      source=StringFormat("detected from the opening deposit of %s",TimeToString(first,TIME_DATE));
+      return(deposit);
+     }
+
+   double bal=AccountInfoDouble(ACCOUNT_BALANCE);
+   source="fallback: current balance";
+   if(closed_trades>0)
+      g_log.Warn(StringFormat("No opening deposit found in history, but this account already has %d closed trades. Falling back to the current balance %.2f as the phase capital - if the phase is already under way this makes every FTMO floor WRONG. Set InpInitialCapital to the real starting capital.",
+                 closed_trades,bal));
+   else
+      g_log.Info(StringFormat("No balance operation in history; using the current balance %.2f as the phase capital.",bal));
+   return(bal);
+  }
+
+//+------------------------------------------------------------------+
 double PhaseTarget()
   {
    if(InpTargetPct>0.0) return(InpTargetPct);
@@ -314,7 +376,8 @@ int OnInit()
    g_eng_h.SetLabel("high");
 
    SetPriors();
-   g_model.Init(F_COUNT,g_priors,GetPointer(g_log),"smc_agent_model.csv",InpWarmupSamples,-0.35);
+   g_model.Init(F_COUNT,g_priors,GetPointer(g_log),
+                StringFormat("smc_agent_model_%s.csv",_Symbol),InpWarmupSamples,-0.35);
    if(InpResetModel) { g_model.Reset(); g_log.Warn("Stored model discarded on request - restarting from the research priors"); }
    else if(!g_model.Load()) g_log.Info("No stored model found - starting from the research priors and observing");
 
@@ -327,9 +390,22 @@ int OnInit()
                news_ptr,GetPointer(g_model),GetPointer(g_log),
                g_gmt,InpNewsMinutesBefore,InpNewsMinutesAfter,InpNewsImportance);
 
-   g_risk.Init(_Symbol,InpMagic,GetPointer(g_log),InpInitialCapital,InpPhase,PhaseTarget(),
+   //--- per account and per symbol, so two challenges running side by side
+   //--- can never inherit each other's capital, trading days or streaks
+   string cap_source="";
+   double capital=DetectInitialCapital(cap_source);
+   long   login=AccountInfoInteger(ACCOUNT_LOGIN);
+   string state_file=StringFormat("smc_agent_state_%s_%s.csv",IntegerToString(login),_Symbol);
+
+   g_risk.Init(_Symbol,InpMagic,GetPointer(g_log),capital,InpPhase,PhaseTarget(),
                InpDailyLossPct,InpMaxLossPct,InpSoftDailyPct,InpHardDailyPct,InpSoftMaxPct,
-               InpBaseRiskPct,InpDailyResetHour,InpMinTradingDays,"smc_agent_state.csv");
+               InpBaseRiskPct,InpDailyResetHour,InpMinTradingDays,state_file,cap_source);
+
+   g_log.Info(StringFormat("Phase capital %.2f (%s). Balance now %.2f, equity %.2f.",
+              g_risk.Initial(),cap_source,AccountInfoDouble(ACCOUNT_BALANCE),AccountInfoDouble(ACCOUNT_EQUITY)));
+   if(AccountInfoDouble(ACCOUNT_EQUITY)<g_risk.OverallFloor())
+      g_log.Err(StringFormat("Equity %.2f is already below the phase's overall floor %.2f - this account looks breached. Check the capital above before trading.",
+                AccountInfoDouble(ACCOUNT_EQUITY),g_risk.OverallFloor()));
 
    g_exec.Init(_Symbol,InpMagic,InpSlippagePoints,GetPointer(g_log));
    g_journal.Init(F_COUNT);

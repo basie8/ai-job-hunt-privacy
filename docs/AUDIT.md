@@ -30,7 +30,7 @@ right-hand extent of drawn objects.
 
 ## 2. Defects found and fixed
 
-Eight issues. Seven were real; all are fixed in this commit.
+Nine issues, all real, all fixed.
 
 ### 2.1 Forming bar contaminated the self-calibration — *fixed*
 `SmcEngine::Calibrate` and `MarketState::BuildStats` began their statistics
@@ -91,6 +91,21 @@ now cleared once the agent is flat and holds no signal.
 Model and state files were opened without an explicit delimiter. The separator is
 now stated (`SMC_FIELD_SEP`), with the old default still accepted on read so an
 existing file is not orphaned.
+
+### 2.9 Phase capital taken from the current balance — *fixed (breach risk)*
+`m_initial` defaulted to the **current** balance. FTMO's limits are percentages of
+the capital the phase *started* with, so attaching the agent to a 100,000 challenge
+that was already 3% down produced an overall floor of 87,300 while the firm closes
+the account at 90,000 — the agent would have kept trading 2,700 **below** the real
+breach point, and chased a 106,700 target instead of 110,000.
+
+The capital is now read from the account's own opening deposit
+(`DEAL_TYPE_BALANCE`), falling back to the balance only when no such record exists
+and warning when the account already has closed trades. Two related defects went
+with it: the state file's 50% tolerance would restore a stored 100,000 onto a live
+140,000 account, and the single global state file let two accounts share capital,
+trading days and streaks. A stored value may now only confirm the detected one
+(within 1%), and state/model files are keyed by account login and symbol.
 
 ### Also removed
 Two superseded helpers (`SmcGmtHour`, `SmcGmtHourF`) that predate the daylight
