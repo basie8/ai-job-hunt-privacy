@@ -217,6 +217,39 @@ policy and display settings.
 | `InpVirtualLearning` | true | learn from setups that were skipped |
 | `InpResetModel` | false | discard the stored model and restart from the priors |
 
+### Notifications
+
+| Input | Default | Notes |
+|---|---|---|
+| `InpNotifyPush` | false | Push to the MetaTrader mobile app. Needs your MetaQuotes ID in *Tools → Options → Notifications* |
+| `InpNotifyEmail` | false | Email. Needs SMTP in *Tools → Options → Email* |
+| `InpNotifyPopup` | false | Terminal popup alert |
+| `InpNotifyEntries` | true | on buy / sell entries |
+| `InpNotifyExits` | true | when a trade closes |
+| `InpNotifyRisk` | true | when the risk envelope locks the day or flattens |
+
+All three channels are **off by default** — switch on the one you want. What you
+get:
+
+```
+XAUUSD PERIOD_M15 BUY 0.42 lots @ 4333.55 | SL 4321.35  TP 4358.90 (2.41R)  p 71%  A - liquidity raid + CHoCH
+XAUUSD PERIOD_M15 closed +1234.56 | day +1.23%  total +3.45%  equity 101234.56
+XAUUSD PERIOD_M15 RISK LOCK | soft daily stop  day -2.51%  no further trades today
+```
+
+**Dry run notifies too**, always tagged, so a simulated fill can never be
+mistaken for a real one:
+
+```
+[DRY RUN] XAUUSD PERIOD_M15 BUY 0.42 lots @ 4333.55 | SL 4321.35  TP 4358.90 (2.41R)  p 71%  A - liquidity raid + CHoCH  - simulated, nothing sent
+```
+
+Push and email leave through the **terminal's** own channels, not through the
+expert, so neither needs a whitelisted URL and the agent still makes no HTTP
+calls of its own. Notifications are suppressed in the strategy tester and
+optimiser, which serve none of them. If a channel is misconfigured the agent says
+so in the journal with the error code rather than failing quietly.
+
 ### Dry run
 
 | Input | Default | Notes |

@@ -68,6 +68,14 @@ input int    InpTargetTradesWeek = 2;      // Minimum trades per week the agent 
 input int    InpWarmupSamples    = 25;     // Resolved setups observed before the model votes
 input bool   InpVirtualLearning  = true;   // Keep learning from setups that were not traded
 
+input group "=== Notifications ==="
+input bool   InpNotifyPush       = false;  // Push to the MetaTrader mobile app (needs your MetaQuotes ID in Tools > Options > Notifications)
+input bool   InpNotifyEmail      = false;  // Email (needs SMTP in Tools > Options > Email)
+input bool   InpNotifyPopup      = false;  // Terminal popup alert
+input bool   InpNotifyEntries    = true;   // Notify on buy / sell entries
+input bool   InpNotifyExits      = true;   // Notify when a trade closes
+input bool   InpNotifyRisk       = true;   // Notify when the risk envelope locks or flattens
+
 input group "=== Dry run ==="
 input bool   InpDryRun           = false;  // Dry run: full pipeline, orders logged not sent (works with no account)
 input double InpDryRunCapital    = 100000; // Assumed phase capital while dry running
@@ -360,6 +368,35 @@ void ReportSizingFeasibility()
   }
 
 //+------------------------------------------------------------------+
+//| Trade notifications.                                              |
+//|                                                                  |
+//| Push and email leave through the TERMINAL's own channels, not     |
+//| through the expert, so neither needs a whitelisted URL and the    |
+//| agent still makes no HTTP calls of its own. Both are off by       |
+//| default. A dry run notifies too, always tagged, so a simulated    |
+//| fill can never be mistaken for a real one.                        |
+//+------------------------------------------------------------------+
+void Notify(const string subject,const string body)
+  {
+   if(!InpNotifyPush && !InpNotifyEmail && !InpNotifyPopup) return;
+   //--- the tester serves none of these and would only fill the log
+   if((bool)MQLInfoInteger(MQL_TESTER) || (bool)MQLInfoInteger(MQL_OPTIMIZATION)) return;
+
+   string head=StringFormat("%s%s %s %s",(InpDryRun?"[DRY RUN] ":""),_Symbol,
+                            EnumToString((ENUM_TIMEFRAMES)Period()),subject);
+   string line=head+" | "+body;
+   //--- SendNotification caps at 255 characters
+   if(StringLen(line)>250) line=StringSubstr(line,0,247)+"...";
+
+   if(InpNotifyPush && !SendNotification(line))
+      g_log.Warn(StringFormat("Push notification failed (error %d). Set your MetaQuotes ID in Tools > Options > Notifications and allow this terminal.",GetLastError()));
+   if(InpNotifyEmail && !SendMail(head,head+"\n\n"+body))
+      g_log.Warn(StringFormat("Email failed (error %d). Configure SMTP in Tools > Options > Email.",GetLastError()));
+   if(InpNotifyPopup)
+      Alert(line);
+  }
+
+//+------------------------------------------------------------------+
 double PhaseTarget()
   {
    if(InpTargetPct>0.0) return(InpTargetPct);
@@ -604,6 +641,10 @@ void HarvestClosedTrades()
       g_model.Replay(1);
       g_model.Save();
       g_risk.OnTradeClosed(profit);
+      if(InpNotifyExits)
+         Notify(StringFormat("closed %+.2f",profit),
+                StringFormat("day %+.2f%%  total %+.2f%%  equity %.2f",
+                g_risk.DayPnLPct(),g_risk.TotalPnLPct(),AccountInfoDouble(ACCOUNT_EQUITY)));
       g_log.Think(StringFormat("LEARN | real trade #%s closed at %.2f -> label %s | model acc %.0f%% after %d updates",
                   IntegerToString((long)t),profit,(y>0.5?"WIN":"LOSS"),g_model.Accuracy()*100.0,(int)g_model.Updates()));
       g_journal.Remove(i);
@@ -690,11 +731,19 @@ void ManagePositions()
 void RiskGuards()
   {
    g_risk.NewDayCheck();
+   //--- announce the transition into a locked day exactly once
+   static bool was_locked=false;
+   if(g_risk.DayLocked() && !was_locked && InpNotifyRisk)
+      Notify("RISK LOCK",StringFormat("%s  day %+.2f%%  no further trades today",
+             g_risk.LockReason(),g_risk.DayPnLPct()));
+   was_locked=g_risk.DayLocked();
+
    string reason="";
    if(g_risk.MustFlatten(reason))
      {
       if(g_exec.OpenCount()>0) g_exec.CloseAll(reason);
       g_risk.Lock(reason);
+      if(InpNotifyRisk) Notify("FLATTENED",reason);
       g_last_action="flattened: "+reason;
       return;
      }
@@ -736,6 +785,10 @@ bool OnBarClose()
          g_risk.SimAddPnL(sim_money);
          g_risk.OnTradeClosed(sim_money);
          g_log.Think(StringFormat("DRY RUN| simulated result %.2f, equity now %.2f",sim_money,g_risk.Eq()));
+         if(InpNotifyExits)
+            Notify(StringFormat("closed %+.2f",sim_money),
+                   StringFormat("day %+.2f%%  total %+.2f%%  equity %.2f  - simulated",
+                   g_risk.DayPnLPct(),g_risk.TotalPnLPct(),g_risk.Eq()));
         }
      }
 
@@ -851,6 +904,10 @@ bool OnBarClose()
       g_log.Think(StringFormat("DRY RUN| WOULD OPEN %s %.2f lots @ %.2f  sl %.2f  tp %.2f  risk %.2f  (nothing sent)",
                   SmcDirShort(g_sig.dir),lots,g_sig.entry,g_sig.sl,g_sig.tp1,
                   MathAbs(g_sig.entry-g_sig.sl)*lots*g_risk.LossPerLot(1.0)));
+      if(InpNotifyEntries)
+         Notify(StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry),
+                StringFormat("SL %.2f  TP %.2f (%.2fR)  p %.0f%%  %s  - simulated, nothing sent",
+                g_sig.sl,g_sig.tp1,g_sig.rr1,g_sig.prob*100.0,g_sig.model));
       g_vis.DrawSignal(g_sig,g_ms.ETime(1));
       Redraw();
       return(true);
@@ -880,6 +937,10 @@ bool OnBarClose()
          g_last_signal=g_sig.bar_time;
          g_last_action=StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry);
          g_log.Think(StringFormat("EXECUTE| #%s %s",IntegerToString((long)ticket),g_last_action));
+         if(InpNotifyEntries)
+            Notify(StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry),
+                   StringFormat("SL %.2f  TP %.2f (%.2fR)  p %.0f%%  %s",
+                   g_sig.sl,g_sig.tp1,g_sig.rr1,g_sig.prob*100.0,g_sig.model));
          g_vis.DrawSignal(g_sig,g_ms.ETime(1));
         }
       else g_log.Warn("Position opened but could not be matched to a ticket - it will be managed by its stop and target only");
