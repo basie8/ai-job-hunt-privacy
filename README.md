@@ -19,7 +19,8 @@ cannot lose 5% in a day.
 
 ```
 MQL5/
-  Experts/SMCAgent/SMC_AI_Agent.mq5     the agent
+  Experts/SMCAgent/SMC_AI_Agent.mq5            the agent (modular build)
+  Experts/SMCAgent/SMC_AI_Agent_SingleFile.mq5 same agent, one file, no includes
   Include/SMCAgent/
     Defs.mqh          shared types and the statistics helpers
     TimeZones.mqh     exchange-local session timing, US/EU DST computed and self-tested

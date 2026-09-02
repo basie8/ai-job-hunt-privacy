@@ -7,16 +7,53 @@ all of it on the chart and in the console.
 
 ## 1. Install
 
-Copy the two folders into your MetaTrader 5 data folder
-(*File → Open Data Folder* in the terminal):
+Two ways. Pick one.
+
+### Option A — single file (simplest)
+
+Copy **one** file anywhere under `MQL5/Experts/`:
+
+```
+<MT5 data folder>/MQL5/Experts/SMC_AI_Agent_SingleFile.mq5
+```
+
+Open it in MetaEditor and press **F7**. Nothing else to place — every module is
+inlined. This is the build to use if you just want it running.
+
+### Option B — modular (for editing)
+
+Copy **both** folders into your MetaTrader 5 data folder
+(*File → Open Data Folder* in the terminal — do **not** use the MetaEditor folder
+or `Program Files`):
 
 ```
 <MT5 data folder>/MQL5/Experts/SMCAgent/SMC_AI_Agent.mq5
-<MT5 data folder>/MQL5/Include/SMCAgent/*.mqh
+<MT5 data folder>/MQL5/Include/SMCAgent/Defs.mqh
+<MT5 data folder>/MQL5/Include/SMCAgent/TimeZones.mqh
+<MT5 data folder>/MQL5/Include/SMCAgent/Logger.mqh
+<MT5 data folder>/MQL5/Include/SMCAgent/MarketState.mqh
+<MT5 data folder>/MQL5/Include/SMCAgent/SmcEngine.mqh
+<MT5 data folder>/MQL5/Include/SMCAgent/NewsFilter.mqh
+<MT5 data folder>/MQL5/Include/SMCAgent/Learner.mqh
+<MT5 data folder>/MQL5/Include/SMCAgent/RiskManager.mqh
+<MT5 data folder>/MQL5/Include/SMCAgent/Confluence.mqh
+<MT5 data folder>/MQL5/Include/SMCAgent/TradeManager.mqh
+<MT5 data folder>/MQL5/Include/SMCAgent/Visuals.mqh
 ```
 
-Then in MetaEditor open `SMC_AI_Agent.mq5` and press **F7** (Compile). It has no
-external dependencies beyond the standard `Trade/Trade.mqh` library.
+`#include <SMCAgent/Defs.mqh>` resolves relative to `MQL5\Include\`, so the
+folder must be named exactly **SMCAgent** and sit directly inside **Include**.
+
+> **`file 'Include\SMCAgent\Defs.mqh' not found`** means the eleven `.mqh`
+> files are not in `MQL5\Include\SMCAgent\`. Copying only the `.mq5` is the
+> usual cause. After copying, right-click the Navigator in MetaEditor →
+> **Refresh**, then compile again.
+
+After editing any module, regenerate the single-file build with
+`python3 tools/build_single_file.py`.
+
+Either build has no external dependencies beyond the standard `Trade/Trade.mqh`
+library that ships with MetaTrader.
 
 ### Which chart to attach it to
 
