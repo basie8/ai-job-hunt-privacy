@@ -1046,7 +1046,8 @@ if haveSig and not inPos
         entryRisk := riskD
         bePlaced  := false
         weekTrades += 1
-        int dnum = year(time, i_ftmoTz) * 1000 + dayofyear(time, i_ftmoTz)
+        // Pine has no dayofyear(); build the day key from y/m/d instead
+        int dnum = year(time, i_ftmoTz) * 10000 + month(time, i_ftmoTz) * 100 + dayofmonth(time, i_ftmoTz)
         if na(lastTradeDay) or lastTradeDay != dnum
             lastTradeDay := dnum
             tradingDays  += 1
