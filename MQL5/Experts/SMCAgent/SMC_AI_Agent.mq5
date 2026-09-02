@@ -314,6 +314,16 @@ void ReportSizingFeasibility()
    double vmin=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
    double budget=g_risk.Initial()*g_risk.BaseRiskPct()/100.0;
 
+   //--- a broker that does not report tick value or size cannot be sized
+   //--- against at all; say that, rather than printing zeros
+   if(g_risk.LossPerLot(typical)<=0.0)
+     {
+      g_log.Err(StringFormat("Sizing | %s does not report a usable tick size/value (tick size %.5f, tick value %.5f). No position can be sized and every setup will be skipped. Check the symbol specification.",
+                _Symbol,SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE),
+                SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_VALUE)));
+      return;
+     }
+
    double want=0,minrisk=0,minpct=0,needpct=0;
    bool ok=g_risk.SizingFeasible(typical,want,minrisk,minpct,needpct);
 

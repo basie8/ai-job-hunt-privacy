@@ -112,6 +112,66 @@ Two superseded helpers (`SmcGmtHour`, `SmcGmtHourF`) that predate the daylight
 saving rework. They were unused, and using them for session windows would have
 silently reintroduced the winter offset bug.
 
+## 2b. Capital-dependent chain — exhaustive verification
+
+The capital → risk → lot-size chain was ported to `tools/verify_sizing.py` and
+driven across **64,800 combinations**: 8 account sizes (1,000 → 200,000), 5 broker
+specifications (standard gold, micro, 0.001 volume step, 0.10 step/minimum,
+3-digit tick), 9 stop distances, 5 confidence levels, 4 loss-streak states, 3
+target-progress states and 3 equity states.
+
+Invariants asserted on every sized trade:
+
+| Invariant | Result |
+|---|---|
+| Realised risk never exceeds the computed budget (rounding is always down) | hold |
+| Never exceeds ⅓ of the remaining daily budget or ⅕ of the remaining hard budget | hold |
+| Volume is an exact multiple of the broker's step and inside `[min,max]` | hold |
+| A trade that passes the worst-case check cannot breach a floor at 1.25× its stop | hold |
+| Floors and targets exactly proportional to phase capital | hold |
+| Intended risk % identical across all account sizes | hold |
+| Lot size monotonic in capital | hold |
+
+**0 failures.** 37,977 combinations sized a position; 26,823 were correctly
+refused because the position would have fallen below the broker's minimum.
+
+Structural separation was proven by inspection: `Confluence.mqh`, where stops and
+targets are computed, contains **no reference** to account, balance, equity or
+capital; `SmcEngine.mqh` and `MarketState.mqh` likewise; and `RiskManager.mqh`
+never sets a stop or target price — it only reads an open position's stop for
+risk accounting. Stop and target *prices* are therefore identical on a 1,000 and
+a 100,000 account; only volume differs.
+
+**Precision limit, not an error.** Rounding down to the broker's volume step means
+realised risk sits at or below target. Measured on standard gold at p=0.62:
+
+| Capital | realised risk vs intended (min / mean) |
+|---|---|
+| 5,000 | 69% / 84% |
+| 10,000 | 58% / 81% |
+| 25,000 | 69% / 90% |
+| 100,000 | 92% / 97% |
+| 200,000 | 97% / 99% |
+
+Smaller accounts under-risk in a lumpy way because one lot step is a large
+fraction of the budget. This is conservative in every case — never the reverse.
+
+### Two defects found by the hostile-input pass — *fixed*
+
+- **A degenerate stop could size an enormous position.** With a stop of one tick,
+  `risk ÷ loss-per-lot` produced 500 lots, clamped to the broker maximum. The
+  strategy layer already refuses such a stop, but sizing must not depend on an
+  upstream caller getting it right. `Lots()` now refuses any stop below
+  `max(SYMBOL_TRADE_STOPS_LEVEL, 2 × spread)`.
+- **Clamping to the maximum lot could land below the minimum** on a malformed
+  symbol specification (`vmax < vmin`), producing an order the server would
+  reject. The minimum is now re-checked after the clamp.
+
+After the fixes, all twelve degenerate cases (zero/negative tick value, tick size,
+budget, stop; zero volume step; `vmax < vmin`; one-tick stop; stop equal to the
+spread; enormous stop; budget far above the maximum lot) either refuse to size or
+size within budget. **0 failures.**
+
 ## 3. Checks that passed unchanged
 
 | Check | Result |

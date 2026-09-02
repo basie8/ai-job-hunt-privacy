@@ -252,6 +252,22 @@ public:
       double tick_val=TickValueLoss();
       double tick_sz =SymbolInfoDouble(m_symbol,SYMBOL_TRADE_TICK_SIZE);
       if(tick_sz<=0.0 || tick_val<=0.0) return(0.0);
+      //--- A degenerate stop would size an enormous position: risk money
+      //--- divided by an almost-zero loss per lot. The strategy layer
+      //--- already refuses such a stop, but sizing must never depend on
+      //--- someone upstream getting it right.
+      double pt=SymbolInfoDouble(m_symbol,SYMBOL_POINT);
+      double stops_level=(double)SymbolInfoInteger(m_symbol,SYMBOL_TRADE_STOPS_LEVEL)*pt;
+      double spread=MathMax(SymbolInfoDouble(m_symbol,SYMBOL_ASK)-SymbolInfoDouble(m_symbol,SYMBOL_BID),0.0);
+      double min_sl=MathMax(stops_level,spread*2.0);
+      if(min_sl>0.0 && sl_distance<min_sl)
+        {
+         if(m_log!=NULL)
+            m_log.Warn(StringFormat("Refusing to size: stop distance %.5f is below the broker's minimum viable distance %.5f",
+                       sl_distance,min_sl));
+         return(0.0);
+        }
+
       double loss_per_lot=(sl_distance/tick_sz)*tick_val;
       if(loss_per_lot<=0.0) return(0.0);
       double lots=risk_money/loss_per_lot;
@@ -265,6 +281,8 @@ public:
       lots=NormalizeDouble(lots,vd);
       if(lots<vmin) return(0.0);           // cannot size compliantly -> skip the trade
       if(lots>vmax) lots=vmax;
+      //--- clamping down to vmax must never land below vmin (broken spec)
+      if(lots<vmin) return(0.0);
 
       //--- margin sanity check
       double margin=0.0;
