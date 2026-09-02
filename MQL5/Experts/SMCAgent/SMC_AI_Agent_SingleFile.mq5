@@ -3935,6 +3935,7 @@ private:
    int               m_cols;        // panel width measured in characters
    bool              m_compact;
    int               m_last_rows;   // height of the previous render, in rows
+   int               m_cw;          // measured width of one character, px
    string            m_font_name;
 
    color             m_c_bull;
@@ -4075,16 +4076,24 @@ private:
       string probe="";
       for(int i=0;i<m_cols;i++) probe+="0";
       uint w=0,h=0;
-      TextSetFont(m_font_name,m_font);
+      //--- NEGATIVE size: tenths of a point AND scaled by the screen DPI,
+      //--- which is how MetaTrader renders a label. Measuring with the
+      //--- positive (DPI independent) form is what made every row come out
+      //--- shorter than it actually draws, so the rows overlapped.
+      TextSetFont(m_font_name,-m_font*10);
       if(!TextGetSize(probe,w,h) || w==0 || h==0)
         {
-         //--- measurement unavailable: fall back to a conservative guess
-         m_row_h=(int)MathRound(m_font*1.9);
-         m_width=(int)MathRound(m_cols*(m_font*0.72))+18;
+         //--- measurement unavailable: fall back generously, never tightly
+         m_row_h=(int)MathRound(m_font*2.2);
+         m_cw   =(int)MathMax(4,MathRound(m_font*0.80));
+         m_width=m_cols*m_cw+22;
          return;
         }
-      m_width=(int)w+16;
-      m_row_h=(int)h+2;
+      //--- always leave headroom: a row that is one pixel short overlaps
+      //--- its neighbour, which is far worse than a slightly tall panel
+      m_row_h=(int)MathMax((int)h+5,(int)MathRound(m_font*2.0));
+      m_cw   =(int)MathMax(4,(int)MathRound((double)w/(double)m_cols)+1);
+      m_width=m_cols*m_cw+22;
 
       //--- Never let the panel run off the chart. If the measured width
       //--- does not fit, drop columns until it does rather than spilling
@@ -4092,16 +4101,11 @@ private:
       long chart_w=ChartGetInteger(m_chart,CHART_WIDTH_IN_PIXELS);
       if(chart_w>200)
         {
-         double per_char=(double)w/(double)m_cols;
-         int room=(int)(chart_w-m_x-14);
-         if(per_char>0.0 && m_width>room)
+         int room=(int)(chart_w-m_x-16);
+         if(m_width>room && m_cw>0)
            {
-            int fit_cols=(int)MathFloor(room/per_char);
-            m_cols=(int)MathMax(44,MathMin(m_cols,fit_cols));
-            probe="";
-            for(int i=0;i<m_cols;i++) probe+="0";
-            TextGetSize(probe,w,h);
-            m_width=(int)w+16;
+            m_cols=(int)MathMax(46,MathMin(m_cols,(int)((room-22)/m_cw)));
+            m_width=m_cols*m_cw+22;
             Print(StringFormat("SMC AI Agent: panel narrowed to %d columns to fit a %d px chart.",m_cols,(int)chart_w));
            }
         }
@@ -4206,7 +4210,7 @@ private:
 public:
                      CVisuals(void): m_chart(0), m_sub(0), m_draw_chart(true), m_draw_panel(true),
                                      m_x(8), m_y(20), m_row_h(13), m_width(470), m_font(8),
-                                     m_cols(78), m_compact(false), m_last_rows(34),
+                                     m_cols(88), m_compact(false), m_last_rows(34), m_cw(8),
                                      m_font_name("Consolas"), m_row(0)
      {
       m_c_bull=C'46,204,113';
@@ -4222,8 +4226,8 @@ public:
      }
 
    void              Init(const long chart_id,const bool draw_chart,const bool draw_panel,
-                          const int panel_x,const int panel_y,const int font_size=8,
-                          const bool compact=false)
+                          const int panel_x,const int panel_y,const int font_size=10,
+                          const bool compact=false,const int width_chars=88)
      {
       m_chart=chart_id;
       //--- An earlier build of the agent used different object names for
@@ -4235,9 +4239,9 @@ public:
       m_draw_panel=draw_panel;
       m_x=panel_x;
       m_y=panel_y;
-      m_font=(int)MathMax(6,MathMin(14,font_size));
+      m_font=(int)MathMax(6,MathMin(16,font_size));
       m_compact=compact;
-      m_cols=(compact?54:78);
+      m_cols=(compact?(int)MathMax(46,width_chars-34):(int)MathMax(46,MathMin(140,width_chars)));
       MeasureFont();
      }
 
@@ -4402,17 +4406,49 @@ public:
    //| background. Every row is padded or truncated to exactly m_cols |
    //| characters; the panel is sized from that, not guessed.         |
    //+---------------------------------------------------------------+
+   //--- One cell, anchored to an ABSOLUTE pixel offset inside the row.
+   //--- Columns therefore line up even if the font turns out not to be
+   //--- monospace; only the row height depends on font metrics.
+   void              Cell(const int row,const int px,const string text,const color clr,const int chars)
+     {
+      if(row>=PANEL_MAX_ROWS) return;
+      Label(StringFormat("P_r%02d_%04d",row,px),m_x+10+px,m_y+8+row*m_row_h,
+            Fit(text,chars),clr,m_font);
+     }
+
+   //--- a full width line (titles, section rules)
    void              Row(const string text,const color clr)
      {
-      if(m_row>=PANEL_MAX_ROWS) return;
-      Label("P_r"+IntegerToString(m_row),m_x+8,m_y+6+m_row*m_row_h,text,clr,m_font);
+      Cell(m_row,0,text,clr,m_cols);
       m_row++;
      }
 
+   //--- label column + value column
    void              KV(const string key,const string val,const color clr)
      {
-      int k=9;
-      Row(Fit(key,k)+" "+Fit(val,m_cols-k-1),clr);
+      Cell(m_row,0,key,m_c_dim,10);
+      Cell(m_row,11*m_cw,val,clr,m_cols-12);
+      m_row++;
+     }
+
+   //--- continuation line under a KV row, aligned to the value column
+   void              Cont(const string val,const color clr)
+     {
+      Cell(m_row,11*m_cw,val,clr,m_cols-12);
+      m_row++;
+     }
+
+   //--- one confluence factor across five aligned columns
+   void              FactorRow(const string name,const string bar,const string score,
+                               const string weight,const string note,const color clr)
+     {
+      Cell(m_row,0,          name,  clr,     18);
+      Cell(m_row,19*m_cw,    bar,   clr,     10);
+      Cell(m_row,30*m_cw,    score, clr,      6);
+      Cell(m_row,37*m_cw,    weight,m_c_dim,  6);
+      if(!m_compact && m_cols>50)
+         Cell(m_row,45*m_cw, note,  m_c_dim, m_cols-46);
+      m_row++;
      }
 
    void              DrawPanel(CMarketState *ms,CSmcEngine *eng,CConfluence *conf,CRiskManager *risk,
@@ -4473,11 +4509,7 @@ public:
 
       //--- confluence -------------------------------------------------
       Row(Rule("CONFLUENCE",W),m_c_dim);
-      int wName=17, wBar=10, wNum=6;
-      int wNote=W-(wName+1+wBar+1+wNum+1+wNum);
-      string hdr=Fit("FACTOR",wName)+" "+Fit("   -  +   ",wBar)+" "+FitR("SCORE",wNum)+" "+FitR("WEIGHT",wNum);
-      if(!m_compact && wNote>4) hdr+=" "+Fit("READING",wNote-1);
-      Row(Fit(hdr,W),m_c_dim);
+      FactorRow("FACTOR","  -   +   ","SCORE","WEIGHT","READING",m_c_dim);
 
       double total=0.0;
       for(int i=0;i<F_COUNT;i++)
@@ -4486,11 +4518,9 @@ public:
          if(!conf.GetFactor(i,f)) continue;
          total+=f.contrib;
          color c=(f.score>0.15?m_c_bull:(f.score<-0.15?m_c_bear:m_c_dim));
-         string line=Fit(f.name,wName)+" "+Bar(f.score,4)+" "
-                    +FitR(StringFormat("%+0.2f",f.score),wNum)+" "
-                    +FitR(StringFormat("%+0.2f",f.weight),wNum);
-         if(!m_compact && wNote>4) line+=" "+Fit(f.note,wNote-1);
-         Row(Fit(line,W),c);
+         FactorRow(f.name,Bar(f.score,4),
+                   StringFormat("%+0.2f",f.score),
+                   StringFormat("%+0.2f",f.weight),f.note,c);
         }
 
       color sc=(total>0?m_c_bull:m_c_bear);
@@ -4526,9 +4556,12 @@ public:
         }
 
       string wrapped[];
-      int nl=Wrap(conf.Context(),m_cols-10,3,wrapped);
+      int nl=Wrap(conf.Context(),m_cols-12,3,wrapped);
       for(int i=0;i<nl;i++)
-         Row(Fit((i==0?Fit("READING",9)+" ":"          ")+wrapped[i],W),m_c_text);
+        {
+         if(i==0) KV("READING",wrapped[i],m_c_text);
+         else     Cont(wrapped[i],m_c_text);
+        }
 
       KV("ACTION",StringFormat("%s   open %d",last_action,open_positions),m_c_accent);
 
@@ -4591,7 +4624,8 @@ input bool   InpShowChart        = true;   // Draw the SMC map on the chart
 input bool   InpShowPanel        = true;   // Draw the live decision panel
 input int    InpPanelX           = 8;      // Panel X
 input int    InpPanelY           = 22;     // Panel Y
-input int    InpPanelFontSize    = 8;      // Panel font size (6-14; raise it on a 4K screen)
+input int    InpPanelFontSize    = 10;     // Panel font size (6-16; raise it on a 4K screen)
+input int    InpPanelWidthChars   = 88;     // Panel width in characters (46-140)
 input bool   InpPanelCompact     = false;  // Compact panel (drops the per-factor reading column)
 input int    InpLogLevel         = 3;      // 0 err 1 warn 2 info 3 decisions 4 debug
 input bool   InpLogToFile        = false;  // Also write the decision log to a file
@@ -4982,7 +5016,8 @@ int OnInit()
    g_exec.Init(_Symbol,InpMagic,InpSlippagePoints,GetPointer(g_log));
    g_journal.Init(F_COUNT);
    g_vbook.Init(F_COUNT,GetPointer(g_log),120);
-   g_vis.Init(ChartID(),InpShowChart,InpShowPanel,InpPanelX,InpPanelY,InpPanelFontSize,InpPanelCompact);
+   g_vis.Init(ChartID(),InpShowChart,InpShowPanel,InpPanelX,InpPanelY,InpPanelFontSize,
+              InpPanelCompact,InpPanelWidthChars);
 
    g_sig.valid=false;
    g_sig.prob=0.0;
