@@ -90,6 +90,8 @@ input bool   InpShowChart        = true;   // Draw the SMC map on the chart
 input bool   InpShowPanel        = true;   // Draw the live decision panel
 input int    InpPanelX           = 8;      // Panel X
 input int    InpPanelY           = 22;     // Panel Y
+input int    InpPanelFontSize    = 8;      // Panel font size (6-14; raise it on a 4K screen)
+input bool   InpPanelCompact     = false;  // Compact panel (drops the per-factor reading column)
 input int    InpLogLevel         = 3;      // 0 err 1 warn 2 info 3 decisions 4 debug
 input bool   InpLogToFile        = false;  // Also write the decision log to a file
 input long   InpMagic            = 20260901;// Magic number
@@ -479,7 +481,7 @@ int OnInit()
    g_exec.Init(_Symbol,InpMagic,InpSlippagePoints,GetPointer(g_log));
    g_journal.Init(F_COUNT);
    g_vbook.Init(F_COUNT,GetPointer(g_log),120);
-   g_vis.Init(ChartID(),InpShowChart,InpShowPanel,InpPanelX,InpPanelY);
+   g_vis.Init(ChartID(),InpShowChart,InpShowPanel,InpPanelX,InpPanelY,InpPanelFontSize,InpPanelCompact);
 
    g_sig.valid=false;
    g_sig.prob=0.0;

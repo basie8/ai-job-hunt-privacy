@@ -129,19 +129,61 @@ DECIDE | stand aside: risk envelope: soft daily stop
 
 ## 3. Reading the panel
 
+The panel is laid out on a fixed character grid in a monospace font, so columns
+line up on every terminal and nothing spills past the background:
+
+```
+SMC AI Agent v1.00  XAUUSD PERIOD_M15  2026.09.02 14:15
+MODE      LIVE      model trained  acc 61%  accept 62%
+CLOCKS    srv 14:15 GMT+2 / LDN 13:15 / NY 08:15 / you 14:15
+-- MARKET --------------------------------------------------------------------
+BIAS      H4 BULLISH / H1 BULLISH / entry BULLISH / int BULLISH
+RANGE     4321.10 - 4356.40   price 38% (discount)
+RAID      ASIA-L BULLISH 2 bars ago  quality 0.72
+PLAYBOOK  A - liquidity raid + CHoCH
+-- CONFLUENCE ----------------------------------------------------------------
+FACTOR               -  +     SCORE WEIGHT READING
+HTF structure     [    ++++]  +0.90  +0.26 PERIOD_H4 is BULLISH (conviction ..
+Entry structure   [    ++++]  +1.00  +0.31 CHoCH in trade direction after th..
+Liquidity raid    [    +++ ]  +0.84  +0.28 ASIA-L swept 2 bars ago, rejectio..
+Premium/discount  [    +   ]  +0.36  +0.20 entry at 38% of the dealing range
+Inducement        [    ++++]  +1.00  +0.20 inducement at 4325.60 has been run
+Confirmation      [   -    ]  -0.32  +0.14 close in the 34% of the bar range
+SCORE     +1.284 weighted  ->  probability 71.2%  (bias -0.31)
+-- RISK ----------------------------------------------------------------------
+FTMO P1   day +0.20%  total +1.80%  target 18%  days 3/4
+FLOORS    soft 97500.00  hard 96500.00  room 4300 / 5300
+CAPITAL   100000.00 (opening deposit)  eq 101800.00  open risk 0
+NEWS      USD Non-Farm Payrolls in 142m  [GMT+2]
+-- DECISION ------------------------------------------------------------------
+SIGNAL    BUY  entry 4333.55  sl 4321.35  tp 4358.90 (2.41R)
+READING   BUY A - liquidity raid + CHoCH. sell-side liquidity taken at
+          ASIA-L then structure shifted BULLISH. Trading from the OB.
+ACTION    BUY 0.42 lots @ 4333.55   open 1
+```
+
 | Row | Meaning |
 |---|---|
-| `MODE` | `WARM-UP` (model still observing), `LIVE` (model trained), `LOCKED` (day closed by the risk envelope) |
-| `STRUCTURE` | swing bias on the higher, intermediate and entry timeframes |
-| `DEALING` | the current dealing range, where price sits in it, and the last liquidity raid |
-| `PLAYBOOK` | which of the three setups is on the table right now |
-| factor table | all 17 confluence factors: score bar, signed score, **learned** weight, and a plain reading. `Inducement` reads `armed` once the pullback guarding the zone has been run, `still resting` while the trap is unsprung |
-| `WEIGHTED SCORE` | the sum of contributions and the resulting probability |
-| `FTMO Pn` | day P/L %, the hard daily floor price, total P/L %, target progress, trading days |
-| `BUDGET` | money left before the soft stop and the hard floor, risk currently open, trades this week |
-| `NEWS` | next high-impact release relevant to gold |
+| `MODE` | `WARM-UP` (model still observing), `LIVE` (model trained), `LOCKED` (day closed by the risk envelope), plus rolling accuracy and the live acceptance threshold |
+| `CLOCKS` | server, London, New York and your own local time side by side |
+| `BIAS` | swing bias on the higher, intermediate and entry timeframes |
+| `RANGE` | the dealing range and where price sits inside it |
+| `RAID` | the liquidity raid arming the current hypothesis, its age and rejection quality |
+| `PLAYBOOK` | which of the three setups is on the table |
+| factor table | all 17 factors. The bar is signed — `[  --  ]` reads against the trade, `[  ++  ]` for it. Then the score, the **learned** weight, and a plain reading |
+| `SCORE` | weighted sum, resulting probability, and the model's learned bias |
+| `FTMO Pn` | day and total P/L %, target progress, trading days |
+| `FLOORS` | soft and hard floor prices, and the money left before each |
+| `CAPITAL` | phase capital and where it was detected from, live equity, risk currently open |
+| `NEWS` | next high-impact release, with the broker offset in use |
 | `SIGNAL` | the live plan, or the reason there is none |
+| `READING` | the agent's reasoning in plain English, word-wrapped over up to three lines |
 | `ACTION` | what the agent last did |
+
+Two inputs control the fit: **`InpPanelFontSize`** (6–14 — raise it on a 4K
+screen; the panel resizes itself from the font) and **`InpPanelCompact`**, which
+drops the per-factor reading column and narrows the panel from 78 to 54
+characters for a crowded chart.
 
 ## 4. Inputs
 

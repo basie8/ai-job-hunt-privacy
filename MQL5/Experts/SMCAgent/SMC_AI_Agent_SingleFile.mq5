@@ -3917,7 +3917,8 @@ public:
 
 
 
-#define VIS_PREFIX "SMCAI_"
+#define VIS_PREFIX     "SMCAI_"
+#define PANEL_MAX_ROWS 48
 
 class CVisuals
   {
@@ -3931,6 +3932,8 @@ private:
    int               m_row_h;
    int               m_width;
    int               m_font;
+   int               m_cols;        // panel width measured in characters
+   bool              m_compact;
    string            m_font_name;
 
    color             m_c_bull;
@@ -4060,12 +4063,74 @@ private:
       ObjectSetInteger(m_chart,n,OBJPROP_WIDTH,size);
      }
 
-   string            Bar(const double score,const int cells=8)
+   //--- exactly w characters: padded with spaces or truncated with ".."
+   string            Fit(const string src,const int w)
      {
-      int filled=(int)MathRound(MathAbs(score)*cells);
-      string s="";
-      for(int i=0;i<cells;i++) s+=(i<filled?"|":".");
-      return(s);
+      if(w<=0) return("");
+      int len=StringLen(src);
+      if(len==w)  return(src);
+      if(len<w)
+        {
+         string out=src;
+         for(int i=len;i<w;i++) out+=" ";
+         return(out);
+        }
+      if(w<=2) return(StringSubstr(src,0,w));
+      return(StringSubstr(src,0,w-2)+"..");
+     }
+
+   //--- right aligned in exactly w characters
+   string            FitR(const string src,const int w)
+     {
+      int len=StringLen(src);
+      if(len>=w) return(Fit(src,w));
+      string out="";
+      for(int i=len;i<w;i++) out+=" ";
+      return(out+src);
+     }
+
+   //--- a signed magnitude bar that reads at a glance: [--   ] / [  ++]
+   string            Bar(const double score,const int half=4)
+     {
+      int filled=(int)MathRound(MathMin(MathAbs(score),1.0)*half);
+      string left="",right="";
+      for(int i=0;i<half;i++)
+        {
+         bool on=(half-i)<=filled;
+         left +=(score<0.0 && on?"-":" ");
+         right+=((i+1)<=filled && score>0.0?"+":" ");
+        }
+      return("["+left+right+"]");
+     }
+
+   //--- section rule: "-- TITLE -----------------------"
+   string            Rule(const string title,const int w)
+     {
+      string out="-- "+title+" ";
+      int len=StringLen(out);
+      for(int i=len;i<w;i++) out+="-";
+      return(StringSubstr(out,0,w));
+     }
+
+   //--- wrap on word boundaries into at most max_lines of width w
+   int               Wrap(const string src,const int w,const int max_lines,string &out[])
+     {
+      ArrayResize(out,max_lines);
+      for(int i=0;i<max_lines;i++) out[i]="";
+      string rest=src;
+      int used=0;
+      while(used<max_lines && StringLen(rest)>0)
+        {
+         if(StringLen(rest)<=w) { out[used]=rest; used++; break; }
+         int cut=-1;
+         for(int i=w;i>=(int)(w*0.5);i--)
+            if(StringGetCharacter(rest,i)==' ') { cut=i; break; }
+         if(cut<0) cut=w;
+         out[used]=StringSubstr(rest,0,cut);
+         used++;
+         rest=StringSubstr(rest,(StringGetCharacter(rest,cut)==' '?cut+1:cut));
+        }
+      return(used);
      }
 
    void              DeleteGroup(const string sub)
@@ -4089,13 +4154,21 @@ public:
      }
 
    void              Init(const long chart_id,const bool draw_chart,const bool draw_panel,
-                          const int panel_x,const int panel_y)
+                          const int panel_x,const int panel_y,const int font_size=8,
+                          const bool compact=false)
      {
       m_chart=chart_id;
       m_draw_chart=draw_chart;
       m_draw_panel=draw_panel;
       m_x=panel_x;
       m_y=panel_y;
+      m_font=(int)MathMax(6,MathMin(14,font_size));
+      m_compact=compact;
+      m_cols=(compact?54:78);
+      //--- Consolas is monospace: one character is close to 0.60 of the
+      //--- point size in width, and a row needs about 1.6x its height.
+      m_row_h=(int)MathRound(m_font*1.65);
+      m_width=(int)MathRound(m_cols*(m_font*0.60))+18;
      }
 
    void              Clear(void) { ObjectsDeleteAll(m_chart,VIS_PREFIX,m_sub,-1); ChartRedraw(m_chart); }
@@ -4251,12 +4324,25 @@ public:
    //+---------------------------------------------------------------+
    //| Decision panel                                                 |
    //+---------------------------------------------------------------+
-   void              Row(const string id,const string text,const color clr,const int size=8)
+   //+---------------------------------------------------------------+
+   //| Decision panel                                                 |
+   //|                                                                |
+   //| Laid out on a fixed character grid in a monospace font, so the |
+   //| columns line up on every terminal and nothing spills past the  |
+   //| background. Every row is padded or truncated to exactly m_cols |
+   //| characters; the panel is sized from that, not guessed.         |
+   //+---------------------------------------------------------------+
+   void              Row(const string text,const color clr)
      {
-      //--- every panel object lives under the P_ group so that the
-      //--- chart layer can be cleared without touching the panel
-      Label("P_"+id,m_x+8,m_y+6+m_row*m_row_h,text,clr,size);
+      if(m_row>=PANEL_MAX_ROWS) return;
+      Label("P_r"+IntegerToString(m_row),m_x+8,m_y+6+m_row*m_row_h,text,clr,m_font);
       m_row++;
+     }
+
+   void              KV(const string key,const string val,const color clr)
+     {
+      int k=9;
+      Row(Fit(key,k)+" "+Fit(val,m_cols-k-1),clr);
      }
 
    void              DrawPanel(CMarketState *ms,CSmcEngine *eng,CConfluence *conf,CRiskManager *risk,
@@ -4265,49 +4351,56 @@ public:
                                const string news_line,const int gmt)
      {
       if(!m_draw_panel) return;
-      int rows=16+F_COUNT;
-      int h=rows*m_row_h+22;
-      Panel("P_BG",m_x,m_y,m_width,h,m_c_panel,C'60,64,74');
       m_row=0;
+      int W=m_cols;
+      datetime utc=SmcServerToUtc(SmcNow(),gmt);
 
-      Row("h1",StringFormat("%s v%s   %s %s   %s",SMC_AGENT_NAME,SMC_AGENT_VERSION,ms.Symbol(),
-          EnumToString(ms.TfEntry()),TimeToString(SmcNow(),TIME_DATE|TIME_MINUTES)),m_c_accent,9);
+      //--- title ------------------------------------------------------
+      Row(Fit(StringFormat("%s v%s  %s %s  %s",SMC_AGENT_NAME,SMC_AGENT_VERSION,ms.Symbol(),
+          EnumToString(ms.TfEntry()),TimeToString(SmcNow(),TIME_DATE|TIME_MINUTES)),W),m_c_accent);
 
       color mode_c=(mode=="LIVE"?m_c_bull:(mode=="LOCKED"?m_c_bear:m_c_accent));
-      Row("h2",StringFormat("MODE %-10s  model %s  samples %d  acc %.0f%%  thr %.0f%%",
-          mode,(model.IsWarm()?"trained":StringFormat("warm-up %d/%d",(int)model.Updates(),model.WarmupNeeded())),
-          model.Samples(),model.Accuracy()*100.0,threshold*100.0),mode_c,8);
+      KV("MODE",StringFormat("%-8s  %s  acc %.0f%%  accept %.0f%%",mode,
+         (model.IsWarm()?"model trained":StringFormat("warm-up %d/%d",(int)model.Updates(),model.WarmupNeeded())),
+         model.Accuracy()*100.0,threshold*100.0),mode_c);
 
-      Row("h3",StringFormat("STRUCTURE  %s %s | %s %s | %s swing %s / internal %s",
-          EnumToString(ms.TfHigh()),SmcDirStr(conf.BiasHtf()),
-          EnumToString(ms.TfMid()),SmcDirStr(conf.BiasMid()),
-          EnumToString(ms.TfEntry()),SmcDirStr(eng.Trend()),SmcDirStr(eng.InternalTrend())),m_c_text,8);
+      int pc=SmcPcGmtOffsetHours();
+      KV("CLOCKS",StringFormat("srv %s GMT%+d | LDN %s | NY %s | you %s",
+         TimeToString(SmcNow(),TIME_MINUTES),gmt,
+         SmcHm(SmcZoneHourF(TZ_LONDON,utc)),SmcHm(SmcZoneHourF(TZ_NY,utc)),
+         (pc==99?"tz?":SmcHm(SmcPcHourF(utc)))),m_c_dim);
+
+      //--- market -----------------------------------------------------
+      Row(Rule("MARKET",W),m_c_dim);
+      KV("BIAS",StringFormat("%s %s | %s %s | entry %s / int %s",
+         EnumToString(ms.TfHigh()),SmcDirStr(conf.BiasHtf()),
+         EnumToString(ms.TfMid()),SmcDirStr(conf.BiasMid()),
+         SmcDirStr(eng.Trend()),SmcDirStr(eng.InternalTrend())),m_c_text);
 
       double hi,lo;
-      string rng="range not mapped";
       if(eng.Range(hi,lo))
-         rng=StringFormat("range %.2f - %.2f  price at %.0f%% (%s)",lo,hi,
-             eng.RangePosition(SymbolInfoDouble(ms.Symbol(),SYMBOL_BID))*100.0,
-             (eng.RangePosition(SymbolInfoDouble(ms.Symbol(),SYMBOL_BID))>0.5?"premium":"discount"));
-      Row("h4",StringFormat("DEALING    %s | raid %s",rng,
-          (eng.SweepValid()?StringFormat("%s %s %d bars ago",eng.SweepPool(),SmcDirStr(eng.SweepDir()),eng.SweepAge()):"none")),
-          m_c_dim,8);
+        {
+         double pos=eng.RangePosition(SymbolInfoDouble(ms.Symbol(),SYMBOL_BID))*100.0;
+         KV("RANGE",StringFormat("%.2f - %.2f   price %.0f%% (%s)",lo,hi,pos,(pos>50.0?"premium":"discount")),m_c_dim);
+        }
+      else KV("RANGE","not mapped yet",m_c_dim);
 
-      Row("h5",StringFormat("PLAYBOOK   %s",conf.Playbook()),m_c_text,8);
+      KV("RAID",(eng.SweepValid()
+         ?StringFormat("%s %s %d bars ago  quality %.2f",eng.SweepPool(),SmcDirStr(eng.SweepDir()),
+                       eng.SweepAge(),eng.SweepQuality())
+         :"none in the current window"),
+         (eng.SweepValid()?(eng.SweepDir()==DIR_BULL?m_c_bull:m_c_bear):m_c_dim));
 
-      //--- every frame of reference at a glance. Decisions are anchored to
-      //--- the exchanges, so they are the same wherever this runs; the PC
-      //--- column is there so the operator knows when the agent is awake.
-      datetime utc=SmcServerToUtc(SmcNow(),gmt);
-      int pc=SmcPcGmtOffsetHours();
-      Row("h6",StringFormat("CLOCKS     server %s GMT%+d | LDN %s %s | NY %s %s | you %s %s",
-          TimeToString(SmcNow(),TIME_MINUTES),gmt,
-          SmcHm(SmcZoneHourF(TZ_LONDON,utc)),SmcZoneAbbr(TZ_LONDON,utc),
-          SmcHm(SmcZoneHourF(TZ_NY,utc)),SmcZoneAbbr(TZ_NY,utc),
-          SmcHm(SmcPcHourF(utc)),(pc==99?"(tz?)":StringFormat("GMT%+d",pc))),m_c_dim,8);
+      KV("PLAYBOOK",conf.Playbook(),m_c_text);
 
-      //--- factor table -------------------------------------------------
-      Row("f_hdr","FACTOR              SCORE  WEIGHT  CONTRIB  READING",m_c_dim,8);
+      //--- confluence -------------------------------------------------
+      Row(Rule("CONFLUENCE",W),m_c_dim);
+      int wName=17, wBar=10, wNum=6;
+      int wNote=W-(wName+1+wBar+1+wNum+1+wNum);
+      string hdr=Fit("FACTOR",wName)+" "+Fit("   -  +   ",wBar)+" "+FitR("SCORE",wNum)+" "+FitR("WEIGHT",wNum);
+      if(!m_compact && wNote>4) hdr+=" "+Fit("READING",wNote-1);
+      Row(Fit(hdr,W),m_c_dim);
+
       double total=0.0;
       for(int i=0;i<F_COUNT;i++)
         {
@@ -4315,46 +4408,58 @@ public:
          if(!conf.GetFactor(i,f)) continue;
          total+=f.contrib;
          color c=(f.score>0.15?m_c_bull:(f.score<-0.15?m_c_bear:m_c_dim));
-         string note=f.note;
-         if(StringLen(note)>34) note=StringSubstr(note,0,34)+"..";
-         Row(StringFormat("f%d",i),
-             StringFormat("%-18s %s %+0.2f  %+0.2f  %s",f.name,Bar(f.score,5),f.score,f.weight,note),c,8);
+         string line=Fit(f.name,wName)+" "+Bar(f.score,4)+" "
+                    +FitR(StringFormat("%+0.2f",f.score),wNum)+" "
+                    +FitR(StringFormat("%+0.2f",f.weight),wNum);
+         if(!m_compact && wNote>4) line+=" "+Fit(f.note,wNote-1);
+         Row(Fit(line,W),c);
         }
 
       color sc=(total>0?m_c_bull:m_c_bear);
-      Row("f_sum",StringFormat("WEIGHTED SCORE %+0.3f  ->  probability %.1f%%  (bias %+0.2f)",
-          total,(sig.prob>0?sig.prob*100.0:0.0),model.Bias()),sc,8);
+      KV("SCORE",StringFormat("%+0.3f weighted  ->  probability %.1f%%  (bias %+0.2f)",
+         total,sig.prob*100.0,model.Bias()),sc);
 
-      //--- risk block ---------------------------------------------------
+      //--- risk -------------------------------------------------------
+      Row(Rule("RISK",W),m_c_dim);
       double dp=risk.DayPnLPct();
-      color dc=(dp>=0?m_c_bull:(dp<-2.0?m_c_bear:m_c_accent));
-      Row("r1",StringFormat("FTMO P%d    day %+0.2f%% (floor %.2f)  total %+0.2f%%  target %.0f%%  days %d/%d",
-          risk.Phase(),dp,risk.DailyFloor(),risk.TotalPnLPct(),risk.TargetProgress()*100.0,
-          risk.TradingDays(),risk.MinDays()),dc,8);
-      Row("r2",StringFormat("BUDGET     soft stop in %.2f  hard floor in %.2f  open risk %.2f  week trades %d",
-          risk.RemainingDailyBudget(),risk.RemainingHardBudget(),risk.OpenRiskMoney(),risk.WeekTrades()),m_c_dim,8);
-      Row("r2b",StringFormat("CAPITAL    phase %.2f (%s)  balance %.2f  equity %.2f",
-          risk.Initial(),risk.CapitalSource(),AccountInfoDouble(ACCOUNT_BALANCE),AccountInfoDouble(ACCOUNT_EQUITY)),m_c_dim,8);
-      Row("r3",StringFormat("NEWS       %s",news_line),m_c_dim,8);
+      color dc=(dp>=0.0?m_c_bull:(dp<-2.0?m_c_bear:m_c_accent));
+      KV(StringFormat("FTMO P%d",risk.Phase()),
+         StringFormat("day %+0.2f%%  total %+0.2f%%  target %.0f%%  days %d/%d",
+         dp,risk.TotalPnLPct(),risk.TargetProgress()*100.0,risk.TradingDays(),risk.MinDays()),dc);
+      KV("FLOORS",StringFormat("soft %.2f  hard %.2f  room %.0f / %.0f",
+         risk.SoftDailyFloor(),risk.HardDailyFloor(),
+         risk.RemainingDailyBudget(),risk.RemainingHardBudget()),m_c_dim);
+      KV("CAPITAL",StringFormat("%.2f (%s)  eq %.2f  open risk %.0f",
+         risk.Initial(),risk.CapitalSource(),AccountInfoDouble(ACCOUNT_EQUITY),risk.OpenRiskMoney()),m_c_dim);
+      KV("NEWS",news_line,m_c_dim);
 
-      //--- decision -----------------------------------------------------
+      //--- decision ---------------------------------------------------
+      Row(Rule("DECISION",W),m_c_dim);
       if(sig.valid)
         {
          color c=(sig.dir==DIR_BULL?m_c_bull:m_c_bear);
-         Row("d1",StringFormat("SIGNAL     %s  entry %.2f  sl %.2f  tp1 %.2f (%.2fR)  tp2 %.2f (%.2fR)",
-             SmcDirShort(sig.dir),sig.entry,sig.sl,sig.tp1,sig.rr1,sig.tp2,sig.rr2),c,8);
+         KV("SIGNAL",StringFormat("%s  entry %.2f  sl %.2f  tp %.2f (%.2fR)",
+            SmcDirShort(sig.dir),sig.entry,sig.sl,sig.tp1,sig.rr1),c);
         }
       else
         {
          string v=conf.Veto();
-         Row("d1",StringFormat("SIGNAL     none - %s",(v==""?"no qualified setup on this close":v)),m_c_dim,8);
+         KV("SIGNAL","none - "+(v==""?"no qualified setup on this close":v),m_c_dim);
         }
 
-      string ctx=conf.Context();
-      Row("d2",StringFormat("READING    %s",StringSubstr(ctx,0,72)),m_c_text,8);
-      Row("d3",StringFormat("           %s",StringSubstr(ctx,72,72)),m_c_text,8);
-      Row("d4",StringFormat("ACTION     %s   open positions %d",last_action,open_positions),m_c_accent,8);
+      string wrapped[];
+      int nl=Wrap(conf.Context(),m_cols-10,3,wrapped);
+      for(int i=0;i<nl;i++)
+         Row(Fit((i==0?Fit("READING",9)+" ":"          ")+wrapped[i],W),m_c_text);
 
+      KV("ACTION",StringFormat("%s   open %d",last_action,open_positions),m_c_accent);
+
+      //--- blank whatever the previous, longer render left behind
+      int used=m_row;
+      for(int r=used;r<PANEL_MAX_ROWS;r++)
+         Label("P_r"+IntegerToString(r),m_x+8,m_y+6+r*m_row_h,"",m_c_dim,m_font);
+
+      Panel("P_BG",m_x,m_y,m_width,used*m_row_h+12,m_c_panel,C'60,64,74');
       ChartRedraw(m_chart);
      }
   };
@@ -4411,6 +4516,8 @@ input bool   InpShowChart        = true;   // Draw the SMC map on the chart
 input bool   InpShowPanel        = true;   // Draw the live decision panel
 input int    InpPanelX           = 8;      // Panel X
 input int    InpPanelY           = 22;     // Panel Y
+input int    InpPanelFontSize    = 8;      // Panel font size (6-14; raise it on a 4K screen)
+input bool   InpPanelCompact     = false;  // Compact panel (drops the per-factor reading column)
 input int    InpLogLevel         = 3;      // 0 err 1 warn 2 info 3 decisions 4 debug
 input bool   InpLogToFile        = false;  // Also write the decision log to a file
 input long   InpMagic            = 20260901;// Magic number
@@ -4800,7 +4907,7 @@ int OnInit()
    g_exec.Init(_Symbol,InpMagic,InpSlippagePoints,GetPointer(g_log));
    g_journal.Init(F_COUNT);
    g_vbook.Init(F_COUNT,GetPointer(g_log),120);
-   g_vis.Init(ChartID(),InpShowChart,InpShowPanel,InpPanelX,InpPanelY);
+   g_vis.Init(ChartID(),InpShowChart,InpShowPanel,InpPanelX,InpPanelY,InpPanelFontSize,InpPanelCompact);
 
    g_sig.valid=false;
    g_sig.prob=0.0;
