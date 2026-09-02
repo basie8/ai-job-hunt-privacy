@@ -176,22 +176,56 @@ void SyncBrokerClock(const bool announce=false)
    int off=DetectGmtOffset();
    if(off==g_gmt && !announce) return;
    if(off!=g_gmt)
+     {
+      int jump=(int)MathAbs(off-g_gmt);
       g_log.Warn(StringFormat("Broker clock re-aligned: GMT%+d -> GMT%+d (server %s / GMT %s)",
                  g_gmt,off,TimeToString(SmcNow(),TIME_DATE|TIME_MINUTES),
                  TimeToString(TimeGMT(),TIME_DATE|TIME_MINUTES)));
+      //--- a daylight saving switch moves the offset by exactly one hour.
+      //--- Anything larger is a machine clock or timezone fault, not a
+      //--- seasonal change, and it would silently move every news window.
+      if(jump>1)
+         g_log.Err(StringFormat("Offset jumped by %d hours - that is not a daylight saving change. Check this machine's clock and timezone, and pin InpGmtOffsetHours if the terminal cannot be trusted.",jump));
+     }
    g_gmt=off;
    g_conf.SetGmtOffset(g_gmt);
    if(InpUseNews) g_news.SetGmtOffset(g_gmt);
-   if(announce)
-     {
-      datetime utc=SmcServerToUtc(SmcNow(),g_gmt);
-      g_log.Info(StringFormat("Clock: server %s = GMT%+d. Calendar events are published in GMT and shifted by %+d h to server time.",
-                 TimeToString(SmcNow(),TIME_DATE|TIME_MINUTES),g_gmt,g_gmt));
-      g_log.Info(StringFormat("Sessions: London killzone 07:00-10:00 %s local (%s), New York killzone 08:00-11:00 %s local (%s). Right now it is %.2f in London and %.2f in New York.",
-                 SmcZoneName(TZ_LONDON),SmcZoneAbbr(TZ_LONDON,utc),
-                 SmcZoneName(TZ_NY),SmcZoneAbbr(TZ_NY,utc),
-                 SmcZoneHourF(TZ_LONDON,utc),SmcZoneHourF(TZ_NY,utc)));
-     }
+   if(announce) AnnounceClocks();
+  }
+
+//+------------------------------------------------------------------+
+//| Print every frame of reference at once, and translate the session |
+//| schedule into the trader's own day. The decisions themselves are  |
+//| anchored to the exchanges and are identical in every location -   |
+//| this is so the operator can see when the agent will be awake.     |
+//+------------------------------------------------------------------+
+void AnnounceClocks()
+  {
+   datetime srv=SmcNow();
+   datetime utc=SmcServerToUtc(srv,g_gmt);
+   int      pc =SmcPcGmtOffsetHours();
+
+   g_log.Info(StringFormat("Clock | server %s (GMT%+d) | GMT %s | this PC %s (%s) | %s %s (%s) | %s %s (%s)",
+              TimeToString(srv,TIME_MINUTES),g_gmt,
+              TimeToString(TimeGMT(),TIME_MINUTES),
+              TimeToString(TimeLocal(),TIME_MINUTES),
+              (pc==99?"offset unknown":StringFormat("GMT%+d",pc)),
+              SmcZoneName(TZ_LONDON),SmcHm(SmcZoneHourF(TZ_LONDON,utc)),SmcZoneAbbr(TZ_LONDON,utc),
+              SmcZoneName(TZ_NY),SmcHm(SmcZoneHourF(TZ_NY,utc)),SmcZoneAbbr(TZ_NY,utc)));
+
+   //--- the two killzones, expressed in server time and in the operator's time
+   datetime ldn_day=SmcZoneDayStart(TZ_LONDON,utc);
+   datetime ny_day =SmcZoneDayStart(TZ_NY,utc);
+   double sf,st,pf,pt;
+   SmcZoneWindowElsewhere(TZ_LONDON,ldn_day,7.0,10.0,g_gmt,sf,st,pf,pt);
+   g_log.Info(StringFormat("Session | London killzone 07:00-10:00 London local = %s-%s server = %s-%s on this PC",
+              SmcHm(sf),SmcHm(st),SmcHm(pf),SmcHm(pt)));
+   SmcZoneWindowElsewhere(TZ_NY,ny_day,8.0,11.0,g_gmt,sf,st,pf,pt);
+   g_log.Info(StringFormat("Session | New York killzone 08:00-11:00 New York local = %s-%s server = %s-%s on this PC",
+              SmcHm(sf),SmcHm(st),SmcHm(pf),SmcHm(pt)));
+
+   if(pc==99)
+      g_log.Warn("This machine's timezone could not be read. Session decisions are unaffected (they are anchored to the exchanges), but verify the broker offset above and pin InpGmtOffsetHours if it looks wrong.");
   }
 
 //+------------------------------------------------------------------+
@@ -350,7 +384,7 @@ void RedrawPanel()
   {
    g_vis.DrawPanel(GetPointer(g_ms),GetPointer(g_eng_e),GetPointer(g_conf),GetPointer(g_risk),
                    GetPointer(g_model),g_sig,ModeString(),g_threshold,g_last_action,
-                   g_exec.OpenCount(),NewsLine());
+                   g_exec.OpenCount(),NewsLine(),g_gmt);
   }
 
 //+------------------------------------------------------------------+

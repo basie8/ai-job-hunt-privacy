@@ -215,6 +215,51 @@ pinned with `InpGmtOffsetHours` if the machine's clock is untrustworthy.
 changes, or the US adopts permanent DST, update the two rule functions in
 `TimeZones.mqh` and add the new transition to the self test.
 
+### Running the EA from a different country
+
+**The agent's decisions do not depend on where you are, and that is deliberate.**
+A killzone is a property of an exchange, not of the trader. The London open is the
+London open whether you watch it from Cape Town, Dubai, London or Sydney, so the
+windows are anchored to `Europe/London` and `America/New_York` and every instance of
+this EA reaches the same conclusion at the same instant anywhere on earth. If the
+sessions followed your local clock instead, a user in Sydney would get a "London
+killzone" in the middle of the Australian afternoon.
+
+There are four clocks in play, and only one of them touches a decision:
+
+| Clock | Used for | Affects trading? |
+|---|---|---|
+| **Broker server time** | every internal timestamp, bar times, the FTMO daily reset | yes — the working frame |
+| **Exchange local** (London, New York) | killzones, accumulation range, Friday drain | yes — anchored, location-independent |
+| **GMT** (`TimeGMT()`, from this machine's clock and timezone) | the single reference used to derive the broker offset | indirectly — see below |
+| **Your PC local time** (`TimeLocal()`) | display only | no |
+
+So your location changes nothing except what you read on the panel. Your machine's
+**timezone setting**, however, is the reference the terminal uses for GMT, so a VPS
+with a wrong clock or timezone yields a wrong broker offset and would shift the news
+windows. Three protections:
+
+1. Start-up prints every clock on one line, plus both killzones translated into
+   server time *and* your own time, so a misconfiguration is visible immediately:
+
+```
+Clock   | server 14:15 (GMT+2) | GMT 12:15 | this PC 14:15 (GMT+2) | London 13:15 (BST) | New York 08:15 (EDT)
+Session | London killzone 07:00-10:00 London local = 08:00-11:00 server = 08:00-11:00 on this PC
+Session | New York killzone 08:00-11:00 New York local = 14:00-17:00 server = 14:00-17:00 on this PC
+```
+
+2. The panel carries a live `CLOCKS` row with server, London, New York and your own
+   time side by side.
+3. A broker offset that moves by more than one hour is flagged as an error rather
+   than accepted — a daylight saving change is exactly one hour, so a larger jump is
+   a machine clock fault.
+
+If your terminal's clock cannot be trusted, pin `InpGmtOffsetHours` to your broker's
+real offset and nothing else in the agent depends on the PC at all.
+
+*Note for backtests:* in the strategy tester `TimeLocal()` mirrors the modelled
+server time, so the "this PC" column is not meaningful there.
+
 ## 6. Files it writes (common files folder)
 
 | File | Purpose |

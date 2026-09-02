@@ -362,10 +362,10 @@ public:
    void              DrawPanel(CMarketState *ms,CSmcEngine *eng,CConfluence *conf,CRiskManager *risk,
                                COnlineLearner *model,const SSignal &sig,const string mode,
                                const double threshold,const string last_action,const int open_positions,
-                               const string news_line)
+                               const string news_line,const int gmt)
      {
       if(!m_draw_panel) return;
-      int rows=14+F_COUNT;
+      int rows=15+F_COUNT;
       int h=rows*m_row_h+22;
       Panel("P_BG",m_x,m_y,m_width,h,m_c_panel,C'60,64,74');
       m_row=0;
@@ -394,6 +394,17 @@ public:
           m_c_dim,8);
 
       Row("h5",StringFormat("PLAYBOOK   %s",conf.Playbook()),m_c_text,8);
+
+      //--- every frame of reference at a glance. Decisions are anchored to
+      //--- the exchanges, so they are the same wherever this runs; the PC
+      //--- column is there so the operator knows when the agent is awake.
+      datetime utc=SmcServerToUtc(SmcNow(),gmt);
+      int pc=SmcPcGmtOffsetHours();
+      Row("h6",StringFormat("CLOCKS     server %s GMT%+d | LDN %s %s | NY %s %s | you %s %s",
+          TimeToString(SmcNow(),TIME_MINUTES),gmt,
+          SmcHm(SmcZoneHourF(TZ_LONDON,utc)),SmcZoneAbbr(TZ_LONDON,utc),
+          SmcHm(SmcZoneHourF(TZ_NY,utc)),SmcZoneAbbr(TZ_NY,utc),
+          SmcHm(SmcPcHourF(utc)),(pc==99?"(tz?)":StringFormat("GMT%+d",pc))),m_c_dim,8);
 
       //--- factor table -------------------------------------------------
       Row("f_hdr","FACTOR              SCORE  WEIGHT  CONTRIB  READING",m_c_dim,8);

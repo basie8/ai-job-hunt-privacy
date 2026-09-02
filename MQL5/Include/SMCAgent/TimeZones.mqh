@@ -177,6 +177,67 @@ void SmcZoneWindowToServer(const int zone,const datetime local_day_start,
   }
 
 //+------------------------------------------------------------------+
+//| The trader's own machine.                                        |
+//|                                                                  |
+//| The PC clock is NOT used to decide anything. Session windows are |
+//| anchored to the exchanges, so the agent behaves identically in    |
+//| Johannesburg, Dubai, London or Sydney. The machine matters in     |
+//| exactly one place - it is the terminal's reference for GMT, and   |
+//| therefore for the broker offset - and it is shown on the panel so |
+//| a trader can read the agent's schedule in their own day.          |
+//+------------------------------------------------------------------+
+int SmcPcGmtOffsetHours()
+  {
+   datetime loc=TimeLocal();
+   datetime gmt=TimeGMT();
+   if(loc<=0 || gmt<=0) return(99);
+   double h=((double)((long)loc-(long)gmt))/3600.0;
+   if(MathAbs(h)>14.5) return(99);
+   return((int)MathRound(h));
+  }
+
+datetime SmcUtcToPc(const datetime utc)
+  {
+   int off=SmcPcGmtOffsetHours();
+   if(off==99) return(utc);
+   return(SmcShift(utc,(long)off*3600));
+  }
+
+double SmcPcHourF(const datetime utc)
+  {
+   MqlDateTime d;
+   TimeToStruct(SmcUtcToPc(utc),d);
+   return(d.hour+d.min/60.0);
+  }
+
+//--- "13:30" from 13.5
+string SmcHm(const double hour_f)
+  {
+   double h=hour_f;
+   while(h<0.0)   h+=24.0;
+   while(h>=24.0) h-=24.0;
+   int hh=(int)MathFloor(h);
+   int mm=(int)MathRound((h-hh)*60.0);
+   if(mm>=60) { mm-=60; hh=(hh+1)%24; }
+   return(StringFormat("%02d:%02d",hh,mm));
+  }
+
+//--- where an exchange-local window falls in another frame of reference
+void SmcZoneWindowElsewhere(const int zone,const datetime local_day_start,
+                            const double from_h,const double to_h,const int gmt_offset,
+                            double &server_from,double &server_to,
+                            double &pc_from,double &pc_to)
+  {
+   datetime u1=SmcZoneToUtc(zone,SmcShift(local_day_start,(long)(from_h*3600.0)));
+   datetime u2=SmcZoneToUtc(zone,SmcShift(local_day_start,(long)(to_h*3600.0)));
+   MqlDateTime d;
+   TimeToStruct(SmcUtcToServer(u1,gmt_offset),d); server_from=d.hour+d.min/60.0;
+   TimeToStruct(SmcUtcToServer(u2,gmt_offset),d); server_to  =d.hour+d.min/60.0;
+   pc_from=SmcPcHourF(u1);
+   pc_to  =SmcPcHourF(u2);
+  }
+
+//+------------------------------------------------------------------+
 //| Self test against known transitions.                             |
 //| Returns true when every assertion holds; report carries the       |
 //| detail either way.                                                |
