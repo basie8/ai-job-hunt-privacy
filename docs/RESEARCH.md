@@ -25,6 +25,7 @@ traders expect to see. Its feature set defines the visual contract of this EA:
 | Swing and internal order blocks | `SmcEngine.mqh :: BuildOrderBlock` | last opposing candle before the displacement that broke structure |
 | Fair value gaps / imbalances | `SmcEngine.mqh :: MapFvg` | 3-candle imbalance, filtered by the live gap distribution |
 | Equal highs / equal lows | `SmcEngine.mqh :: MapLiquidity` | tolerance derived from the median true range, not a fixed pip value |
+| Inducement (IDM) | `SmcEngine.mqh :: FindInducement` | not a LuxAlgo object; added from the ICT / structure-mapping literature (see §2b) |
 | Premium / discount / equilibrium | `SmcEngine.mqh :: MapRange` | drawn over the current dealing range |
 | Multi-timeframe highs and lows | `Confluence.mqh :: LoadKeyLevels` | PDH/PDL, PWH/PWL, Asian range |
 
@@ -74,6 +75,39 @@ Sources:
 - <https://hw.online/faq/comprehensive-review-ict-trading-strategy-applied-gold-xauusd/>
 - <https://medium.com/@fxmbrand/ict-smart-money-concepts-finally-explained-like-youre-5-for-gold-trading-the-ultimate-2026-6517ea11c7c7>
 - <https://fxnx.com/en/blog/gold-vs-forex-volatility-xauusd-data-guide>
+
+## 2b. Inducement (IDM)
+
+Inducement is the piece that turns "price is in an order block" into "price was
+*drawn* to this order block". The definition used in the code is the mechanical one:
+**the first valid pullback inside the leg that produced the BOS or CHoCH**. Traders
+who buy that shallow pullback leave their stops just behind it, which turns the
+pocket into a small liquidity pool — one price is expected to collect on the way to
+the real point of interest. In strict structure-mapping models the zone behind the
+inducement is not treated as valid until that pullback has been run.
+
+Implementation consequences:
+
+- `SmcEngine::FindInducement` scans the interior of the creating leg from the order
+  block forward and returns the first minor pivot it finds (internal pivot length
+  first, then a single-bar pivot as a fallback). No pullback in the leg means no
+  inducement — a clean impulse leaves nothing resting in front of the zone.
+- `UpdateZones` re-resolves `idm_taken` on every bar, so a zone flips from
+  *resting* to *armed* the moment price runs the pullback.
+- The stop is placed beyond an untaken inducement, never in front of it.
+- It is a **scored factor, not a hard veto**: on a raid-driven setup the major
+  liquidity grab has already done the trapping, so an untaken inducement is a
+  penalty rather than a disqualification. On a continuation retest it is close to
+  disqualifying. Where it bites hardest in practice is the wide gold order block
+  whose inducement sits inside the zone — the case where price taps the proximal
+  edge, runs the pullback below it, and only then reverses.
+
+Sources:
+- <https://www.luxalgo.com/library/concept/inducement/>
+- <https://www.equiti.com/sc-en/news/trading-ideas/inducement-in-smc-explained-how-smart-money-traps-work/>
+- <https://www.litefinance.org/blog/for-beginners/what-is-inducement-in-trading/>
+- <https://tradingfinder.com/education/forex/inducement/>
+- <https://3commas.io/blog/what-is-inducement-in-smart-money-concepts>
 
 ## 3. What the statistics say about the individual components
 

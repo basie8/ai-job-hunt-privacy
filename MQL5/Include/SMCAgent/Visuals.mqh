@@ -214,6 +214,7 @@ public:
       DeleteGroup("S");
       DeleteGroup("R");
       DeleteGroup("K");
+      DeleteGroup("I");
 
       datetime right=ms.ETime(0)+(datetime)(PeriodSeconds(ms.TfEntry())*12);
 
@@ -234,6 +235,20 @@ public:
               (z.dir==DIR_BULL?"+":"-"),(z.mitigated?" (tapped)":"")),
               (z.dir==DIR_BULL?m_c_bull:m_c_bear),7);
          drawn++;
+        }
+
+      //--- inducement guarding each order block -------------------------
+      int idmn=0;
+      for(int i=zn-1;i>=0 && idmn<8;i--)
+        {
+         SZone z;
+         if(!eng.GetZone(i,z)) continue;
+         if(z.broken || z.kind!=ZONE_OB || z.idm<=0.0) continue;
+         color c=(z.idm_taken?m_c_dim:m_c_accent);
+         string id=StringFormat("I_%d",(int)z.uid);
+         Line(id,z.idm_time,z.idm,right,z.idm,c,STYLE_DOT,1,false);
+         Text(id+"_t",right,z.idm,(z.idm_taken?" IDM taken":" IDM resting"),c,7);
+         idmn++;
         }
 
       //--- structure events -------------------------------------------
@@ -324,6 +339,11 @@ public:
       Text("G_s_t",to,sig.sl," SL",m_c_bear,7);
       Text("G_t1_t",to,sig.tp1,StringFormat(" TP1 %.2fR",sig.rr1),m_c_bull,7);
       Text("G_t2_t",to,sig.tp2,StringFormat(" TP2 %.2fR",sig.rr2),m_c_bull,7);
+      if(sig.idm>0.0)
+        {
+         Line("G_idm",from,sig.idm,to,sig.idm,m_c_accent,STYLE_DOT,1,false);
+         Text("G_idm_t",to,sig.idm,(sig.idm_taken?" IDM taken":" IDM resting"),m_c_accent,7);
+        }
      }
 
    //+---------------------------------------------------------------+

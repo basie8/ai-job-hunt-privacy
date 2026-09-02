@@ -1,7 +1,7 @@
 # Strategy specification — how the agent decides
 
 > One sentence: **on every bar close the agent re-reads the raw candles, rebuilds the
-> Smart Money picture from scratch, proposes a direction, measures 16 confluence
+> Smart Money picture from scratch, proposes a direction, measures 17 confluence
 > factors, converts them into a probability, and only trades when that probability
 > pays for the reward it can actually reach — inside an FTMO envelope that cannot
 > lose 5% in a day.**
@@ -33,6 +33,24 @@ it. The calibration runs on each bar close over the visible window
 The only numbers a user sets are **account, compliance and policy** values — risk
 per trade, FTMO percentages, how many trades per week to aim for, what to draw.
 
+## 0b. The seven steps, and where each one lives
+
+The agent executes the classic SMC sequence in order. Nothing is skipped and
+nothing is implicit:
+
+| Step | Implementation | Notes |
+|---|---|---|
+| 1. Structure mapping & trend | `SmcEngine::MapStructure`, `Confluence::EngineBias` | swing + internal pivots, BOS/CHoCH, run independently on three timeframes |
+| 2. Liquidity zone analysis | `SmcEngine::MapLiquidity` + `Confluence::FeedExternalLiquidity` | EQH/EQL, swing pools, PDH/PDL, PWH/PWL, Asian range |
+| 3. Test of the liquidity zone | `SmcEngine::DetectSweep` | wick through the pool, close back inside, scored on rejection wick, pool weight, freshness |
+| 4. **Inducement (IDM)** | `SmcEngine::FindInducement`, factor 16 | the first valid pullback inside the leg that broke structure; the zone behind it is not armed until that pullback has been run |
+| 5. Imbalance | `SmcEngine::MapFvg`, factors 5 and 4 | significance measured against the live gap distribution |
+| 6. Order block | `SmcEngine::BuildOrderBlock`, factor 4 | last opposing candle before the displacement, scored on displacement, imbalance, participation, tightness |
+| 7. Trade execution | eight gates → `RiskManager` sizing → `CTradeExec` | then partial, break even, structural trail, time stop |
+
+Steps 1-6 are *measurements*; step 7 is the only one that can put money at risk,
+and it is the one wrapped in the FTMO envelope.
+
 ## 1. What the agent reads (three timeframes)
 
 The chart timeframe is the **entry** timeframe. Two higher timeframes are picked
@@ -48,6 +66,8 @@ SMC engine, self-calibrated to its own candles:
   PWH/PWL and the Asian range high/low fed in from higher timeframes
 - **sweeps** — a pool taken and rejected within the same candle, scored by wick
   size relative to the candle and by freshness
+- **inducement** — for every order block, the first valid pullback inside the leg
+  that produced it, plus whether that pullback has since been run
 - the **dealing range** with premium / equilibrium / discount
 
 ## 2. Playbooks (the directional hypothesis)
@@ -70,9 +90,11 @@ here, while entries *inside* the release window remain blocked.
 **C — Trend continuation into origin**
 No reversal required: the entry timeframe is in a BOS sequence that agrees with the
 higher timeframe, and price has returned to the fresh order block / imbalance that
-produced the break.
+produced the break. This is the playbook most exposed to the premature-tap failure,
+so an untaken inducement is penalised hardest here (−0.90 against −0.45 for the
+raid-driven playbooks): the trap in front of the zone has to be sprung first.
 
-## 3. The 16 confluence factors
+## 3. The 17 confluence factors
 
 Each factor is measured for the *proposed direction* and normalised to −1…+1
 (positive = supports the trade). The prior column is the research-based starting
@@ -96,6 +118,7 @@ weight (see `RESEARCH.md`); the model owns the weight after warm-up.
 | 13 | Confirmation | 0.14 | where the confirmation candle closed in its range, size of its rejection wick |
 | 14 | Participation | 0.08 | tick volume of the confirmation bar vs the median |
 | 15 | News context | 0.16 | negative approaching a release, strongly positive on a post-release raid |
+| 16 | Inducement | 0.20 | +1.0 when the inducement guarding the zone has been run, −0.45 when it is still resting after a major raid, −0.90 when it is still resting on a continuation entry, +0.15 when the creating leg had no interior pullback at all |
 
 The weighted sum plus the model bias goes through a logistic function to produce
 `p`, the probability that the setup reaches its first objective before its stop.
@@ -107,7 +130,10 @@ The weighted sum plus the model bias goes through a logistic function to produce
    may take 1.3R. This replaces a fixed take-profit setting.
 2. **Acceptance gate** — `p` must clear the live acceptance threshold (§6).
 3. **Stop sanity** — the invalidation may not be deeper than 4.5 units of local
-   volatility.
+   volatility. Inducement that has not been run is resting liquidity, so the stop is
+   pushed beyond it rather than in front of it — and if that makes the stop too deep,
+   the setup is rejected by this same rule instead of being taken with liquidity
+   sitting inside the risk.
 4. **Objective exists** — there must be unswept liquidity to aim at.
 5. **News gate** — no entries inside the release window (default −15 / +10 minutes
    around high-impact events).
@@ -213,14 +239,15 @@ readability of the panel.
 
 ## 9. What is drawn
 
-Chart layer: order blocks and imbalances (fading label when tapped), BOS / CHoCH
+Chart layer: order blocks and imbalances (fading label when tapped), the inducement
+line guarding each order block labelled `IDM resting` / `IDM taken`, BOS / CHoCH
 lines (dotted for internal structure), liquidity pools with their names and a
 `swept` marker, the dealing range with premium / equilibrium / discount, an arrow
 on the raid that armed the current hypothesis, killzone shading, and — while a
 signal is live — entry, stop and both objectives with their R multiples.
 
 Panel: mode and model state, structure on all three timeframes, dealing range and
-raid, active playbook, the full 16-factor table with score bars, learned weights,
+raid, active playbook, the full 17-factor table with score bars, learned weights,
 contributions and a plain-English reading of each factor, the weighted score and
 probability, the complete FTMO position (day P/L, floors, remaining budget, open
 risk, target progress, trading days, trades this week), the news line, the signal

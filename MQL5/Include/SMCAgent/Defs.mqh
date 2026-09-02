@@ -37,6 +37,7 @@
 #define LQ_ASIA_L   7     // asian / accumulation range low
 #define LQ_SWING_H  8     // major swing high
 #define LQ_SWING_L  9     // major swing low
+#define LQ_IDM     10     // inducement: the first pullback inside the leg that broke structure
 
 //--- structure event kinds ------------------------------------------
 #define EV_BOS    0
@@ -73,6 +74,12 @@ struct SZone
    double            displacement; // size of the leg that created it, in local TR units
    bool              has_fvg;    // order block backed by an imbalance
    double            vol_ratio;  // creating candle volume vs local distribution
+   //--- inducement: the first valid pullback inside the leg that this
+   //--- zone produced. The zone is not considered "armed" until that
+   //--- pullback liquidity has been run.
+   double            idm;        // price of the inducement (0 = none identified)
+   datetime          idm_time;
+   bool              idm_taken;
    long              uid;
   };
 
@@ -137,6 +144,8 @@ struct SSignal
    datetime          bar_time;
    double            zone_top;
    double            zone_bottom;
+   double            idm;         // inducement guarding the zone (0 = none)
+   bool              idm_taken;
   };
 
 //+------------------------------------------------------------------+
@@ -309,6 +318,7 @@ string SmcLiqStr(const int kind)
       case LQ_ASIA_L:  return("ASIA-L");
       case LQ_SWING_H: return("SWING-H");
       case LQ_SWING_L: return("SWING-L");
+      case LQ_IDM:     return("IDM");
      }
    return("LQ");
   }

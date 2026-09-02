@@ -3,27 +3,28 @@
 //|                                                                  |
 //|   XAUUSD Smart Money Concepts agent for FTMO 2-step accounts.    |
 //|                                                                  |
-//|   This is not a parameter driven expert advisor. There is no      |
-//|   moving average period to optimise, no RSI level, no fixed pip   |
-//|   distance. On every bar close the agent:                         |
+//|   This is not a parameter driven expert advisor. There is no     |
+//|   moving average period to optimise, no RSI level, no fixed pip  |
+//|   distance. On every bar close the agent:                        |
 //|                                                                  |
-//|     1. re-reads the raw candles of three timeframes and           |
-//|        calibrates itself to the volatility, rhythm and            |
-//|        participation that are visible right now;                  |
-//|     2. rebuilds the full Smart Money picture (market structure,   |
-//|        BOS / CHoCH, order blocks, imbalances, equal highs and     |
-//|        lows, session and daily liquidity, premium / discount);    |
-//|     3. proposes a directional hypothesis from one of three        |
-//|        researched playbooks;                                      |
-//|     4. measures 16 confluence factors for that hypothesis and     |
-//|        converts them into a probability with an online model      |
-//|        that keeps learning from every resolved setup;             |
-//|     5. sizes and manages the trade inside a layered FTMO risk     |
-//|        envelope that cannot lose 5% in a day;                     |
-//|     6. draws everything it saw and prints why it acted.           |
+//|     1. re-reads the raw candles of three timeframes and          |
+//|        calibrates itself to the volatility, rhythm and           |
+//|        participation that are visible right now;                 |
+//|     2. rebuilds the full Smart Money picture (market structure,  |
+//|        BOS / CHoCH, inducement, order blocks, imbalances, equal  |
+//|        highs and lows, session and daily liquidity, premium and  |
+//|        discount);                                                |
+//|     3. proposes a directional hypothesis from one of three       |
+//|        researched playbooks;                                     |
+//|     4. measures 17 confluence factors for that hypothesis and    |
+//|        converts them into a probability with an online model     |
+//|        that keeps learning from every resolved setup;            |
+//|     5. sizes and manages the trade inside a layered FTMO risk    |
+//|        envelope that cannot lose 5% in a day;                    |
+//|     6. draws everything it saw and prints why it acted.          |
 //|                                                                  |
-//|   Research behind the playbooks and the factor priors:            |
-//|   see docs/RESEARCH.md and docs/STRATEGY.md.                      |
+//|   Research behind the playbooks and the factor priors:           |
+//|   see docs/RESEARCH.md and docs/STRATEGY.md.                     |
 //+------------------------------------------------------------------+
 #property copyright "SMC AI Agent"
 #property link      "https://github.com/basie8/ai-job-hunt-privacy"
@@ -116,7 +117,7 @@ double         g_threshold     = 0.62;
 SSignal        g_sig;
 bool           g_ready         = false;
 
-//--- research based priors for the 16 confluence factors ------------
+//--- research based priors for the 17 confluence factors ------------
 //--- (see docs/RESEARCH.md for the source of each number)
 double         g_priors[F_COUNT];
 
@@ -139,6 +140,7 @@ void SetPriors()
    g_priors[F_CANDLE]       = 0.14;   // confirmation candle quality
    g_priors[F_VOLUME]       = 0.08;   // participation on the confirmation
    g_priors[F_NEWS]         = 0.16;   // macro context
+   g_priors[F_INDUCEMENT]   = 0.20;   // has the pullback liquidity in front of the zone been run
   }
 
 //+------------------------------------------------------------------+

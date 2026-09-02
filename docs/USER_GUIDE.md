@@ -62,7 +62,7 @@ DECIDE | stand aside: risk envelope: soft daily stop
 | `STRUCTURE` | swing bias on the higher, intermediate and entry timeframes |
 | `DEALING` | the current dealing range, where price sits in it, and the last liquidity raid |
 | `PLAYBOOK` | which of the three setups is on the table right now |
-| factor table | every confluence factor: score bar, signed score, **learned** weight, and a plain reading |
+| factor table | all 17 confluence factors: score bar, signed score, **learned** weight, and a plain reading. `Inducement` reads `armed` once the pullback guarding the zone has been run, `still resting` while the trap is unsprung |
 | `WEIGHTED SCORE` | the sum of contributions and the resulting probability |
 | `FTMO Pn` | day P/L %, the hard daily floor price, total P/L %, target progress, trading days |
 | `BUDGET` | money left before the soft stop and the hard floor, risk currently open, trades this week |
@@ -110,7 +110,7 @@ window and importance filter, the CSV fallback name, panel position and log leve
 
 | File | Purpose |
 |---|---|
-| `smc_agent_model.csv` | learned weights, bias, update count and replay memory |
+| `smc_agent_model.csv` | learned weights, bias, update count and replay memory. If the feature count ever changes (as it did when inducement was added), the loader detects the mismatch, warns, and restarts from the research priors |
 | `smc_agent_state.csv` | phase capital, trading days, streaks, equity peak |
 | `smc_agent_log.txt` | decision log, when `InpLogToFile` is on |
 | `smc_news.csv` | *optional input*: fallback calendar, `YYYY.MM.DD HH:MM;CUR;IMPORTANCE;NAME` |
@@ -140,7 +140,7 @@ Delete the first two to start a phase from scratch (or set `InpResetModel`).
 - **Killzones are mapped in GMT** and converted with the detected server offset.
   They do not track US daylight-saving transitions to the minute; the NY window is
   approximated as 12:00–15:00 GMT.
-- **The model is linear** in its 16 factors — interpretable and stable on small
+- **The model is linear** in its 17 factors — interpretable and stable on small
   samples, but it cannot discover a pattern that none of the factors expresses.
 - **Slippage and gaps are real.** The worst-case check assumes a 25% overshoot
   beyond the stop; a weekend gap can still exceed that. Nothing in software can make

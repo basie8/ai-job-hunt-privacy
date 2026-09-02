@@ -188,12 +188,14 @@ private:
 
    void              PushZone(const int kind,const int dir,const double top,const double bottom,
                               const datetime from,const datetime active,const double displacement,
-                              const bool has_fvg,const double vol_ratio)
+                              const bool has_fvg,const double vol_ratio,
+                              const double idm=0.0,const datetime idm_time=0)
      {
       if(top<=bottom) return;
       SZone z;
       z.kind=kind; z.dir=dir; z.top=top; z.bottom=bottom;
       z.t_from=from; z.t_active=active; z.t_to=from;
+      z.idm=idm; z.idm_time=idm_time; z.idm_taken=false;
       z.mitigated=false; z.broken=false;
       z.displacement=displacement;
       z.has_fvg=has_fvg;
@@ -208,6 +210,39 @@ private:
       int n=ArraySize(m_zones);
       ArrayResize(m_zones,n+1);
       m_zones[n]=z;
+     }
+
+   //+---------------------------------------------------------------+
+   //| Inducement (IDM)                                                |
+   //|                                                                 |
+   //| The first valid pullback inside the leg that produced the break. |
+   //| Traders who buy that shallow pullback leave their stops just     |
+   //| behind it, which is the liquidity price is expected to run       |
+   //| before it is drawn back to the real point of interest. The zone  |
+   //| behind it is not treated as armed until that pullback has been   |
+   //| taken.                                                           |
+   //|                                                                 |
+   //| break_bar  = the bar whose close broke structure (newer)         |
+   //| origin_bar = the order block candle at the start of the leg      |
+   //+---------------------------------------------------------------+
+   bool              FindInducement(const int dir,const int break_bar,const int origin_bar,
+                                    double &idm,datetime &idm_time)
+     {
+      idm=0.0; idm_time=0;
+      if(origin_bar-1<break_bar+1) return(false);            // impulse with no interior bars
+      //--- nearest pullback to the point of interest = the first one
+      //--- that formed inside the leg, so scan from the origin forward
+      for(int pass=0;pass<2;pass++)
+        {
+         int len=(pass==0?m_ipivot:1);
+         for(int p=origin_bar-1;p>=break_bar+1;p--)
+           {
+            if(p-len<0 || p+len>=m_bars) continue;
+            if(dir==DIR_BULL && IsPivotLow(p,len))  { idm=L(p); idm_time=T(p); return(true); }
+            if(dir==DIR_BEAR && IsPivotHigh(p,len)) { idm=H(p); idm_time=T(p); return(true); }
+           }
+        }
+      return(false);
      }
 
    //--- build the order block that produced a structural break -------
@@ -237,7 +272,10 @@ private:
       double disp=SmcSafeDiv(MathAbs(C(break_bar)-(dir==DIR_BULL?L(j):H(j))),m_unit,0.0);
       bool   fvg =HasImbalance(break_bar,j,dir);
       double vr  =SmcSafeDiv((double)m_r[j].tick_volume,m_vol_med,1.0);
-      PushZone(ZONE_OB,dir,H(j),L(j),T(j),T(break_bar),disp,fvg,vr);
+      double idm=0.0;
+      datetime idm_t=0;
+      FindInducement(dir,break_bar,j,idm,idm_t);
+      PushZone(ZONE_OB,dir,H(j),L(j),T(j),T(break_bar),disp,fvg,vr,idm,idm_t);
      }
 
    //--- single pass over history: pivots, structure, order blocks ----
@@ -348,15 +386,18 @@ private:
          if(from<0) from=iBarShiftLocal(m_zones[z].t_from);
          if(from<0) continue;
          m_zones[z].t_to=T(1);
+         m_zones[z].idm_taken=false;
          for(int b=from-1;b>=1;b--)
            {
             if(m_zones[z].dir==DIR_BULL)
               {
+               if(m_zones[z].idm>0.0 && L(b)<m_zones[z].idm) m_zones[z].idm_taken=true;
                if(L(b)<=m_zones[z].top) m_zones[z].mitigated=true;
                if(C(b)< m_zones[z].bottom) { m_zones[z].broken=true; m_zones[z].t_to=T(b); break; }
               }
             else
               {
+               if(m_zones[z].idm>0.0 && H(b)>m_zones[z].idm) m_zones[z].idm_taken=true;
                if(H(b)>=m_zones[z].bottom) m_zones[z].mitigated=true;
                if(C(b)> m_zones[z].top) { m_zones[z].broken=true; m_zones[z].t_to=T(b); break; }
               }

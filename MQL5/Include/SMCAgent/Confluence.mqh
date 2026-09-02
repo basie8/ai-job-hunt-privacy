@@ -6,14 +6,14 @@
 //|  On every closed bar it reads the chart through the SMC engines   |
 //|  (entry / intermediate / higher timeframe), proposes a directional|
 //|  hypothesis from one of three researched playbooks, and then      |
-//|  measures 16 confluence factors for that hypothesis. Every factor |
+//|  measures 17 confluence factors for that hypothesis. Every factor |
 //|  is a measurement of the live tape, normalised to -1..+1, never a |
 //|  fixed technical trigger. The factors are handed to the online    |
 //|  model which returns a probability of the setup working.          |
 //|                                                                  |
 //|  Playbooks (from the research notes in docs/RESEARCH.md):         |
-//|    A  Liquidity raid -> CHoCH -> discount/premium OB or FVG       |
-//|       (ICT "turtle soup" / LuxAlgo swing structure reversal)      |
+//|    A  Liquidity raid -> CHoCH -> inducement run -> discount or    |
+//|       premium OB / FVG (ICT "turtle soup" style reversal)          |
 //|    B  Post-release raid: the same shape immediately after a high  |
 //|       impact macro print, when the sweep is engineered by the news|
 //|    C  Trend continuation: BOS in the HTF direction, retrace into  |
@@ -46,7 +46,8 @@
 #define F_CANDLE       13
 #define F_VOLUME       14
 #define F_NEWS         15
-#define F_COUNT        16
+#define F_INDUCEMENT   16
+#define F_COUNT        17
 
 class CConfluence
   {
@@ -338,11 +339,15 @@ public:
         {
          sl=MathMin(zone.bottom,(m_e.SweepValid() && m_e.SweepDir()==DIR_BULL?m_e.SweepExtreme():zone.bottom))-buffer;
          sl=MathMin(sl,m_ms.ELow(1)-buffer);
+         //--- inducement that has not been run yet is resting liquidity:
+         //--- the invalidation has to sit beyond it, never in front of it
+         if(zone.idm>0.0 && !zone.idm_taken) sl=MathMin(sl,zone.idm-buffer);
         }
       else
         {
          sl=MathMax(zone.top,(m_e.SweepValid() && m_e.SweepDir()==DIR_BEAR?m_e.SweepExtreme():zone.top))+buffer;
          sl=MathMax(sl,m_ms.EHigh(1)+buffer);
+         if(zone.idm>0.0 && !zone.idm_taken) sl=MathMax(sl,zone.idm+buffer);
         }
       double risk=MathAbs(entry-sl);
       if(risk<=0.0)
@@ -449,6 +454,8 @@ public:
       sig.bar_time=bt;
       sig.zone_top=zone.top;
       sig.zone_bottom=zone.bottom;
+      sig.idm=zone.idm;
+      sig.idm_taken=zone.idm_taken;
       sig.rationale=BuildRationale(dir,zone,why,t1name,rr1,prob);
       m_context=sig.rationale;
       return(true);
@@ -488,6 +495,7 @@ public:
       SetFactor(F_VOLUME,"Participation",0.0,0.0,"neutral");
       double nsc=NewsScore(false);
       SetFactor(F_NEWS,"News context",nsc,nsc,(m_news!=NULL?m_news.Describe(TimeCurrent(),m_news_importance):"news feed off"));
+      SetFactor(F_INDUCEMENT,"Inducement",0.0,0.0,"no zone engaged");
      }
 
    double            VolScore(const double vr)
@@ -662,6 +670,29 @@ public:
       double s_vol=SmcClamp((vratio-1.0)/1.2,-1.0,1.0);
       SetFactor(F_VOLUME,"Participation",vratio,s_vol,
                 StringFormat("confirmation bar traded %.2fx the median tick volume",vratio));
+
+      //--- 16 inducement: has the trap in front of this zone been sprung
+      double s_idm=0.0;
+      string n_idm="";
+      if(zone.idm<=0.0)
+        {
+         s_idm=0.15;
+         n_idm="no interior pullback in the creating leg - nothing resting in front of the zone";
+        }
+      else if(zone.idm_taken)
+        {
+         s_idm=1.00;
+         n_idm=StringFormat("inducement at %.2f has been run - the zone is armed",zone.idm);
+        }
+      else
+        {
+         //--- a continuation entry that has not taken its inducement is
+         //--- the classic premature tap; after a major raid it is milder
+         bool continuation=(StringFind(m_playbook,"C -")==0);
+         s_idm=(continuation?-0.90:-0.45);
+         n_idm=StringFormat("inducement at %.2f still resting - the trap has not been sprung",zone.idm);
+        }
+      SetFactor(F_INDUCEMENT,"Inducement",zone.idm,s_idm,n_idm);
 
       //--- 15 news context
       double s_news=NewsScore(post_news);
