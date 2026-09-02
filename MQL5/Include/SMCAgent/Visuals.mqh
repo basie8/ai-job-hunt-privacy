@@ -241,8 +241,8 @@ private:
 
 public:
                      CVisuals(void): m_chart(0), m_sub(0), m_draw_chart(true), m_draw_panel(true),
-                                     m_x(8), m_y(20), m_row_h(13), m_width(430), m_font(8),
-                                     m_font_name("Consolas"), m_row(0)
+                                     m_x(8), m_y(20), m_row_h(13), m_width(470), m_font(8),
+                                     m_cols(78), m_compact(false), m_font_name("Consolas"), m_row(0)
      {
       m_c_bull=C'46,204,113';
       m_c_bear=C'231,76,60';
