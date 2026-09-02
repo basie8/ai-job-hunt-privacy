@@ -16,6 +16,11 @@
 #define SMC_AGENT_NAME     "SMC AI Agent"
 #define SMC_AGENT_VERSION  "1.00"
 
+//--- field separator for the files the agent writes and reads back.
+//--- Stated explicitly rather than relying on FileOpen's default, so a
+//--- change of default can never orphan a stored model.
+#define SMC_FIELD_SEP      ';'
+
 //--- directions (plain ints, so that -1 is always legal) ------------
 #define DIR_NONE   0
 #define DIR_BULL   1
@@ -252,21 +257,10 @@ int SmcServerGmtOffsetHours()
    return((int)MathRound(h));
   }
 
-int SmcGmtHour(const datetime server_time,const int offset_hours)
-  {
-   datetime g=server_time-(datetime)(offset_hours*3600);
-   MqlDateTime dt;
-   TimeToStruct(g,dt);
-   return(dt.hour);
-  }
-
-double SmcGmtHourF(const datetime server_time,const int offset_hours)
-  {
-   datetime g=server_time-(datetime)(offset_hours*3600);
-   MqlDateTime dt;
-   TimeToStruct(g,dt);
-   return(dt.hour+dt.min/60.0);
-  }
+//--- NOTE: raw "hour in GMT" helpers used to live here. They were removed
+//--- with the daylight saving rework: session windows are exchange-local
+//--- (see TimeZones.mqh) and reintroducing a fixed-GMT hour would silently
+//--- bring back the winter offset bug.
 
 datetime SmcDayStart(const datetime t)
   {

@@ -64,6 +64,17 @@ private:
    double            Bal(void)  { return(AccountInfoDouble(ACCOUNT_BALANCE)); }
    double            Eq(void)   { return(AccountInfoDouble(ACCOUNT_EQUITY));  }
 
+   //--- Value of one tick per lot when the trade goes AGAINST us.
+   //--- MT5 publishes separate profit and loss tick values; for gold on
+   //--- some accounts they differ, and sizing a stop off the profit value
+   //--- understates the loss. Always size risk off the loss value.
+   double            TickValueLoss(void)
+     {
+      double v=SymbolInfoDouble(m_symbol,SYMBOL_TRADE_TICK_VALUE_LOSS);
+      if(v>0.0) return(v);
+      return(SymbolInfoDouble(m_symbol,SYMBOL_TRADE_TICK_VALUE));
+     }
+
    datetime          ResetAnchor(const datetime now)
      {
       datetime d=SmcDayStart(now)+(datetime)(m_reset_hour*3600);
@@ -226,7 +237,7 @@ public:
    double            Lots(const double risk_money,const double sl_distance)
      {
       if(sl_distance<=0.0 || risk_money<=0.0) return(0.0);
-      double tick_val=SymbolInfoDouble(m_symbol,SYMBOL_TRADE_TICK_VALUE);
+      double tick_val=TickValueLoss();
       double tick_sz =SymbolInfoDouble(m_symbol,SYMBOL_TRADE_TICK_SIZE);
       if(tick_sz<=0.0 || tick_val<=0.0) return(0.0);
       double loss_per_lot=(sl_distance/tick_sz)*tick_val;
@@ -261,9 +272,9 @@ public:
    //--- worst case check before sending an order -------------------------
    bool              WorstCaseAcceptable(const double lots,const double sl_distance,string &reason)
      {
-      double tick_val=SymbolInfoDouble(m_symbol,SYMBOL_TRADE_TICK_VALUE);
+      double tick_val=TickValueLoss();
       double tick_sz =SymbolInfoDouble(m_symbol,SYMBOL_TRADE_TICK_SIZE);
-      if(tick_sz<=0.0) { reason="symbol tick size unavailable"; return(false); }
+      if(tick_sz<=0.0 || tick_val<=0.0) { reason="symbol tick size/value unavailable"; return(false); }
       //--- assume a 25% slippage/gap overshoot beyond the stop
       double worst=(sl_distance*1.25/tick_sz)*tick_val*lots;
       double open_risk=OpenRiskMoney();
@@ -279,9 +290,9 @@ public:
    double            OpenRiskMoney(void)
      {
       double total=0.0;
-      double tick_val=SymbolInfoDouble(m_symbol,SYMBOL_TRADE_TICK_VALUE);
+      double tick_val=TickValueLoss();
       double tick_sz =SymbolInfoDouble(m_symbol,SYMBOL_TRADE_TICK_SIZE);
-      if(tick_sz<=0.0) return(0.0);
+      if(tick_sz<=0.0 || tick_val<=0.0) return(0.0);
       for(int i=PositionsTotal()-1;i>=0;i--)
         {
          ulong ticket=PositionGetTicket(i);
@@ -321,7 +332,7 @@ public:
    //--- persistence --------------------------------------------------------
    bool              SaveState(void)
      {
-      int h=FileOpen(m_state_file,FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
+      int h=FileOpen(m_state_file,FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON,SMC_FIELD_SEP);
       if(h==INVALID_HANDLE) return(false);
       FileWrite(h,"SMC_AGENT_STATE",DoubleToString(m_initial,2),(string)m_trading_days,
                 (string)(long)m_last_trade_day,(string)m_loss_streak,(string)m_win_streak,
@@ -332,15 +343,15 @@ public:
 
    bool              LoadState(void)
      {
-      int h=FileOpen(m_state_file,FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
+      int h=FileOpen(m_state_file,FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON,SMC_FIELD_SEP);
       if(h==INVALID_HANDLE) return(false);
       bool ok=false;
       while(!FileIsEnding(h))
         {
          string line=FileReadString(h);
          string p[];
-         int k=StringSplit(line,'\t',p);
-         if(k<2) k=StringSplit(line,';',p);
+         int k=StringSplit(line,SMC_FIELD_SEP,p);
+         if(k<2) k=StringSplit(line,'\t',p);
          if(k>=7 && p[0]=="SMC_AGENT_STATE")
            {
             double init=StringToDouble(p[1]);

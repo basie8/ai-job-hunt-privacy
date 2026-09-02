@@ -98,18 +98,23 @@ private:
 
    void              Calibrate(void)
      {
-      int win=(int)MathMin(400,m_bars-1);
+      //--- Index 0 is the bar currently forming. Its range, body and volume
+      //--- are incomplete, so including it drags every statistic towards
+      //--- zero - most visibly the short volatility window. Calibration
+      //--- therefore runs on closed bars only, from index 1.
+      int win=(int)MathMin(400,m_bars-2);
       if(win<30) { m_unit=0.0; return; }
       double tr[],vol[],gaps[];
       ArrayResize(tr,win); ArrayResize(vol,win); ArrayResize(gaps,win);
       for(int i=0;i<win;i++)
         {
-         double h=H(i),l=L(i),pc=C(i+1);
+         int b=i+1;                                   // closed bars only
+         double h=H(b),l=L(b),pc=C(b+1);
          tr[i]=MathMax(h-l,MathMax(MathAbs(h-pc),MathAbs(l-pc)));
-         vol[i]=(double)m_r[i].tick_volume;
+         vol[i]=(double)m_r[b].tick_volume;
         }
       int g=0;
-      for(int i=1;i<win-1;i++)
+      for(int i=2;i<win;i++)
         {
          double up=L(i-1)-H(i+1);
          double dn=L(i+1)-H(i-1);
@@ -127,7 +132,7 @@ private:
       for(int len=2;len<=6;len++)
         {
          int cnt=0;
-         for(int i=len;i<win-len;i++)
+         for(int i=(len>1?len:1);i<win-len;i++)
             if(IsPivotHigh(i,len) || IsPivotLow(i,len)) cnt++;
          double density=SmcSafeDiv((double)cnt,(double)(win-2*len),0.0);
          double err=MathAbs(density-0.125);

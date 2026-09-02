@@ -247,8 +247,16 @@ public:
    //+---------------------------------------------------------------+
    bool              Evaluate(SSignal &sig)
      {
+      //--- clear every field: a stale probability or R multiple left over
+      //--- from an earlier bar must never reach the panel or the log
       sig.valid=false;
       sig.dir=DIR_NONE;
+      sig.entry=0.0; sig.sl=0.0; sig.tp1=0.0; sig.tp2=0.0;
+      sig.prob=0.0;  sig.raw_score=0.0;
+      sig.rr1=0.0;   sig.rr2=0.0;
+      sig.zone_top=0.0; sig.zone_bottom=0.0;
+      sig.idm=0.0;   sig.idm_taken=false;
+      sig.bar_time=0;
       sig.rationale="";
       sig.model="";
       m_veto="";

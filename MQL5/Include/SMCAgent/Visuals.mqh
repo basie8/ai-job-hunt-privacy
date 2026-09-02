@@ -327,6 +327,9 @@ public:
       Box(id,t1,hi,t2,lo,clr,true,STYLE_SOLID,1);
      }
 
+   //--- remove the entry / stop / target overlay
+   void              ClearSignal(void) { DeleteGroup("G"); }
+
    void              DrawSignal(const SSignal &sig,const datetime from)
      {
       DeleteGroup("G");

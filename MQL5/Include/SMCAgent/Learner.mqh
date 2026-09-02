@@ -190,7 +190,7 @@ public:
    //--- persistence ---------------------------------------------------
    bool              Save(void)
      {
-      int h=FileOpen(m_file,FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
+      int h=FileOpen(m_file,FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON,SMC_FIELD_SEP);
       if(h==INVALID_HANDLE) return(false);
       FileWrite(h,"SMC_AGENT_MODEL",SMC_AGENT_VERSION,m_n,DoubleToString(m_bias,8),(string)m_updates,
                 DoubleToString(m_acc,6),DoubleToString(m_logloss,6));
@@ -207,7 +207,7 @@ public:
 
    bool              Load(void)
      {
-      int h=FileOpen(m_file,FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
+      int h=FileOpen(m_file,FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON,SMC_FIELD_SEP);
       if(h==INVALID_HANDLE) return(false);
       bool ok=false;
       m_mem_cnt=0; m_mem_head=0;
@@ -216,8 +216,8 @@ public:
          string line=FileReadString(h);
          if(StringLen(line)<2) continue;
          string p[];
-         int k=StringSplit(line,'\t',p);
-         if(k<2) k=StringSplit(line,';',p);
+         int k=StringSplit(line,SMC_FIELD_SEP,p);
+         if(k<2) k=StringSplit(line,'\t',p);      // tolerate a file written with the old default
          if(k<2) continue;
          if(p[0]=="SMC_AGENT_MODEL" && k>=5)
            {

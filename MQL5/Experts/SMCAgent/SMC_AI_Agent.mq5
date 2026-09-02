@@ -394,6 +394,10 @@ void RedrawPanel()
 void Redraw()
   {
    g_vis.DrawChart(GetPointer(g_ms),GetPointer(g_eng_e),GetPointer(g_conf),g_gmt);
+   //--- the entry / stop / target overlay belongs to a live plan only.
+   //--- Once the agent is flat and holds no signal it must come off the
+   //--- chart rather than linger as a picture of a finished trade.
+   if(!g_sig.valid && g_exec.OpenCount()==0) g_vis.ClearSignal();
    RedrawPanel();
   }
 
@@ -415,7 +419,24 @@ void HarvestClosedTrades()
       ulong t=g_journal.Ticket(i);
       if(PositionSelectByTicket(t)) continue;      // still open
       double profit=0.0;
-      g_exec.ClosedResult(t,profit);
+      //--- The position is gone, but the closing deal may not be in the
+      //--- terminal's history yet - OnTrade fires before it lands. A
+      //--- missing deal is not a loss, so wait rather than teach the
+      //--- model something false.
+      if(!g_exec.ClosedResult(g_journal.PositionId(i),profit))
+        {
+         g_journal.MarkFail(i);
+         if(g_journal.Fails(i)==1)
+            g_log.Debug(StringFormat("Position #%s closed, waiting for the deal to reach history before learning from it",
+                        IntegerToString((long)t)));
+         if(g_journal.Fails(i)>600)
+           {
+            g_log.Warn(StringFormat("Gave up resolving #%s after 600 attempts - dropped WITHOUT training the model rather than labelling it blind",
+                       IntegerToString((long)t)));
+            g_journal.Remove(i);
+           }
+         continue;
+        }
       double x[];
       g_journal.Vector(i,x);
       double y=(profit>0.0?1.0:0.0);
@@ -534,12 +555,12 @@ void RiskGuards()
 //+------------------------------------------------------------------+
 //| One decision cycle, executed on the close of every bar           |
 //+------------------------------------------------------------------+
-void OnBarClose()
+bool OnBarClose()
   {
    if(!AnalyzeAll())
      {
-      g_log.Warn("Chart data not ready on this close");
-      return;
+      g_log.Warn("Chart data not ready on this close - will retry on the next tick");
+      return(false);
      }
    if(InpUseNews) g_news.Refresh(false);
 
@@ -588,7 +609,7 @@ void OnBarClose()
       g_last_action=StringFormat("no trade - %s",(g_conf.Veto()==""?"no qualified setup":g_conf.Veto()));
       g_log.Think("DECIDE | "+g_last_action);
       Redraw();
-      return;
+      return(true);
      }
 
    g_log.Think(StringFormat("PLAN   | %s",g_sig.rationale));
@@ -630,14 +651,14 @@ void OnBarClose()
       //--- keep learning from what was skipped
       if(InpVirtualLearning) g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir);
       Redraw();
-      return;
+      return(true);
      }
 
    //--- execute ---------------------------------------------------------
    string comment=StringFormat("SMCAI %s p%.0f",(g_sig.dir==DIR_BULL?"L":"S"),g_sig.prob*100.0);
    if(g_exec.Open(g_sig.dir,lots,g_sig.sl,g_sig.tp2,comment))
      {
-      ulong ticket=0;
+      ulong ticket=0,posid=0;
       for(int i=PositionsTotal()-1;i>=0;i--)
         {
          ulong t=PositionGetTicket(i);
@@ -646,11 +667,14 @@ void OnBarClose()
          if(PositionGetInteger(POSITION_MAGIC)!=InpMagic) continue;
          if(g_journal.IndexOf(t)>=0) continue;
          ticket=t;
+         //--- history is indexed by the position identifier, which is not
+         //--- always the same number as the position ticket
+         posid=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
          break;
         }
       if(ticket>0)
         {
-         g_journal.Add(ticket,x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir);
+         g_journal.Add(ticket,posid,x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir);
          g_risk.OnTradeOpened();
          g_last_signal=g_sig.bar_time;
          g_last_action=StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry);
@@ -666,6 +690,7 @@ void OnBarClose()
      }
 
    Redraw();
+   return(true);
   }
 
 //+------------------------------------------------------------------+
@@ -678,7 +703,9 @@ void OnTick()
    datetime bt=(datetime)SeriesInfoInteger(_Symbol,(ENUM_TIMEFRAMES)Period(),SERIES_LASTBAR_DATE);
    if(bt==0 || bt==g_last_bar) return;
    g_last_bar=bt;
-   OnBarClose();
+   //--- if the chart data was not ready this bar is retried on the next
+   //--- tick instead of being silently skipped
+   if(!OnBarClose()) g_last_bar=0;
   }
 
 //+------------------------------------------------------------------+

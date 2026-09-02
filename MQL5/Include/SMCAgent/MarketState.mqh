@@ -70,7 +70,9 @@ private:
      {
       int n=ArraySize(m_r_entry);
       if(n<30) return;
-      int win=(int)MathMin(SMC_CAL_BARS,n-1);
+      //--- closed bars only: index 0 is still forming and would bias
+      //--- every percentile, the 20 bar volatility window most of all
+      int win=(int)MathMin(SMC_CAL_BARS,n-2);
 
       double tr[],body[],vol[],gaps[];
       ArrayResize(tr,win);
@@ -81,14 +83,15 @@ private:
 
       for(int i=0;i<win;i++)
         {
-         double h=m_r_entry[i].high,l=m_r_entry[i].low,pc=m_r_entry[i+1].close;
+         int b=i+1;                                   // closed bars only
+         double h=m_r_entry[b].high,l=m_r_entry[b].low,pc=m_r_entry[b+1].close;
          double t=MathMax(h-l,MathMax(MathAbs(h-pc),MathAbs(l-pc)));
          tr[i]=t;
-         body[i]=MathAbs(m_r_entry[i].close-m_r_entry[i].open);
-         vol[i]=(double)m_r_entry[i].tick_volume;
+         body[i]=MathAbs(m_r_entry[b].close-m_r_entry[b].open);
+         vol[i]=(double)m_r_entry[b].tick_volume;
         }
       //--- 3 candle imbalances inside the window
-      for(int i=1;i<win-1;i++)
+      for(int i=2;i<win;i++)
         {
          double up=m_r_entry[i-1].low-m_r_entry[i+1].high;   // bullish gap
          double dn=m_r_entry[i+1].low-m_r_entry[i-1].high;   // bearish gap
@@ -111,7 +114,7 @@ private:
       int sw=(int)MathMin(20,win);
       double trs[];
       ArrayResize(trs,sw);
-      for(int i=0;i<sw;i++) trs[i]=tr[i];
+      for(int i=0;i<sw;i++) trs[i]=tr[i];   // tr[0] is the last CLOSED bar
       m_range_recent=SmcPercentile(trs,0.50);
       m_vol_regime=SmcSafeDiv(m_range_recent,m_tr_med,1.0);
 
@@ -127,7 +130,7 @@ private:
       for(int L=2;L<=6;L++)
         {
          int cnt=0;
-         for(int i=L;i<win-L;i++)
+         for(int i=(L>1?L:1);i<win-L;i++)
            {
             bool sh=true,sl=true;
             for(int k=1;k<=L;k++)

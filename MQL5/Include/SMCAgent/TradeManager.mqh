@@ -35,6 +35,8 @@ class CTradeJournal
   {
 private:
    ulong             m_ticket[];
+   ulong             m_posid[];     // POSITION_IDENTIFIER: the key history is indexed by
+   int               m_fails[];     // consecutive failed attempts to resolve the outcome
    double            m_x[];         // flattened feature vectors
    double            m_entry[];
    double            m_sl[];
@@ -50,11 +52,13 @@ public:
 
    void              Init(const int features) { m_n=features; }
 
-   void              Add(const ulong ticket,const double &x[],const double entry,const double sl,
-                         const double tp1,const int dir)
+   void              Add(const ulong ticket,const ulong position_id,const double &x[],const double entry,
+                         const double sl,const double tp1,const int dir)
      {
       int k=ArraySize(m_ticket);
       ArrayResize(m_ticket,k+1);
+      ArrayResize(m_posid,k+1);
+      ArrayResize(m_fails,k+1);
       ArrayResize(m_entry,k+1);
       ArrayResize(m_sl,k+1);
       ArrayResize(m_tp1,k+1);
@@ -64,6 +68,8 @@ public:
       ArrayResize(m_be,k+1);
       ArrayResize(m_x,(k+1)*m_n);
       m_ticket[k]=ticket;
+      m_posid[k]=(position_id>0?position_id:ticket);
+      m_fails[k]=0;
       m_entry[k]=entry;
       m_sl[k]=sl;
       m_tp1[k]=tp1;
@@ -76,6 +82,9 @@ public:
 
    int               Count(void) { return(ArraySize(m_ticket)); }
    ulong             Ticket(const int i) { return(i>=0 && i<ArraySize(m_ticket)?m_ticket[i]:0); }
+   ulong             PositionId(const int i) { return(i>=0 && i<ArraySize(m_posid)?m_posid[i]:0); }
+   int               Fails(const int i) { return(i>=0 && i<ArraySize(m_fails)?m_fails[i]:0); }
+   void              MarkFail(const int i) { if(i>=0 && i<ArraySize(m_fails)) m_fails[i]++; }
    double            Entry(const int i)  { return(i>=0 && i<ArraySize(m_entry)?m_entry[i]:0.0); }
    double            Sl(const int i)     { return(i>=0 && i<ArraySize(m_sl)?m_sl[i]:0.0); }
    double            Tp1(const int i)    { return(i>=0 && i<ArraySize(m_tp1)?m_tp1[i]:0.0); }
@@ -104,6 +113,8 @@ public:
       if(i<0 || i>=k) return;
       ArrayRemove(m_x,i*m_n,m_n);
       ArrayRemove(m_ticket,i,1);
+      ArrayRemove(m_posid,i,1);
+      ArrayRemove(m_fails,i,1);
       ArrayRemove(m_entry,i,1);
       ArrayRemove(m_sl,i,1);
       ArrayRemove(m_tp1,i,1);
@@ -315,23 +326,31 @@ public:
       return(c);
      }
 
-   //--- realised result of a closed position --------------------------
-   bool              ClosedResult(const ulong ticket,double &profit)
+   //--- Realised result of a closed position.
+   //--- Returns false until the closing deal is actually present in the
+   //--- terminal's history. The caller must NOT invent a label from a
+   //--- false return: a deal that has not been written yet is not a loss.
+   bool              ClosedResult(const ulong position_id,double &profit)
      {
       profit=0.0;
-      if(!HistorySelectByPosition(ticket)) return(false);
+      if(!HistorySelectByPosition(position_id)) return(false);
       int deals=HistoryDealsTotal();
-      bool any=false;
+      bool has_exit=false;
+      double sum=0.0;
       for(int i=0;i<deals;i++)
         {
          ulong d=HistoryDealGetTicket(i);
          if(d==0) continue;
-         profit+=HistoryDealGetDouble(d,DEAL_PROFIT)
-                +HistoryDealGetDouble(d,DEAL_SWAP)
-                +HistoryDealGetDouble(d,DEAL_COMMISSION);
-         any=true;
+         long entry_type=HistoryDealGetInteger(d,DEAL_ENTRY);
+         if(entry_type==DEAL_ENTRY_OUT || entry_type==DEAL_ENTRY_OUT_BY || entry_type==DEAL_ENTRY_INOUT)
+            has_exit=true;
+         sum+=HistoryDealGetDouble(d,DEAL_PROFIT)
+             +HistoryDealGetDouble(d,DEAL_SWAP)
+             +HistoryDealGetDouble(d,DEAL_COMMISSION);
         }
-      return(any);
+      if(!has_exit) return(false);          // still settling
+      profit=sum;
+      return(true);
      }
   };
 
