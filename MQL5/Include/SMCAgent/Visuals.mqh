@@ -648,6 +648,24 @@ public:
          risk.RiskCeiling(),SmcSafeDiv(risk.RiskCeiling(),risk.Initial(),0.0)*100.0),m_c_dim);
       KV("CAPITAL",StringFormat("%.2f (%s)  eq %.2f  open risk %.0f",
          risk.Initial(),risk.CapitalSource(),risk.Equity(),risk.OpenRiskMoney()),m_c_dim);
+
+      //--- Whether the trades MADE MONEY. This is a different question from
+      //--- the model accuracy on the MODE row, which also counts setups that
+      //--- were only observed, and answers "was the prediction right" rather
+      //--- than "did it pay".
+      int rt=risk.ResultTrades();
+      if(rt<=0)
+         KV("RESULTS","no trade has closed yet - nothing to judge",m_c_dim);
+      else
+        {
+         double net=risk.ResultNet();
+         double pf =risk.ResultProfitFactor();
+         KV("RESULTS",StringFormat("%d closed  %dW/%dL (%.0f%%)  net %+.2f (%+.2f%%)  PF %s  exp %+.2f/trade",
+            rt,risk.ResultWins(),risk.ResultLosses(),risk.ResultWinRate()*100.0,
+            net,SmcSafeDiv(net,risk.Initial(),0.0)*100.0,
+            (pf>0.0?DoubleToString(pf,2):"n/a"),risk.ResultExpectancy()),
+            (net>=0.0?m_c_bull:m_c_bear));
+        }
       KV("NEWS",news_line,m_c_dim);
 
       //--- decision ---------------------------------------------------

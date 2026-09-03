@@ -2519,6 +2519,13 @@ private:
 
    int               m_loss_streak;
    int               m_win_streak;
+   //--- running result of trades actually taken. The learner's accuracy
+   //--- answers "was the model right"; this answers "did it make money",
+   //--- which is a different question and the one that matters.
+   int               m_res_trades;
+   int               m_res_wins;
+   double            m_res_gross_win;
+   double            m_res_gross_loss;   // held positive
    int               m_trading_days;
    datetime          m_last_trade_day;
    int               m_week_trades;
@@ -2584,7 +2591,9 @@ public:
                                          m_base_risk_pct(0.5), m_reset_hour(0), m_min_days(4),
                                          m_day_ref(0), m_day_start(0), m_day_low_equity(0), m_day_realised(0),
                                          m_day_trades(0), m_day_locked(false), m_lock_reason(""),
-                                         m_loss_streak(0), m_win_streak(0), m_trading_days(0), m_last_trade_day(0),
+                                         m_loss_streak(0), m_win_streak(0),
+                                         m_res_trades(0), m_res_wins(0), m_res_gross_win(0), m_res_gross_loss(0),
+                                         m_trading_days(0), m_last_trade_day(0),
                                          m_week_trades(0), m_week_start(0), m_peak_equity(0),
                                          m_state_file("smc_agent_state.csv"), m_persist(true), m_capital_source(""),
                                          m_sim(false), m_sim_capital(0), m_sim_pnl(0) {}
@@ -2688,6 +2697,25 @@ public:
    int               TradingDays(void)const{ return(m_trading_days); }
    int               MinDays(void)  const { return(m_min_days); }
    int               LossStreak(void)const{ return(m_loss_streak); }
+
+   //--- results of trades this agent actually took -----------------------
+   int               ResultTrades(void) const { return(m_res_trades); }
+   int               ResultWins(void)   const { return(m_res_wins); }
+   int               ResultLosses(void) const { return(m_res_trades-m_res_wins); }
+   double            ResultNet(void)    const { return(m_res_gross_win-m_res_gross_loss); }
+   double            ResultWinRate(void)const
+     { return(m_res_trades>0?(double)m_res_wins/(double)m_res_trades:0.0); }
+   double            ResultAvgWin(void) const
+     { return(m_res_wins>0?m_res_gross_win/(double)m_res_wins:0.0); }
+   double            ResultAvgLoss(void)const
+     { int l=m_res_trades-m_res_wins; return(l>0?m_res_gross_loss/(double)l:0.0); }
+   //--- gross profit divided by gross loss. Above 1.00 the trades made
+   //--- money; a run with no loss yet has no meaningful factor.
+   double            ResultProfitFactor(void) const
+     { return(m_res_gross_loss>0.0?m_res_gross_win/m_res_gross_loss:0.0); }
+   //--- what one average trade returned, in money
+   double            ResultExpectancy(void) const
+     { return(m_res_trades>0?(m_res_gross_win-m_res_gross_loss)/(double)m_res_trades:0.0); }
    bool              DayLocked(void)const { return(m_day_locked); }
    string            LockReason(void)const{ return(m_lock_reason); }
    double            RemainingDailyBudget(void) { return(MathMax(Eq()-SoftDailyFloor(),0.0)); }
@@ -2945,11 +2973,17 @@ public:
    void              OnTradeClosed(const double profit)
      {
       m_day_realised+=profit;
+      m_res_trades++;
+      if(profit>=0.0) { m_res_wins++; m_res_gross_win+=profit; }
+      else            { m_res_gross_loss+=-profit; }
       if(profit<0.0) { m_loss_streak++; m_win_streak=0; }
       else if(profit>0.0) { m_win_streak++; m_loss_streak=0; }
       if(m_log!=NULL)
-         m_log.Info(StringFormat("Trade closed P/L=%.2f  day=%.2f%%  total=%.2f%%  streak L%d/W%d",
-                    profit,DayPnLPct(),TotalPnLPct(),m_loss_streak,m_win_streak));
+         m_log.Info(StringFormat("Trade closed P/L=%.2f  day=%.2f%%  total=%.2f%%  streak L%d/W%d  |  record %dW/%dL over %d, net %+.2f, avg win %.2f vs avg loss %.2f, profit factor %s",
+                    profit,DayPnLPct(),TotalPnLPct(),m_loss_streak,m_win_streak,
+                    ResultWins(),ResultLosses(),ResultTrades(),ResultNet(),
+                    ResultAvgWin(),ResultAvgLoss(),
+                    (ResultProfitFactor()>0.0?DoubleToString(ResultProfitFactor(),2):"n/a (no loss yet)")));
       SaveState();
      }
 
@@ -2961,7 +2995,9 @@ public:
       if(h==INVALID_HANDLE) return(false);
       FileWrite(h,"SMC_AGENT_STATE",DoubleToString(m_initial,2),(string)m_trading_days,
                 (string)(long)m_last_trade_day,(string)m_loss_streak,(string)m_win_streak,
-                DoubleToString(m_peak_equity,2));
+                DoubleToString(m_peak_equity,2),
+                (string)m_res_trades,(string)m_res_wins,
+                DoubleToString(m_res_gross_win,2),DoubleToString(m_res_gross_loss,2));
       FileClose(h);
       return(true);
      }
@@ -2999,6 +3035,15 @@ public:
             m_loss_streak=(int)StringToInteger(p[4]);
             m_win_streak=(int)StringToInteger(p[5]);
             m_peak_equity=StringToDouble(p[6]);
+            //--- the result tally was added later; a file written before it
+            //--- simply has no columns here and keeps a zero tally
+            if(k>=11)
+              {
+               m_res_trades    =(int)StringToInteger(p[7]);
+               m_res_wins      =(int)StringToInteger(p[8]);
+               m_res_gross_win =StringToDouble(p[9]);
+               m_res_gross_loss=StringToDouble(p[10]);
+              }
             ok=true;
            }
         }
@@ -4858,6 +4903,24 @@ public:
          risk.RiskCeiling(),SmcSafeDiv(risk.RiskCeiling(),risk.Initial(),0.0)*100.0),m_c_dim);
       KV("CAPITAL",StringFormat("%.2f (%s)  eq %.2f  open risk %.0f",
          risk.Initial(),risk.CapitalSource(),risk.Equity(),risk.OpenRiskMoney()),m_c_dim);
+
+      //--- Whether the trades MADE MONEY. This is a different question from
+      //--- the model accuracy on the MODE row, which also counts setups that
+      //--- were only observed, and answers "was the prediction right" rather
+      //--- than "did it pay".
+      int rt=risk.ResultTrades();
+      if(rt<=0)
+         KV("RESULTS","no trade has closed yet - nothing to judge",m_c_dim);
+      else
+        {
+         double net=risk.ResultNet();
+         double pf =risk.ResultProfitFactor();
+         KV("RESULTS",StringFormat("%d closed  %dW/%dL (%.0f%%)  net %+.2f (%+.2f%%)  PF %s  exp %+.2f/trade",
+            rt,risk.ResultWins(),risk.ResultLosses(),risk.ResultWinRate()*100.0,
+            net,SmcSafeDiv(net,risk.Initial(),0.0)*100.0,
+            (pf>0.0?DoubleToString(pf,2):"n/a"),risk.ResultExpectancy()),
+            (net>=0.0?m_c_bull:m_c_bear));
+        }
       KV("NEWS",news_line,m_c_dim);
 
       //--- decision ---------------------------------------------------
