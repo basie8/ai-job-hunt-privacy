@@ -266,6 +266,23 @@ double SmcRank(const double &src[],const double v)
    return((double)below/(double)n);
   }
 
+//--- Tie-aware empirical rank, 0..1. Ties count half, so a CONSTANT
+//--- sample returns 0.5 rather than 0 - which matters, because a
+//--- constant measurement carries no information and must score neutral
+//--- instead of maximally good.
+double SmcRankTies(const double &src[],const double v)
+  {
+   int n=ArraySize(src);
+   if(n<=0) return(0.5);
+   int below=0,equal=0;
+   for(int i=0;i<n;i++)
+     {
+      if(src[i]<v-1e-12)      below++;
+      else if(src[i]<=v+1e-12) equal++;
+     }
+   return(((double)below+0.5*(double)equal)/(double)n);
+  }
+
 //--- map a value to -1..+1 using a soft saturation ------------------
 double SmcSquash(const double x,const double scale)
   {
@@ -788,7 +805,8 @@ public:
 
 
 #define SMC_CAL_BARS   400   // size of the observation window used for calibration
-#define SMC_HIST_BARS  1200  // how much history is pulled for structure mapping
+#define SMC_HIST_BARS  1200 // how much history is pulled for structure mapping
+#define SMC_SPREAD_WIN 240  // rolling spread samples, one per bar close
 
 class CMarketState
   {
@@ -816,6 +834,7 @@ private:
    int               m_pivot_len;      // adaptive swing sensitivity
    double            m_point;
    int               m_digits;
+   double            m_spread_hist[];
 
    void              PickHigherTimeframes(void)
      {
@@ -952,6 +971,7 @@ public:
       ArraySetAsSeries(m_r_mid,true);
       ArraySetAsSeries(m_r_high,true);
       BuildStats();
+      PushSpreadSample();
       return(true);
      }
 
@@ -1018,6 +1038,38 @@ public:
       return(MathMax(a-b,0.0));
      }
    double            SpreadUnits(void) { return(SmcSafeDiv(SpreadPrice(),Unit(),0.0)); }
+
+   //--- Rolling record of the spread, in units of a median candle, so the
+   //--- agent can tell "wide for this broker" from "wide in absolute
+   //--- terms". A broker with a fixed spread produces a constant sample,
+   //--- which ranks at 0.5 and therefore scores neutral - it cannot leak
+   //--- into the model as a permanent penalty.
+   void              PushSpreadSample(void)
+     {
+      double v=SpreadUnits();
+      if(v<=0.0) return;
+      int n=ArraySize(m_spread_hist);
+      if(n<SMC_SPREAD_WIN)
+        {
+         ArrayResize(m_spread_hist,n+1);
+         m_spread_hist[n]=v;
+        }
+      else
+        {
+         for(int i=0;i<n-1;i++) m_spread_hist[i]=m_spread_hist[i+1];
+         m_spread_hist[n-1]=v;
+        }
+     }
+
+   //--- 0 = the tightest this broker has shown, 1 = the widest
+   double            SpreadRank(void)
+     {
+      if(ArraySize(m_spread_hist)<20) return(0.5);
+      return(SmcRankTies(m_spread_hist,SpreadUnits()));
+     }
+   double            SpreadMedianUnits(void)
+     { return(ArraySize(m_spread_hist)>0?SmcPercentile(m_spread_hist,0.50):0.0); }
+   int               SpreadSamples(void) { return(ArraySize(m_spread_hist)); }
 
    //--- true range of a given entry-TF bar --------------------------
    double            TrueRange(const int i)
@@ -2120,12 +2172,20 @@ private:
    int               m_correct;
    int               m_pos;         // labels seen: objective reached
    int               m_neg;         // labels seen: invalidated
+   //--- running spread of each feature (Welford). A feature that never
+   //--- varies carries no information, yet gradient descent will happily
+   //--- give it a large weight - at which point it acts as a second bias
+   //--- term and drags every probability the same way. Damping the update
+   //--- by the feature's own variability stops that.
+   double            m_fmean[];
+   double            m_fm2[];
+   long              m_fn;
 
 public:
                      COnlineLearner(void): m_n(0), m_bias(0.0), m_init_bias(0.0), m_lr(0.06), m_l2(0.010), m_updates(0),
                                            m_warmup_needed(25), m_file("smc_agent_model.csv"), m_log(NULL),
                                            m_mem_cnt(0), m_mem_head(0), m_logloss(0.0), m_acc(0.0),
-                                           m_scored(0), m_correct(0), m_pos(0), m_neg(0) {}
+                                           m_scored(0), m_correct(0), m_pos(0), m_neg(0), m_fn(0) {}
 
    void              Init(const int n_features,const double &priors[],CLogger *log,
                           const string model_file,const int warmup_samples,const double init_bias=0.0)
@@ -2144,6 +2204,11 @@ public:
         }
       m_bias=init_bias;
       m_init_bias=init_bias;
+      ArrayResize(m_fmean,m_n);
+      ArrayResize(m_fm2,m_n);
+      ArrayInitialize(m_fmean,0.0);
+      ArrayInitialize(m_fm2,0.0);
+      m_fn=0;
       ArrayResize(m_mem_x,LRN_MEMORY*m_n);
       ArrayResize(m_mem_y,LRN_MEMORY);
       ArrayResize(m_mem_w,LRN_MEMORY);
@@ -2165,6 +2230,12 @@ public:
    double            Accuracy(void)  const { return(m_acc); }
    double            PositiveRate(void) const
      { int t=m_pos+m_neg; return(t>0?(double)m_pos/(double)t:0.5); }
+   //--- how much a feature actually varies, for the diagnostics log
+   double            FeatureSd(const int i) const
+     {
+      if(i<0 || i>=m_n || m_fn<2) return(0.0);
+      return(MathSqrt(m_fm2[i]/(double)(m_fn-1)));
+     }
 
    //--- raw linear score (used for the "confluence score" display) ----
    double            Score(const double &x[])
@@ -2211,12 +2282,26 @@ public:
         }
       double sw=sample_weight*cls;
 
+      //--- Welford update of each feature's spread
+      m_fn++;
+      for(int i=0;i<m_n && i<ArraySize(x);i++)
+        {
+         double d=x[i]-m_fmean[i];
+         m_fmean[i]+=d/(double)m_fn;
+         m_fm2[i]  +=d*(x[i]-m_fmean[i]);
+        }
+
       double p=Probability(x);
       double err=p-y;
       double lr=m_lr/MathSqrt(1.0+(double)m_updates*0.05);
       for(int i=0;i<m_n && i<ArraySize(x);i++)
         {
-         double grad=err*x[i]*sw + m_l2*(m_w[i]-m_prior[i]);
+         //--- damp the learning of a feature that barely moves; the pull
+         //--- back towards its research prior is left at full strength, so
+         //--- a dead feature decays to its prior instead of drifting
+         double sd=(m_fn>1?MathSqrt(m_fm2[i]/(double)(m_fn-1)):1.0);
+         double info=(m_fn>=30?SmcClamp(sd/0.15,0.0,1.0):1.0);
+         double grad=err*x[i]*sw*info + m_l2*(m_w[i]-m_prior[i]);
          m_w[i]-=lr*grad;
          m_w[i]=SmcClamp(m_w[i],-4.0,4.0);
         }
@@ -2361,7 +2446,9 @@ public:
       for(int i=0;i<m_n;i++) m_w[i]=m_prior[i];
       m_bias=m_init_bias; m_updates=0; m_mem_cnt=0; m_mem_head=0;
       m_scored=0; m_correct=0; m_acc=0.0; m_logloss=0.0;
-      m_pos=0; m_neg=0;
+      m_pos=0; m_neg=0; m_fn=0;
+      ArrayInitialize(m_fmean,0.0);
+      ArrayInitialize(m_fm2,0.0);
      }
   };
 
@@ -3400,9 +3487,9 @@ public:
       SetFactor(F_SESSION,"Session",ss,ss,lbl);
       double vr=m_ms.VolRegime();
       SetFactor(F_VOLATILITY,"Volatility regime",vr,VolScore(vr),VolNote(vr));
-      double sp=m_ms.SpreadUnits();
-      SetFactor(F_EXECUTION,"Execution cost",sp,SmcClamp(1.0-sp/0.30,-1.0,1.0),
-                StringFormat("spread %.2f of a median candle",sp));
+      string exec_note="";
+      double exec_sc=ExecScore(exec_note);
+      SetFactor(F_EXECUTION,"Execution cost",m_ms.SpreadUnits(),exec_sc,exec_note);
       SetFactor(F_RR,"Reward:risk",0.0,0.0,"no objective mapped");
       SetFactor(F_KEYLEVEL,"Key levels",0.0,0.0,(m_has_day?"PDH/PDL loaded":"daily levels unavailable"));
       SetFactor(F_CANDLE,"Confirmation",0.0,0.0,"no confirmation candle");
@@ -3425,6 +3512,28 @@ public:
       if(vr<0.55) return(StringFormat("compressed tape (%.2fx normal) - raids fail to follow through",vr));
       if(vr>2.60) return(StringFormat("violent expansion (%.2fx normal) - slippage risk",vr));
       return(StringFormat("%.2fx the normal candle - workable",vr));
+     }
+
+   //--- Execution cost, defined ONCE and used on both paths.
+   //--- Scored against the spread's own rolling distribution rather than
+   //--- an absolute divisor: a broker with a permanently wide but stable
+   //--- spread reads neutral, and only a spread that is wide FOR THIS
+   //--- BROKER penalises the setup. A constant measurement must not
+   //--- become a standing penalty the model can learn as a second bias.
+   //--- Absolute affordability is enforced separately, by the spread veto.
+   double            ExecScore(string &note)
+     {
+      double sp_u=m_ms.SpreadUnits();
+      if(m_ms.SpreadSamples()<20)
+        {
+         note=StringFormat("spread %.2f of a median candle (still sampling)",sp_u);
+         return(0.0);
+        }
+      double rank=m_ms.SpreadRank();
+      double sc=SmcClamp(1.0-2.0*rank,-1.0,1.0);
+      note=StringFormat("spread %.2f candles, %.0f%% of this broker's own range (median %.2f)",
+                        sp_u,rank*100.0,m_ms.SpreadMedianUnits());
+      return(sc);
      }
 
    double            NewsScore(const bool post_news)
@@ -3543,13 +3652,13 @@ public:
       double vr=m_ms.VolRegime();
       SetFactor(F_VOLATILITY,"Volatility regime",vr,VolScore(vr),VolNote(vr));
 
-      //--- 10 execution cost
-      double sp=m_ms.SpreadPrice();
+      //--- 10 execution cost - same definition as the context path
+      string exec_note="";
+      double s_exec=ExecScore(exec_note);
       double risk=MathAbs(entry-sl);
-      double sp_ratio=SmcSafeDiv(sp,risk,1.0);
-      double s_exec=SmcClamp(1.0-sp_ratio/0.12,-1.0,1.0);
-      SetFactor(F_EXECUTION,"Execution cost",sp_ratio,s_exec,
-                StringFormat("spread is %.1f%% of the stop distance",sp_ratio*100.0));
+      double sp_ratio=SmcSafeDiv(m_ms.SpreadPrice(),risk,1.0);
+      SetFactor(F_EXECUTION,"Execution cost",m_ms.SpreadUnits(),s_exec,
+                StringFormat("%s, %.0f%% of this stop",exec_note,sp_ratio*100.0));
 
       //--- 11 reward to risk
       double s_rr=SmcClamp((rr1-1.5)/1.5,-1.0,1.0);
@@ -5026,6 +5135,10 @@ void ReportSizingFeasibility()
               g_risk.Initial(),budget,g_risk.BaseRiskPct(),typical,deepest));
    g_log.Info(StringFormat("Sizing | one minimum lot (%.2f) risks %.2f on that stop = %.2f%% of phase capital. Agent wants %.4f lots.",
               vmin,minrisk,minpct,want));
+   double sp_now=g_ms.SpreadPrice();
+   g_log.Info(StringFormat("Sizing | spread now %.2f = %.2f of a median candle = %.1f%% of a typical stop. %s",
+              sp_now,g_ms.SpreadUnits(),(typical>0.0?sp_now/typical*100.0:0.0),
+              (sp_now>typical*0.20?"WIDE - the spread gate will veto setups whose stop it exceeds 20% of":"workable")));
 
    if(!ok)
      {

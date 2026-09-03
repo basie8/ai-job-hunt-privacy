@@ -526,9 +526,9 @@ public:
       SetFactor(F_SESSION,"Session",ss,ss,lbl);
       double vr=m_ms.VolRegime();
       SetFactor(F_VOLATILITY,"Volatility regime",vr,VolScore(vr),VolNote(vr));
-      double sp=m_ms.SpreadUnits();
-      SetFactor(F_EXECUTION,"Execution cost",sp,SmcClamp(1.0-sp/0.30,-1.0,1.0),
-                StringFormat("spread %.2f of a median candle",sp));
+      string exec_note="";
+      double exec_sc=ExecScore(exec_note);
+      SetFactor(F_EXECUTION,"Execution cost",m_ms.SpreadUnits(),exec_sc,exec_note);
       SetFactor(F_RR,"Reward:risk",0.0,0.0,"no objective mapped");
       SetFactor(F_KEYLEVEL,"Key levels",0.0,0.0,(m_has_day?"PDH/PDL loaded":"daily levels unavailable"));
       SetFactor(F_CANDLE,"Confirmation",0.0,0.0,"no confirmation candle");
@@ -551,6 +551,28 @@ public:
       if(vr<0.55) return(StringFormat("compressed tape (%.2fx normal) - raids fail to follow through",vr));
       if(vr>2.60) return(StringFormat("violent expansion (%.2fx normal) - slippage risk",vr));
       return(StringFormat("%.2fx the normal candle - workable",vr));
+     }
+
+   //--- Execution cost, defined ONCE and used on both paths.
+   //--- Scored against the spread's own rolling distribution rather than
+   //--- an absolute divisor: a broker with a permanently wide but stable
+   //--- spread reads neutral, and only a spread that is wide FOR THIS
+   //--- BROKER penalises the setup. A constant measurement must not
+   //--- become a standing penalty the model can learn as a second bias.
+   //--- Absolute affordability is enforced separately, by the spread veto.
+   double            ExecScore(string &note)
+     {
+      double sp_u=m_ms.SpreadUnits();
+      if(m_ms.SpreadSamples()<20)
+        {
+         note=StringFormat("spread %.2f of a median candle (still sampling)",sp_u);
+         return(0.0);
+        }
+      double rank=m_ms.SpreadRank();
+      double sc=SmcClamp(1.0-2.0*rank,-1.0,1.0);
+      note=StringFormat("spread %.2f candles, %.0f%% of this broker's own range (median %.2f)",
+                        sp_u,rank*100.0,m_ms.SpreadMedianUnits());
+      return(sc);
      }
 
    double            NewsScore(const bool post_news)
@@ -669,13 +691,13 @@ public:
       double vr=m_ms.VolRegime();
       SetFactor(F_VOLATILITY,"Volatility regime",vr,VolScore(vr),VolNote(vr));
 
-      //--- 10 execution cost
-      double sp=m_ms.SpreadPrice();
+      //--- 10 execution cost - same definition as the context path
+      string exec_note="";
+      double s_exec=ExecScore(exec_note);
       double risk=MathAbs(entry-sl);
-      double sp_ratio=SmcSafeDiv(sp,risk,1.0);
-      double s_exec=SmcClamp(1.0-sp_ratio/0.12,-1.0,1.0);
-      SetFactor(F_EXECUTION,"Execution cost",sp_ratio,s_exec,
-                StringFormat("spread is %.1f%% of the stop distance",sp_ratio*100.0));
+      double sp_ratio=SmcSafeDiv(m_ms.SpreadPrice(),risk,1.0);
+      SetFactor(F_EXECUTION,"Execution cost",m_ms.SpreadUnits(),s_exec,
+                StringFormat("%s, %.0f%% of this stop",exec_note,sp_ratio*100.0));
 
       //--- 11 reward to risk
       double s_rr=SmcClamp((rr1-1.5)/1.5,-1.0,1.0);

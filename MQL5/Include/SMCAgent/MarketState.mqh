@@ -13,7 +13,8 @@
 #include "TimeZones.mqh"
 
 #define SMC_CAL_BARS   400   // size of the observation window used for calibration
-#define SMC_HIST_BARS  1200  // how much history is pulled for structure mapping
+#define SMC_HIST_BARS  1200 // how much history is pulled for structure mapping
+#define SMC_SPREAD_WIN 240  // rolling spread samples, one per bar close
 
 class CMarketState
   {
@@ -41,6 +42,7 @@ private:
    int               m_pivot_len;      // adaptive swing sensitivity
    double            m_point;
    int               m_digits;
+   double            m_spread_hist[];
 
    void              PickHigherTimeframes(void)
      {
@@ -177,6 +179,7 @@ public:
       ArraySetAsSeries(m_r_mid,true);
       ArraySetAsSeries(m_r_high,true);
       BuildStats();
+      PushSpreadSample();
       return(true);
      }
 
@@ -243,6 +246,38 @@ public:
       return(MathMax(a-b,0.0));
      }
    double            SpreadUnits(void) { return(SmcSafeDiv(SpreadPrice(),Unit(),0.0)); }
+
+   //--- Rolling record of the spread, in units of a median candle, so the
+   //--- agent can tell "wide for this broker" from "wide in absolute
+   //--- terms". A broker with a fixed spread produces a constant sample,
+   //--- which ranks at 0.5 and therefore scores neutral - it cannot leak
+   //--- into the model as a permanent penalty.
+   void              PushSpreadSample(void)
+     {
+      double v=SpreadUnits();
+      if(v<=0.0) return;
+      int n=ArraySize(m_spread_hist);
+      if(n<SMC_SPREAD_WIN)
+        {
+         ArrayResize(m_spread_hist,n+1);
+         m_spread_hist[n]=v;
+        }
+      else
+        {
+         for(int i=0;i<n-1;i++) m_spread_hist[i]=m_spread_hist[i+1];
+         m_spread_hist[n-1]=v;
+        }
+     }
+
+   //--- 0 = the tightest this broker has shown, 1 = the widest
+   double            SpreadRank(void)
+     {
+      if(ArraySize(m_spread_hist)<20) return(0.5);
+      return(SmcRankTies(m_spread_hist,SpreadUnits()));
+     }
+   double            SpreadMedianUnits(void)
+     { return(ArraySize(m_spread_hist)>0?SmcPercentile(m_spread_hist,0.50):0.0); }
+   int               SpreadSamples(void) { return(ArraySize(m_spread_hist)); }
 
    //--- true range of a given entry-TF bar --------------------------
    double            TrueRange(const int i)

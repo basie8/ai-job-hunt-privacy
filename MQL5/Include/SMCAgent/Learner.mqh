@@ -57,12 +57,20 @@ private:
    int               m_correct;
    int               m_pos;         // labels seen: objective reached
    int               m_neg;         // labels seen: invalidated
+   //--- running spread of each feature (Welford). A feature that never
+   //--- varies carries no information, yet gradient descent will happily
+   //--- give it a large weight - at which point it acts as a second bias
+   //--- term and drags every probability the same way. Damping the update
+   //--- by the feature's own variability stops that.
+   double            m_fmean[];
+   double            m_fm2[];
+   long              m_fn;
 
 public:
                      COnlineLearner(void): m_n(0), m_bias(0.0), m_init_bias(0.0), m_lr(0.06), m_l2(0.010), m_updates(0),
                                            m_warmup_needed(25), m_file("smc_agent_model.csv"), m_log(NULL),
                                            m_mem_cnt(0), m_mem_head(0), m_logloss(0.0), m_acc(0.0),
-                                           m_scored(0), m_correct(0), m_pos(0), m_neg(0) {}
+                                           m_scored(0), m_correct(0), m_pos(0), m_neg(0), m_fn(0) {}
 
    void              Init(const int n_features,const double &priors[],CLogger *log,
                           const string model_file,const int warmup_samples,const double init_bias=0.0)
@@ -81,6 +89,11 @@ public:
         }
       m_bias=init_bias;
       m_init_bias=init_bias;
+      ArrayResize(m_fmean,m_n);
+      ArrayResize(m_fm2,m_n);
+      ArrayInitialize(m_fmean,0.0);
+      ArrayInitialize(m_fm2,0.0);
+      m_fn=0;
       ArrayResize(m_mem_x,LRN_MEMORY*m_n);
       ArrayResize(m_mem_y,LRN_MEMORY);
       ArrayResize(m_mem_w,LRN_MEMORY);
@@ -102,6 +115,12 @@ public:
    double            Accuracy(void)  const { return(m_acc); }
    double            PositiveRate(void) const
      { int t=m_pos+m_neg; return(t>0?(double)m_pos/(double)t:0.5); }
+   //--- how much a feature actually varies, for the diagnostics log
+   double            FeatureSd(const int i) const
+     {
+      if(i<0 || i>=m_n || m_fn<2) return(0.0);
+      return(MathSqrt(m_fm2[i]/(double)(m_fn-1)));
+     }
 
    //--- raw linear score (used for the "confluence score" display) ----
    double            Score(const double &x[])
@@ -148,12 +167,26 @@ public:
         }
       double sw=sample_weight*cls;
 
+      //--- Welford update of each feature's spread
+      m_fn++;
+      for(int i=0;i<m_n && i<ArraySize(x);i++)
+        {
+         double d=x[i]-m_fmean[i];
+         m_fmean[i]+=d/(double)m_fn;
+         m_fm2[i]  +=d*(x[i]-m_fmean[i]);
+        }
+
       double p=Probability(x);
       double err=p-y;
       double lr=m_lr/MathSqrt(1.0+(double)m_updates*0.05);
       for(int i=0;i<m_n && i<ArraySize(x);i++)
         {
-         double grad=err*x[i]*sw + m_l2*(m_w[i]-m_prior[i]);
+         //--- damp the learning of a feature that barely moves; the pull
+         //--- back towards its research prior is left at full strength, so
+         //--- a dead feature decays to its prior instead of drifting
+         double sd=(m_fn>1?MathSqrt(m_fm2[i]/(double)(m_fn-1)):1.0);
+         double info=(m_fn>=30?SmcClamp(sd/0.15,0.0,1.0):1.0);
+         double grad=err*x[i]*sw*info + m_l2*(m_w[i]-m_prior[i]);
          m_w[i]-=lr*grad;
          m_w[i]=SmcClamp(m_w[i],-4.0,4.0);
         }
@@ -298,7 +331,9 @@ public:
       for(int i=0;i<m_n;i++) m_w[i]=m_prior[i];
       m_bias=m_init_bias; m_updates=0; m_mem_cnt=0; m_mem_head=0;
       m_scored=0; m_correct=0; m_acc=0.0; m_logloss=0.0;
-      m_pos=0; m_neg=0;
+      m_pos=0; m_neg=0; m_fn=0;
+      ArrayInitialize(m_fmean,0.0);
+      ArrayInitialize(m_fm2,0.0);
      }
   };
 

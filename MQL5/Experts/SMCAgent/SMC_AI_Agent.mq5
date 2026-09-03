@@ -346,6 +346,10 @@ void ReportSizingFeasibility()
               g_risk.Initial(),budget,g_risk.BaseRiskPct(),typical,deepest));
    g_log.Info(StringFormat("Sizing | one minimum lot (%.2f) risks %.2f on that stop = %.2f%% of phase capital. Agent wants %.4f lots.",
               vmin,minrisk,minpct,want));
+   double sp_now=g_ms.SpreadPrice();
+   g_log.Info(StringFormat("Sizing | spread now %.2f = %.2f of a median candle = %.1f%% of a typical stop. %s",
+              sp_now,g_ms.SpreadUnits(),(typical>0.0?sp_now/typical*100.0:0.0),
+              (sp_now>typical*0.20?"WIDE - the spread gate will veto setups whose stop it exceeds 20% of":"workable")));
 
    if(!ok)
      {

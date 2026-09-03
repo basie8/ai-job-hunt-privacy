@@ -222,6 +222,23 @@ double SmcRank(const double &src[],const double v)
    return((double)below/(double)n);
   }
 
+//--- Tie-aware empirical rank, 0..1. Ties count half, so a CONSTANT
+//--- sample returns 0.5 rather than 0 - which matters, because a
+//--- constant measurement carries no information and must score neutral
+//--- instead of maximally good.
+double SmcRankTies(const double &src[],const double v)
+  {
+   int n=ArraySize(src);
+   if(n<=0) return(0.5);
+   int below=0,equal=0;
+   for(int i=0;i<n;i++)
+     {
+      if(src[i]<v-1e-12)      below++;
+      else if(src[i]<=v+1e-12) equal++;
+     }
+   return(((double)below+0.5*(double)equal)/(double)n);
+  }
+
 //--- map a value to -1..+1 using a soft saturation ------------------
 double SmcSquash(const double x,const double scale)
   {
