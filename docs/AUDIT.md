@@ -6,9 +6,14 @@ contains no placeholders or stale data. Performed on the full source tree
 data path, the risk envelope and the learning loop.
 
 **What this audit could not do:** the environment has no MetaEditor, so the code
-was **not compiled**, and no live or backtest run was performed. Findings below
-are from source analysis and from numerical simulation of ported logic. A first
-compile may still surface diagnostics.
+was **not compiled here**, and no live or backtest run was performed. Findings
+below are from source analysis and from numerical simulation of ported logic.
+
+**Compile status:** `SMC_AI_Agent_SingleFile.mq5` compiled clean in MetaEditor —
+no errors — reported by the user on 2026-09-03. That closes the "may still
+surface diagnostics" caveat for the single-file build. It does **not** close
+the others: no backtest and no live run has been performed on any build, and a
+clean compile says nothing about whether the strategy has an edge.
 
 ---
 
