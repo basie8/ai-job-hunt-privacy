@@ -828,7 +828,15 @@ bool OnBarClose()
       double sim_money=0.0;
       double value_per_price=g_risk.LossPerLot(1.0);
       int done=g_vbook.Resolve(g_ms.EHigh(1),g_ms.ELow(1),GetPointer(g_model),value_per_price,sim_money);
-      if(done>0) g_model.Save();
+      if(done>0)
+        {
+         //--- A real closed trade gets a replay pass over the memory before
+         //--- it is saved; a dry run trade and an observation must get the
+         //--- same, or dry running trains a weaker model than live would
+         //--- and the two are no longer comparable.
+         g_model.Replay(1);
+         g_model.Save();
+        }
       if(InpDryRun && MathAbs(sim_money)>0.0)
         {
          g_risk.SimAddPnL(sim_money);
