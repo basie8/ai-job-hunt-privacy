@@ -17,8 +17,11 @@ executed the same way every time so that its results mean something.
    taken, not a breakdown.
 2. **Change of character.** Within `InpConfirmBars` bars, a candle closes
    *above* the swing high that was standing at the moment of the raid. The
-   level is fixed when the raid happens and never moves afterwards. If price
-   instead breaks back below the raid low, the setup is void immediately.
+   level is fixed when the raid happens and never moves afterwards, and it
+   must sit genuinely ahead of the close — a level price has already passed
+   would be "broken" by the next candle whatever it did. If price instead
+   trades through where the stop would go (the raid low less the same 0.15
+   median-candle buffer the entry uses), the setup is void immediately.
 3. **Execute.** Enter at the confirmation close. Stop goes beyond the raid
    low (plus a buffer of 0.15 median candles and the spread). Target is the
    nearest *unswept* buy-side pool at least `InpMinRR` away; if none lies far
@@ -30,9 +33,12 @@ close below the standing swing low, stop above the raid high.
 ### Pools it hunts
 
 Previous day high/low, previous week high/low, the Asian session high/low
-(00:00–07:00 London, computed from the real DST rules), equal highs/lows
-within 0.15 of a median candle, and recent swing highs/lows. Each can be
-switched off individually.
+(00:00–07:00 London, computed from the real DST rules, and published only
+once that session has actually closed), equal highs/lows within 0.15 of a
+median candle, and the eight most recent swing highs and lows. Each can be
+switched off individually. An equal pair replaces the swing it grew out of
+rather than sitting a few cents beside it, and the day and week levels are
+added first so a busy chart can never crowd them out.
 
 ## Nothing is optimised to a fixed price
 
@@ -108,6 +114,34 @@ stop-width limit and pool set were chosen with M15 gold in mind.
 | `InpRiskPercent` | 0.5 | Risk per trade |
 | `InpMaxDailyLossPct` | 3.0 | Set to 3.0 or lower on a 5% daily-limit account |
 
+## What the audit changed
+
+The first version was written straight through and then audited line by
+line. Three of the fourteen findings would have stopped it working as
+designed, and are worth knowing about if you compare against that first cut:
+
+- The already-swept scan included bar 1 — the exact candle the raid detector
+  judges — so **every raid arrived pre-marked "swept" and no setup could ever
+  fire**. The scan now stops at bar 2.
+- The time stop counted bars from the moment the order was *sent*, but the
+  previous bar's open time is always earlier than that, so the count broke on
+  its first pass and **held was permanently zero**. It now counts from the bar
+  the trade was opened on.
+- Pool eviction at the 40-pool cap removed from the front of the list, and the
+  day and week levels are added first — so **PDH, PDL, PWH and PWL were the
+  first things thrown away** on a chart with many swings.
+
+The rest: a previous-week level older than the loaded M15 window was never
+checked for sweeps at all; equal highs were published alongside the swing
+they were built from; the Asian range was published while it was still
+forming; a fixed lot size bypassed volume-step normalisation; stop and target
+distances were checked against the wrong side of the spread and ignored the
+freeze level; break-even and trailing moves could ask for a stop the broker
+would refuse; panel rows ran past the background and the panel was fully
+deleted and rebuilt twice a second; several inputs could be set to values
+that silently prevented any trade; and the one-letter bar accessors were
+renamed (`C()` sat one character away from MQL5's `C'r,g,b'` colour syntax).
+
 ## Honest limits
 
 - This has not been compiled in MetaEditor or run through the strategy
@@ -117,3 +151,6 @@ stop-width limit and pool set were chosen with M15 gold in mind.
   mechanism forcing trades, by design.
 - Structure is read from closed bars, so the EA is always one bar behind a
   break. That is the cost of not repainting.
+- The daily loss governor takes its reference equity from the first bar close
+  after the EA sees a new server day. Attach it mid-session and the day's
+  earlier losses are not counted against the limit until the next day rolls.

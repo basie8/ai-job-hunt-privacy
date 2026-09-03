@@ -124,6 +124,7 @@ ulong     posId=0;
 double    posEntry=0,posStop=0,posRisk=0,posTP=0;
 int       posDir=0;
 datetime  posOpened=0;
+datetime  posBarTime=0;          // open time of the bar the trade was taken on
 bool      donePartial=false,doneBE=false;
 
 //--- day tracking
@@ -163,11 +164,21 @@ int VolumeDigits(double step)
    return(d);
   }
 
-double H(int i){ return(i>=0 && i<bars?rt[i].high :0.0); }
-double L(int i){ return(i>=0 && i<bars?rt[i].low  :0.0); }
-double O(int i){ return(i>=0 && i<bars?rt[i].open :0.0); }
-double C(int i){ return(i>=0 && i<bars?rt[i].close:0.0); }
-datetime T(int i){ return(i>=0 && i<bars?rt[i].time:0); }
+double BarH(int i){ return(i>=0 && i<bars?rt[i].high :0.0); }
+double BarL(int i){ return(i>=0 && i<bars?rt[i].low  :0.0); }
+double BarO(int i){ return(i>=0 && i<bars?rt[i].open :0.0); }
+double BarC(int i){ return(i>=0 && i<bars?rt[i].close:0.0); }
+datetime BarT(int i){ return(i>=0 && i<bars?rt[i].time:0); }
+double BarV(int i){ return(i>=0 && i<bars?(double)rt[i].tick_volume:0.0); }
+
+//--- the broker refuses any stop or target closer to price than its
+//--- stops level (and will not touch one inside the freeze level at all)
+bool StopAllowed(double px,double level)
+  {
+   double lvl=(double)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL)*_Point;
+   double frz=(double)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_FREEZE_LEVEL)*_Point;
+   return(MathAbs(px-level)>=MathMax(lvl,frz)+_Point);
+  }
 
 //+------------------------------------------------------------------+
 //| Daylight saving, computed - no lookup tables, no network         |
@@ -259,7 +270,7 @@ bool Refresh()
    for(int i=0;i<win;i++)
      {
       int b=i+1;                                   // closed bars only
-      double hi=H(b),lo=L(b),pc=C(b+1);
+      double hi=BarH(b),lo=BarL(b),pc=BarC(b+1);
       tr[i]=MathMax(hi-lo,MathMax(MathAbs(hi-pc),MathAbs(lo-pc)));
       vol[i]=(double)rt[b].tick_volume;
      }
@@ -292,8 +303,8 @@ bool IsPivotHigh(int p,int len)
    if(p-len<0 || p+len>=bars) return(false);
    for(int k=1;k<=len;k++)
      {
-      if(H(p)<=H(p-k)) return(false);              // strictly higher on the newer side
-      if(H(p)< H(p+k)) return(false);
+      if(BarH(p)<=BarH(p-k)) return(false);              // strictly higher on the newer side
+      if(BarH(p)< BarH(p+k)) return(false);
      }
    return(true);
   }
@@ -302,8 +313,8 @@ bool IsPivotLow(int p,int len)
    if(p-len<0 || p+len>=bars) return(false);
    for(int k=1;k<=len;k++)
      {
-      if(L(p)>=L(p-k)) return(false);
-      if(L(p)> L(p+k)) return(false);
+      if(BarL(p)>=BarL(p-k)) return(false);
+      if(BarL(p)> BarL(p+k)) return(false);
      }
    return(true);
   }
@@ -321,18 +332,18 @@ void MapStructure()
       int p=b+pivLen;
       if(p+pivLen<=bars-1)
         {
-         if(IsPivotHigh(p,pivLen)){ swingHigh=H(p); swingHighT=T(p); }
-         if(IsPivotLow(p,pivLen)) { swingLow =L(p); swingLowT =T(p); }
+         if(IsPivotHigh(p,pivLen)){ swingHigh=BarH(p); swingHighT=BarT(p); }
+         if(IsPivotLow(p,pivLen)) { swingLow =BarL(p); swingLowT =BarT(p); }
         }
-      if(swingHigh>0.0 && C(b)>swingHigh){ trendDir=DIR_BUY;  swingHigh=0.0; }
-      if(swingLow >0.0 && C(b)<swingLow) { trendDir=DIR_SELL; swingLow =0.0; }
+      if(swingHigh>0.0 && BarC(b)>swingHigh){ trendDir=DIR_BUY;  swingHigh=0.0; }
+      if(swingLow >0.0 && BarC(b)<swingLow) { trendDir=DIR_SELL; swingLow =0.0; }
      }
    //--- re-establish whichever level was consumed, so a level is always
    //--- available for the next CHoCH test
    for(int p=pivLen+1;p<(int)MathMin(bars-pivLen-1,200);p++)
      {
-      if(swingHigh<=0.0 && IsPivotHigh(p,pivLen)){ swingHigh=H(p); swingHighT=T(p); }
-      if(swingLow <=0.0 && IsPivotLow(p,pivLen)) { swingLow =L(p); swingLowT =T(p); }
+      if(swingHigh<=0.0 && IsPivotHigh(p,pivLen)){ swingHigh=BarH(p); swingHighT=BarT(p); }
+      if(swingLow <=0.0 && IsPivotLow(p,pivLen)) { swingLow =BarL(p); swingLowT =BarT(p); }
       if(swingHigh>0.0 && swingLow>0.0) break;
      }
   }
@@ -343,13 +354,13 @@ void MapStructure()
 void AddPool(string name,int side,double price,datetime born)
   {
    if(price<=0.0) return;
+   if(ArraySize(pools)>=MAX_POOLS) return;      // the important levels are added first
    for(int i=0;i<ArraySize(pools);i++)
       if(pools[i].name==name && MathAbs(pools[i].price-price)<unitTR*0.05) return;
    int n=ArraySize(pools);
    ArrayResize(pools,n+1);
    pools[n].name=name; pools[n].side=side; pools[n].price=price;
    pools[n].born=born; pools[n].swept=false;
-   if(ArraySize(pools)>MAX_POOLS) ArrayRemove(pools,0,ArraySize(pools)-MAX_POOLS);
   }
 
 void BuildPools()
@@ -381,6 +392,8 @@ void BuildPools()
         {
          datetime now_u=SrvToUtc(TimeCurrent());
          MqlDateTime nd; TimeToStruct(Shift(now_u,(long)(EuDst(now_u)?3600:0)),nd);
+         //--- a range that is still forming is not a liquidity pool yet
+         bool asiaDone=(nd.hour+nd.min/60.0>=7.0);
          double ah=-DBL_MAX,al=DBL_MAX;
          datetime at=0;
          for(int i=0;i<cnt;i++)
@@ -392,7 +405,7 @@ void BuildPools()
             if(lh>=0.0 && lh<7.0)
               { ah=MathMax(ah,m[i].high); al=MathMin(al,m[i].low); if(at==0) at=m[i].time; }
            }
-         if(ah>-DBL_MAX*0.5 && al<DBL_MAX*0.5)
+         if(asiaDone && ah>-DBL_MAX*0.5 && al<DBL_MAX*0.5)
            {
             AddPool("ASIA-H",DIR_BUY, ah,at);
             AddPool("ASIA-L",DIR_SELL,al,at);
@@ -400,27 +413,49 @@ void BuildPools()
         }
      }
 
-   //--- swing pools and equal levels, walked oldest to newest
-   double prevH=0,prevL=0;
-   int scan=(int)MathMin(bars-pivLen-2,300);
-   for(int p=scan;p>=pivLen+1;p--)
+   //--- Swings and equal levels. Collected oldest to newest, because that is
+   //--- the order an equal pair actually forms in; an equal pair replaces the
+   //--- swing it grew out of rather than sitting a few cents beside it. Only
+   //--- the most recent few of each side are published - old swings are noise,
+   //--- and they must never crowd out the day and week levels above.
+   if(InpUseSwings || InpUseEqualLevels)
      {
-      if(IsPivotHigh(p,pivLen))
+      double hPx[],lPx[]; datetime hT[],lT[]; bool hEq[],lEq[];
+      int nh=0,nl=0;
+      double prevH=0,prevL=0;
+      int scan=(int)MathMin(bars-pivLen-2,300);
+      for(int p=scan;p>=pivLen+1;p--)
         {
-         if(InpUseEqualLevels && prevH>0.0 && MathAbs(H(p)-prevH)<=unitTR*0.15)
-            AddPool("EQH",DIR_BUY,(H(p)+prevH)*0.5,T(p));
-         else if(InpUseSwings)
-            AddPool("SWING-H",DIR_BUY,H(p),T(p));
-         prevH=H(p);
+         if(IsPivotHigh(p,pivLen))
+           {
+            bool eq=(InpUseEqualLevels && prevH>0.0 && MathAbs(BarH(p)-prevH)<=unitTR*0.15);
+            if(eq && nh>0)
+              { hPx[nh-1]=(BarH(p)+prevH)*0.5; hT[nh-1]=BarT(p); hEq[nh-1]=true; }
+            else
+              {
+               ArrayResize(hPx,nh+1); ArrayResize(hT,nh+1); ArrayResize(hEq,nh+1);
+               hPx[nh]=BarH(p); hT[nh]=BarT(p); hEq[nh]=false; nh++;
+              }
+            prevH=BarH(p);
+           }
+         if(IsPivotLow(p,pivLen))
+           {
+            bool eq=(InpUseEqualLevels && prevL>0.0 && MathAbs(BarL(p)-prevL)<=unitTR*0.15);
+            if(eq && nl>0)
+              { lPx[nl-1]=(BarL(p)+prevL)*0.5; lT[nl-1]=BarT(p); lEq[nl-1]=true; }
+            else
+              {
+               ArrayResize(lPx,nl+1); ArrayResize(lT,nl+1); ArrayResize(lEq,nl+1);
+               lPx[nl]=BarL(p); lT[nl]=BarT(p); lEq[nl]=false; nl++;
+              }
+            prevL=BarL(p);
+           }
         }
-      if(IsPivotLow(p,pivLen))
-        {
-         if(InpUseEqualLevels && prevL>0.0 && MathAbs(L(p)-prevL)<=unitTR*0.15)
-            AddPool("EQL",DIR_SELL,(L(p)+prevL)*0.5,T(p));
-         else if(InpUseSwings)
-            AddPool("SWING-L",DIR_SELL,L(p),T(p));
-         prevL=L(p);
-        }
+      int keep=8;
+      for(int i=(int)MathMax(nh-keep,0);i<nh;i++)
+         if(hEq[i] || InpUseSwings) AddPool(hEq[i]?"EQH":"SWING-H",DIR_BUY,hPx[i],hT[i]);
+      for(int i=(int)MathMax(nl-keep,0);i<nl;i++)
+         if(lEq[i] || InpUseSwings) AddPool(lEq[i]?"EQL":"SWING-L",DIR_SELL,lPx[i],lT[i]);
      }
 
    //--- mark anything price has already taken out. The scan deliberately
@@ -429,12 +464,15 @@ void BuildPools()
    for(int i=0;i<ArraySize(pools);i++)
      {
       int from=-1;
-      for(int b=0;b<bars;b++) if(T(b)<=pools[i].born){ from=b; break; }
-      if(from<2) continue;
-      for(int b=from-1;b>=2;b--)
+      for(int b=0;b<bars;b++) if(BarT(b)<=pools[i].born){ from=b; break; }
+      //--- a previous-week level is usually older than the loaded M15 window,
+      //--- so there is no birth bar to start from: check the whole window
+      if(from<0) from=bars;
+      if(from<3) continue;
+      for(int b=(int)MathMin(from-1,bars-1);b>=2;b--)
         {
-         if(pools[i].side==DIR_BUY  && H(b)>pools[i].price){ pools[i].swept=true; break; }
-         if(pools[i].side==DIR_SELL && L(b)<pools[i].price){ pools[i].swept=true; break; }
+         if(pools[i].side==DIR_BUY  && BarH(b)>pools[i].price){ pools[i].swept=true; break; }
+         if(pools[i].side==DIR_SELL && BarL(b)<pools[i].price){ pools[i].swept=true; break; }
         }
      }
   }
@@ -478,7 +516,7 @@ void DetectRaid()
   {
    if(armed || bars<3) return;
 
-   double hi=H(1),lo=L(1),cl=C(1),op=O(1);
+   double hi=BarH(1),lo=BarL(1),cl=BarC(1),op=BarO(1);
    double rng=MathMax(hi-lo,_Point);
 
    int    bestIdx=-1, bestDir=0;
@@ -529,14 +567,15 @@ void DetectRaid()
    armDir=bestDir;
    armExtreme=(bestDir==DIR_BUY?lo:hi);
    armCHoCH=level;
-   armTime=T(1);
+   armTime=BarT(1);
    armBar=0;
    armPool=pools[bestIdx].name;
    armQuality=bestQ;
    nRaids++;
 
-   lastNote=StringFormat("%s raid on %s (rejection %.0f%%) - waiting for a %s CHoCH through %.2f",
+   lastNote=StringFormat("%s raid on %s (rejection %.0f%%, %.1fx volume) - waiting for a %s CHoCH through %.2f",
                          (bestDir==DIR_BUY?"sell-side":"buy-side"),armPool,bestQ*100.0,
+                         SafeDiv(BarV(1),volMed,0.0),
                          (bestDir==DIR_BUY?"bullish":"bearish"),armCHoCH);
    Print("RAID   | ",lastNote);
    if(InpShowSetups)
@@ -548,7 +587,7 @@ void DetectRaid()
       ObjectSetInteger(0,id,OBJPROP_WIDTH,2);
       ObjectSetInteger(0,id,OBJPROP_HIDDEN,true);
       string lid=PFX+"choch_"+IntegerToString((long)armTime);
-      datetime lend=(datetime)((long)T(1)+(long)PeriodSeconds()*InpConfirmBars);
+      datetime lend=(datetime)((long)BarT(1)+(long)PeriodSeconds()*InpConfirmBars);
       ObjectCreate(0,lid,OBJ_TREND,0,armTime,armCHoCH,lend,armCHoCH);
       ObjectSetInteger(0,lid,OBJPROP_COLOR,clrGold);
       ObjectSetInteger(0,lid,OBJPROP_STYLE,STYLE_DASH);
@@ -566,15 +605,19 @@ bool ConfirmCHoCH()
    if(!armed) return(false);
    armBar++;
 
-   //--- the raid low/high failing is the setup being wrong, not late
-   if(armDir==DIR_BUY && L(1)<armExtreme)
+   //--- The setup is wrong, not late, once price trades through where the
+   //--- stop would sit. That is the raid extreme plus the same buffer the
+   //--- entry would use - voiding on the bare extreme would be stricter than
+   //--- the trade's own risk, and would discard setups that never failed.
+   double invalid=0.15*unitTR;
+   if(armDir==DIR_BUY && BarL(1)<armExtreme-invalid)
      {
       lastNote=StringFormat("setup void - price broke back under the %s raid low",armPool);
       Print("VOID   | ",lastNote);
       armed=false; nExpired++;
       return(false);
      }
-   if(armDir==DIR_SELL && H(1)>armExtreme)
+   if(armDir==DIR_SELL && BarH(1)>armExtreme+invalid)
      {
       lastNote=StringFormat("setup void - price broke back over the %s raid high",armPool);
       Print("VOID   | ",lastNote);
@@ -590,8 +633,8 @@ bool ConfirmCHoCH()
       return(false);
      }
 
-   if(armDir==DIR_BUY  && C(1)>armCHoCH){ nCHoCH++; return(true); }
-   if(armDir==DIR_SELL && C(1)<armCHoCH){ nCHoCH++; return(true); }
+   if(armDir==DIR_BUY  && BarC(1)>armCHoCH){ nCHoCH++; return(true); }
+   if(armDir==DIR_SELL && BarC(1)<armCHoCH){ nCHoCH++; return(true); }
    return(false);
   }
 
@@ -610,9 +653,22 @@ double LossPerLot(double dist)
    if(tv<=0.0 || ts<=0.0 || dist<=0.0) return(0.0);
    return((dist/ts)*tv);
   }
+double NormalizeLots(double lots)
+  {
+   double vmin =SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
+   double vmax =SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MAX);
+   double vstep=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP);
+   if(vstep<=0.0) vstep=0.01;
+   lots=NormalizeDouble(MathFloor(lots/vstep+1e-9)*vstep,VolumeDigits(vstep));
+   if(lots>vmax) lots=NormalizeDouble(MathFloor(vmax/vstep+1e-9)*vstep,VolumeDigits(vstep));
+   if(lots<vmin) return(0.0);
+   return(lots);
+  }
+
 double LotsFor(double riskMoney,double dist)
   {
-   if(InpFixedLots>0.0) return(InpFixedLots);
+   //--- a fixed size is still only usable if the broker will accept it
+   if(InpFixedLots>0.0) return(NormalizeLots(InpFixedLots));
    double per=LossPerLot(dist);
    if(per<=0.0 || riskMoney<=0.0) return(0.0);
 
@@ -623,16 +679,12 @@ double LotsFor(double riskMoney,double dist)
    double minsl=MathMax(lvl,spr*2.0);
    if(minsl>0.0 && dist<minsl) return(0.0);
 
-   double lots=riskMoney/per;
-   double vmin=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
-   double vmax=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MAX);
+   double lots=NormalizeLots(riskMoney/per);
+   if(lots<=0.0) return(0.0);
+   double vmin =SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
    double vstep=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP);
    if(vstep<=0.0) vstep=0.01;
    int vd=VolumeDigits(vstep);
-   lots=NormalizeDouble(MathFloor(lots/vstep+1e-9)*vstep,vd);
-   if(lots<vmin) return(0.0);
-   if(lots>vmax) lots=vmax;
-   if(lots<vmin) return(0.0);
 
    double margin=0.0;
    double price=SymbolInfoDouble(_Symbol,SYMBOL_ASK);
@@ -709,6 +761,8 @@ void AdoptPosition(bool quiet=false)
       posTP    =PositionGetDouble(POSITION_TP);
       posDir   =(PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY?DIR_BUY:DIR_SELL);
       posOpened=(datetime)PositionGetInteger(POSITION_TIME);
+      long   ps=(long)PeriodSeconds();
+      posBarTime=(datetime)(ps>0?((long)posOpened-((long)posOpened%ps)):(long)posOpened);
       double d =MathAbs(posEntry-posStop);
       posRisk  =(d>0.0?d:(unitTR>0.0?unitTR:1.0));
       donePartial=false; doneBE=false;
@@ -750,7 +804,7 @@ void ReportClose()
    Print("CLOSED | ",lastNote);
 
    posTicket=0; posId=0; posEntry=0; posStop=0; posTP=0; posRisk=0;
-   posDir=0; posOpened=0; donePartial=false; doneBE=false;
+   posDir=0; posOpened=0; posBarTime=0; donePartial=false; doneBE=false;
    if(InpShowSetups) ObjectsDeleteAll(0,PFX+"live",0,-1);
   }
 
@@ -794,8 +848,10 @@ void TrySignal()
    double dist  =MathAbs(entry-stop);
 
    int    dg=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
-   double stops_lvl=(double)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL)*_Point;
-   if(dist<=stops_lvl+_Point)
+   //--- a buy's stop is measured against Bid and a sell's against Ask, so the
+   //--- spread comes off the distance the broker actually checks
+   double mkt=(dir==DIR_BUY?bid:ask);
+   if(!StopAllowed(mkt,stop))
      { lastNote="stop would sit inside the broker's minimum distance"; Print("SKIP   | ",lastNote); return; }
    if(unitTR>0.0 && dist>InpMaxStopUnits*unitTR)
      {
@@ -829,6 +885,11 @@ void TrySignal()
       lastNote=StringFormat("objective %s is only %.2fR away",tname,rr);
       Print("SKIP   | ",lastNote); return;
      }
+   if(!StopAllowed(mkt,tp))
+     {
+      lastNote=StringFormat("target %s at %.2f is inside the broker's minimum distance",tname,tp);
+      Print("SKIP   | ",lastNote); return;
+     }
 
    //--- size it
    double bal=AccountInfoDouble(ACCOUNT_BALANCE);
@@ -860,7 +921,8 @@ void TrySignal()
    posTicket=trade.ResultOrder();
    posDir=dir; posEntry=(trade.ResultPrice()>0.0?trade.ResultPrice():entry);
    posStop=stop; posTP=tp; posRisk=MathAbs(posEntry-stop);
-   posOpened=TimeCurrent(); donePartial=false; doneBE=false;
+   posOpened=TimeCurrent(); posBarTime=BarT(0);
+   donePartial=false; doneBE=false;
    posId=0;
    if(PositionSelectByTicket(posTicket))
       posId=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
@@ -937,7 +999,11 @@ void ManageTick()
       double spread=SymbolInfoDouble(_Symbol,SYMBOL_ASK)-SymbolInfoDouble(_Symbol,SYMBOL_BID);
       double be=NormalizeDouble(posDir==DIR_BUY?posEntry+spread+0.05*unitTR
                                               :posEntry-spread-0.05*unitTR,dg);
+      double mkt=(posDir==DIR_BUY?SymbolInfoDouble(_Symbol,SYMBOL_BID)
+                                 :SymbolInfoDouble(_Symbol,SYMBOL_ASK));
       bool better=(posDir==DIR_BUY?(cur<=0.0 || be>cur):(cur<=0.0 || be<cur));
+      if(better && !StopAllowed(mkt,be))
+         return;                                  // too close to price right now, try again next tick
       if(better)
         {
          if(trade.PositionModify(posTicket,be,PositionGetDouble(POSITION_TP)))
@@ -963,9 +1029,12 @@ void ManageBar()
    double r=OpenR();
    int    dg=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
 
-   //--- how many closed bars the trade has been alive for
+   //--- How many closed bars the trade has been alive for. This counts from
+   //--- the bar the trade was opened ON, not the moment it was sent: the
+   //--- previous bar's open time is always earlier than the send time, so
+   //--- comparing against the send time counted zero bars forever.
    int held=0;
-   for(int b=1;b<bars;b++){ if(T(b)<posOpened) break; held++; }
+   for(int b=1;b<bars;b++){ if(posBarTime<=0 || BarT(b)<posBarTime) break; held++; }
 
    //--- time stop: an idea that has gone nowhere is capital sitting still
    if(InpTimeStopBars>0 && held>=InpTimeStopBars && r<0.5)
@@ -988,16 +1057,17 @@ void ManageBar()
       double cand=0.0;
       for(int p=pivLen+1;p<(int)MathMin(bars-pivLen-1,120);p++)
         {
-         if(posDir==DIR_BUY && IsPivotLow(p,pivLen) && L(p)<px-0.30*unitTR)
-           { cand=L(p)-buffer; break; }
-         if(posDir==DIR_SELL && IsPivotHigh(p,pivLen) && H(p)>px+0.30*unitTR)
-           { cand=H(p)+buffer; break; }
+         if(posDir==DIR_BUY && IsPivotLow(p,pivLen) && BarL(p)<px-0.30*unitTR)
+           { cand=BarL(p)-buffer; break; }
+         if(posDir==DIR_SELL && IsPivotHigh(p,pivLen) && BarH(p)>px+0.30*unitTR)
+           { cand=BarH(p)+buffer; break; }
         }
       if(cand>0.0)
         {
          cand=NormalizeDouble(cand,dg);
          double cur=PositionGetDouble(POSITION_SL);
          bool better=(posDir==DIR_BUY?(cur<=0.0 || cand>cur+_Point):(cur<=0.0 || cand<cur-_Point));
+         if(better && !StopAllowed(px,cand)) better=false;
          if(better)
            {
             if(trade.PositionModify(posTicket,cand,PositionGetDouble(POSITION_TP)))
@@ -1058,11 +1128,11 @@ void DrawPools()
    ObjectsDeleteAll(0,PFX+"pool",0,-1);
    if(!InpShowPools || bars<3) return;
 
-   datetime right=(datetime)((long)T(0)+(long)PeriodSeconds()*12);
+   datetime right=(datetime)((long)BarT(0)+(long)PeriodSeconds()*12);
    for(int i=0;i<ArraySize(pools);i++)
      {
       datetime from=pools[i].born;
-      if(from<=0 || from>T(0)) from=T(bars>60?60:bars-1);
+      if(from<=0 || from>BarT(0)) from=BarT(bars>60?60:bars-1);
       string id=PFX+"pool_"+IntegerToString(i);
       if(!ObjectCreate(0,id,OBJ_TREND,0,from,pools[i].price,right,pools[i].price)) continue;
       color c=(pools[i].swept?clrDimGray:(pools[i].side==DIR_BUY?clrIndianRed:clrSteelBlue));
@@ -1092,7 +1162,7 @@ void DrawPools()
 void PruneMarks()
   {
    if(bars<10) return;
-   datetime cut=T(bars-1);
+   datetime cut=BarT(bars-1);
    int total=ObjectsTotal(0,0,-1);
    for(int i=total-1;i>=0;i--)
      {
@@ -1122,13 +1192,21 @@ void PanelRow(string &rows[],color &cl[],int &n,string text,color c)
    rows[n]=text; cl[n]=c; n++;
   }
 string KV(string k,string v){ return(Pad(k,17)+": "+v); }
+string Fit(string s,int n){ return(StringLen(s)<=n?s:StringSubstr(s,0,n)); }
+
+#define PANEL_COLS 60
+int g_panelRows=0;
 
 void DrawPanel()
   {
-   ObjectsDeleteAll(0,PFX+"P_",0,-1);
-   if(!InpShowPanel) return;
+   if(!InpShowPanel)
+     {
+      if(g_panelRows>0 || ObjectFind(0,PFX+"P_bg")>=0)
+        { ObjectsDeleteAll(0,PFX+"P_",0,-1); g_panelRows=0; }
+      return;
+     }
 
-   const int COLS=52;
+   const int COLS=PANEL_COLS;
    string rows[]; color cl[]; int n=0;
 
    PanelRow(rows,cl,n,"SMC LIQUIDITY RAID + CHoCH   "+_Symbol+" "+EnumToString((ENUM_TIMEFRAMES)Period()),clrGold);
@@ -1215,30 +1293,40 @@ void DrawPanel()
             nRaids,nCHoCH,nTrades,nExpired)),clrWhite);
    PanelRow(rows,cl,n,Rule(COLS),clrDimGray);
 
-   string note=lastNote;
-   if(StringLen(note)>COLS-19) note=StringSubstr(note,0,COLS-22)+"...";
-   PanelRow(rows,cl,n,KV("Last decision",note),clrYellow);
+   PanelRow(rows,cl,n,KV("Last decision",lastNote),clrYellow);
 
-   //--- measure the font the way the chart will actually render it:
-   //--- a negative size is DPI aware, a positive one is not
-   TextSetFont("Courier New",-InpPanelFontSize*10,0,0);
+   //--- Measure the font the way the chart will actually render it: a
+   //--- negative size is DPI aware, a positive one is not. Measuring with a
+   //--- positive size is what made the previous panel's columns wander.
+   int font=(int)MathMax(6.0,MathMin(20.0,(double)InpPanelFontSize));
+   TextSetFont("Courier New",-font*10,0,0);
    uint tw=0,th=0;
    TextGetSize("MMMMMMMMMMMMMMMMMMMM",tw,th);
    int charW=(int)MathCeil((double)tw/20.0);
-   if(charW<5) charW=(int)MathMax(5.0,InpPanelFontSize*0.62);
-   int rowH=(int)MathMax((double)th+4.0,InpPanelFontSize*1.7);
+   if(charW<5) charW=(int)MathMax(5.0,font*0.62);
+   int rowH=(int)MathMax((double)th+4.0,font*1.7);
 
-   int padX=8,padY=6;
-   int width =charW*COLS+padX*2;
+   //--- never draw wider than the chart itself
+   long chartW=0;
+   int  cols=COLS;
+   if(ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0,chartW) && chartW>160)
+     {
+      int fits=(int)((chartW-40)/(long)MathMax(charW,1));
+      cols=(int)MathMax(30.0,MathMin((double)COLS,(double)fits));
+     }
+
+   int padX=8,padY=6,x0=8,y0=18;
+   int width =charW*cols+padX*2;
    int height=rowH*n+padY*2;
 
-   //--- the background must exist before the labels: on an MT5 chart the
-   //--- creation order is the paint order
+   //--- The background must exist before the labels: on an MT5 chart the
+   //--- creation order is the paint order, and creating it last is what
+   //--- painted the previous panel solid black over its own text.
    string bg=PFX+"P_bg";
-   ObjectCreate(0,bg,OBJ_RECTANGLE_LABEL,0,0,0);
+   if(ObjectFind(0,bg)<0) ObjectCreate(0,bg,OBJ_RECTANGLE_LABEL,0,0,0);
    ObjectSetInteger(0,bg,OBJPROP_CORNER,CORNER_LEFT_UPPER);
-   ObjectSetInteger(0,bg,OBJPROP_XDISTANCE,8);
-   ObjectSetInteger(0,bg,OBJPROP_YDISTANCE,18);
+   ObjectSetInteger(0,bg,OBJPROP_XDISTANCE,x0);
+   ObjectSetInteger(0,bg,OBJPROP_YDISTANCE,y0);
    ObjectSetInteger(0,bg,OBJPROP_XSIZE,width);
    ObjectSetInteger(0,bg,OBJPROP_YSIZE,height);
    ObjectSetInteger(0,bg,OBJPROP_BGCOLOR,C'18,20,26');
@@ -1249,22 +1337,29 @@ void DrawPanel()
    ObjectSetInteger(0,bg,OBJPROP_HIDDEN,true);
    ObjectSetInteger(0,bg,OBJPROP_SELECTABLE,false);
 
+   //--- Update the rows in place. Deleting and recreating two dozen objects
+   //--- twice a second makes the chart flicker and churns the object list.
    for(int i=0;i<n;i++)
      {
       string id=PFX+"P_r"+IntegerToString(i);
-      ObjectCreate(0,id,OBJ_LABEL,0,0,0);
-      ObjectSetInteger(0,id,OBJPROP_CORNER,CORNER_LEFT_UPPER);
-      ObjectSetInteger(0,id,OBJPROP_XDISTANCE,8+padX);
-      ObjectSetInteger(0,id,OBJPROP_YDISTANCE,18+padY+rowH*i);
-      ObjectSetString (0,id,OBJPROP_TEXT,rows[i]);
+      if(ObjectFind(0,id)<0)
+        {
+         ObjectCreate(0,id,OBJ_LABEL,0,0,0);
+         ObjectSetInteger(0,id,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+         ObjectSetInteger(0,id,OBJPROP_ANCHOR,ANCHOR_LEFT_UPPER);
+         ObjectSetInteger(0,id,OBJPROP_BACK,false);
+         ObjectSetInteger(0,id,OBJPROP_HIDDEN,true);
+         ObjectSetInteger(0,id,OBJPROP_SELECTABLE,false);
+        }
+      ObjectSetInteger(0,id,OBJPROP_XDISTANCE,x0+padX);
+      ObjectSetInteger(0,id,OBJPROP_YDISTANCE,y0+padY+rowH*i);
+      ObjectSetString (0,id,OBJPROP_TEXT,Fit(rows[i],cols));
       ObjectSetString (0,id,OBJPROP_FONT,"Courier New");
-      ObjectSetInteger(0,id,OBJPROP_FONTSIZE,InpPanelFontSize);
+      ObjectSetInteger(0,id,OBJPROP_FONTSIZE,font);
       ObjectSetInteger(0,id,OBJPROP_COLOR,cl[i]);
-      ObjectSetInteger(0,id,OBJPROP_ANCHOR,ANCHOR_LEFT_UPPER);
-      ObjectSetInteger(0,id,OBJPROP_BACK,false);
-      ObjectSetInteger(0,id,OBJPROP_HIDDEN,true);
-      ObjectSetInteger(0,id,OBJPROP_SELECTABLE,false);
      }
+   for(int i=n;i<g_panelRows;i++) ObjectDelete(0,PFX+"P_r"+IntegerToString(i));
+   g_panelRows=n;
   }
 
 //+------------------------------------------------------------------+
@@ -1282,7 +1377,7 @@ void LogBar()
                                 (armDir==DIR_BUY?"above":"below"),armCHoCH);
    else                 state="hunting";
    PrintFormat("BAR    | %s C=%.2f | %s | 1 candle %.2f | swing H %.2f L %.2f | %d pools live | %s%s",
-               TimeToString(T(1),TIME_DATE|TIME_MINUTES),C(1),
+               TimeToString(BarT(1),TIME_DATE|TIME_MINUTES),BarC(1),
                (trendDir==DIR_BUY?"structure bullish":(trendDir==DIR_SELL?"structure bearish":"structure undecided")),
                unitTR,swingHigh,swingLow,live,state,
                (dayBlocked?" | DAY STOPPED":""));
@@ -1340,7 +1435,7 @@ void OnBarClose()
 void LogCHoCH()
   {
    PrintFormat("CHoCH  | %s change of character confirmed - close %.2f broke %.2f (raid on %s)",
-               (armDir==DIR_BUY?"bullish":"bearish"),C(1),armCHoCH,armPool);
+               (armDir==DIR_BUY?"bullish":"bearish"),BarC(1),armCHoCH,armPool);
   }
 
 //+------------------------------------------------------------------+
@@ -1354,8 +1449,21 @@ int OnInit()
      { Print("INIT   | set either a risk percent or a fixed lot size"); return(INIT_PARAMETERS_INCORRECT); }
    if(InpMinRR<0.5)
      { Print("INIT   | a minimum reward:risk below 0.5 is not worth trading"); return(INIT_PARAMETERS_INCORRECT); }
+   if(InpMaxPositions<1)
+     { Print("INIT   | max positions must be at least 1, or the EA can never trade"); return(INIT_PARAMETERS_INCORRECT); }
+   if(InpMinRejection<0.0 || InpMinRejection>=1.0)
+     { Print("INIT   | the rejection wick is a fraction of the candle: use 0.0 to 0.99"); return(INIT_PARAMETERS_INCORRECT); }
+   if(InpMaxStopUnits<=0.5)
+     { Print("INIT   | the stop width cap must be more than 0.5 median candles"); return(INIT_PARAMETERS_INCORRECT); }
+   if(InpMaxSpreadPct<=0.0)
+     { Print("INIT   | a spread cap of 0% would reject every trade"); return(INIT_PARAMETERS_INCORRECT); }
+   if(InpMaxDailyLossPct<=0.0)
+     { Print("INIT   | the daily loss limit must be above 0%"); return(INIT_PARAMETERS_INCORRECT); }
+   if(InpPartialAtR>0.0 && (InpPartialPercent<1.0 || InpPartialPercent>95.0))
+     { Print("INIT   | the partial size must be between 1% and 95%"); return(INIT_PARAMETERS_INCORRECT); }
 
    ObjectsDeleteAll(0,PFX,0,-1);
+   g_panelRows=0;
 
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetDeviationInPoints(InpSlippage);
@@ -1401,6 +1509,7 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    ObjectsDeleteAll(0,PFX,0,-1);
+   g_panelRows=0;
    ChartRedraw();
    PrintFormat("DEINIT | stopped (reason %d) | %d raids, %d CHoCH, %d trades, %d unused setups",
                reason,nRaids,nCHoCH,nTrades,nExpired);
