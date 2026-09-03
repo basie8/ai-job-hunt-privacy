@@ -417,8 +417,26 @@ public:
       double prob=(m_model!=NULL?m_model.BlendedProbability(m_x):SmcSigmoid(0.0));
       double score=(m_model!=NULL?m_model.Score(m_x):0.0);
 
-      //--- expectancy gate: the objective must pay for the probability --
-      double rr_needed=MathMax(1.30,SmcSafeDiv(1.0-prob,prob,2.0)*1.80);
+      //--- Below this the setup is not tradeable at any reward, and the
+      //--- expectancy arithmetic stops being informative - (1-p)/p blows
+      //--- up and demands 20R+, which reads as a reward problem when it
+      //--- is really the model refusing the setup. Say what is true.
+      if(prob<0.35)
+        {
+         m_veto=StringFormat("model prices this setup at %.0f%% - too low to trade at any reward",prob*100.0);
+         m_context=StringFormat("%s %s - %s. Rejected: %s",SmcDirShort(dir),m_playbook,why,m_veto);
+         sig.valid=false;
+         sig.dir=dir;
+         sig.prob=prob;
+         sig.raw_score=score;
+         sig.rr1=rr1;
+         return(false);
+        }
+
+      //--- expectancy gate: the objective must pay for the probability.
+      //--- Capped, so the requirement stays a number a real objective
+      //--- could plausibly reach.
+      double rr_needed=MathMax(1.30,MathMin(5.00,SmcSafeDiv(1.0-prob,prob,2.0)*1.80));
       if(rr1<rr_needed)
         {
          m_veto=StringFormat("reward %.2fR below the %.2fR that a %.0f%% setup must earn",rr1,rr_needed,prob*100.0);

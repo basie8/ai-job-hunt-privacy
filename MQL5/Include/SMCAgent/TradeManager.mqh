@@ -199,10 +199,26 @@ public:
          if(m_dir[i]==DIR_BULL) { hit_sl=(bar_low<=m_sl[i]); hit_tp=(bar_high>=m_tp[i]); }
          else                   { hit_sl=(bar_high>=m_sl[i]); hit_tp=(bar_low<=m_tp[i]); }
          double y=-1.0;
+         bool   timed_out=false;
          if(hit_sl && hit_tp) y=0.0;                       // ambiguous bar: assume the stop first
          else if(hit_tp) y=1.0;
          else if(hit_sl) y=0.0;
-         else if(m_bars[i]>=m_max_bars) y=0.0;             // never expanded: treat as a failure
+         else if(m_bars[i]>=m_max_bars) timed_out=true;    // neither side reached
+
+         //--- A setup that reached neither its objective nor its stop is
+         //--- UNRESOLVED, not a failure. Training on it as a loss is what
+         //--- collapsed the first live model: 88% of its labels were
+         //--- timeouts, the bias saturated negative, and every probability
+         //--- fell so low that the expectancy gate demanded 20R+ and
+         //--- nothing could ever trade again. Discard it instead.
+         if(timed_out)
+           {
+            if(m_log!=NULL)
+               m_log.Debug(StringFormat("Observation discarded unresolved after %d bars - not trained on",m_bars[i]));
+            Remove(i);
+            continue;
+           }
+
          if(y>=0.0)
            {
             double xb[];

@@ -55,12 +55,14 @@ private:
    double            m_acc;
    int               m_scored;
    int               m_correct;
+   int               m_pos;         // labels seen: objective reached
+   int               m_neg;         // labels seen: invalidated
 
 public:
                      COnlineLearner(void): m_n(0), m_bias(0.0), m_init_bias(0.0), m_lr(0.06), m_l2(0.010), m_updates(0),
                                            m_warmup_needed(25), m_file("smc_agent_model.csv"), m_log(NULL),
                                            m_mem_cnt(0), m_mem_head(0), m_logloss(0.0), m_acc(0.0),
-                                           m_scored(0), m_correct(0) {}
+                                           m_scored(0), m_correct(0), m_pos(0), m_neg(0) {}
 
    void              Init(const int n_features,const double &priors[],CLogger *log,
                           const string model_file,const int warmup_samples,const double init_bias=0.0)
@@ -98,6 +100,8 @@ public:
    double            Bias(void)      const { return(m_bias); }
    double            LogLoss(void)   const { return(m_logloss); }
    double            Accuracy(void)  const { return(m_acc); }
+   double            PositiveRate(void) const
+     { int t=m_pos+m_neg; return(t>0?(double)m_pos/(double)t:0.5); }
 
    //--- raw linear score (used for the "confluence score" display) ----
    double            Score(const double &x[])
@@ -130,17 +134,33 @@ public:
    void              Learn(const double &x[],const double y,const double sample_weight=1.0)
      {
       if(m_n<=0) return;
+      //--- Class balancing. A stream that is 90% one label drags the bias
+      //--- to that label and the model stops discriminating. Scaling each
+      //--- update by the inverse frequency of its class keeps a skewed
+      //--- stream from collapsing the model.
+      if(y>0.5) m_pos++; else m_neg++;
+      int    tot=m_pos+m_neg;
+      double cls=1.0;
+      if(tot>=20)
+        {
+         int own=(y>0.5?m_pos:m_neg);
+         cls=SmcClamp((double)tot/(2.0*(double)MathMax(own,1)),0.40,2.50);
+        }
+      double sw=sample_weight*cls;
+
       double p=Probability(x);
       double err=p-y;
       double lr=m_lr/MathSqrt(1.0+(double)m_updates*0.05);
       for(int i=0;i<m_n && i<ArraySize(x);i++)
         {
-         double grad=err*x[i]*sample_weight + m_l2*(m_w[i]-m_prior[i]);
+         double grad=err*x[i]*sw + m_l2*(m_w[i]-m_prior[i]);
          m_w[i]-=lr*grad;
          m_w[i]=SmcClamp(m_w[i],-4.0,4.0);
         }
-      m_bias-=lr*(err*sample_weight);
-      m_bias=SmcClamp(m_bias,-2.0,2.0);
+      m_bias-=lr*(err*sw);
+      //--- tighter clamp: a bias past this is the model giving up rather
+      //--- than discriminating
+      m_bias=SmcClamp(m_bias,-1.0,1.0);
       m_updates++;
 
       //--- metrics
@@ -246,9 +266,31 @@ public:
            }
         }
       FileClose(h);
-      if(ok && m_log!=NULL)
-         m_log.Info(StringFormat("Model restored: %d updates, %d memories, acc=%.2f",(int)m_updates,m_mem_cnt,m_acc));
-      return(ok);
+      if(!ok) return(false);
+
+      //--- Audit what was loaded. A label stream this one-sided means the
+      //--- model has stopped discriminating, and loading it silently is
+      //--- what kept a live build permanently out of the market.
+      int pos=0;
+      for(int s2=0;s2<m_mem_cnt;s2++) if(m_mem_y[s2]>0.5) pos++;
+      m_pos=pos;
+      m_neg=m_mem_cnt-pos;
+      double rate=(m_mem_cnt>0?(double)pos/(double)m_mem_cnt:0.5);
+      if(m_mem_cnt>=40 && (rate<0.15 || rate>0.85))
+        {
+         if(m_log!=NULL)
+           {
+            m_log.Err(StringFormat("Stored model is degenerate: only %.0f%% of %d labels reached their objective and the bias has saturated at %+.2f. It would price every setup near zero and never trade.",
+                      rate*100.0,m_mem_cnt,m_bias));
+            m_log.Err("Discarding it and restarting from the research priors. Delete the model file if this repeats.");
+           }
+         Reset();
+         return(false);
+        }
+      if(m_log!=NULL)
+         m_log.Info(StringFormat("Model restored: %d updates, %d memories, %.0f%% reached objective, acc=%.2f, bias %+.2f",
+                    (int)m_updates,m_mem_cnt,rate*100.0,m_acc,m_bias));
+      return(true);
      }
 
    void              Reset(void)
@@ -256,6 +298,7 @@ public:
       for(int i=0;i<m_n;i++) m_w[i]=m_prior[i];
       m_bias=m_init_bias; m_updates=0; m_mem_cnt=0; m_mem_head=0;
       m_scored=0; m_correct=0; m_acc=0.0; m_logloss=0.0;
+      m_pos=0; m_neg=0;
      }
   };
 

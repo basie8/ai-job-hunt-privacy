@@ -518,6 +518,15 @@ int OnInit()
       g_log.Warn(StringFormat("DRY RUN ACTIVE: simulating %.2f of capital. The agent will size and log every trade it would take, mark them to market against real candles, and learn from the outcome - but NOTHING is sent to the broker.",
                  InpDryRunCapital));
 
+   //--- say exactly where the persistent files live, so nobody has to
+   //--- hunt for the common folder. FILE_COMMON writes into the \Files
+   //--- subfolder of TERMINAL_COMMONDATA_PATH.
+   string common=TerminalInfoString(TERMINAL_COMMONDATA_PATH)+"\\Files\\";
+   g_log.Info("Files | model  "+common+model_file);
+   g_log.Info("Files | state  "+common+state_file);
+   if(InpLogToFile) g_log.Info("Files | log    "+common+"smc_agent_log.txt");
+   g_log.Info("Files | delete the model file, or set InpResetModel, to restart learning from the research priors");
+
    g_log.Info(StringFormat("Phase capital %.2f (%s). Balance now %.2f, equity %.2f.",
               g_risk.Initial(),cap_source,AccountInfoDouble(ACCOUNT_BALANCE),AccountInfoDouble(ACCOUNT_EQUITY)));
    if(AccountInfoDouble(ACCOUNT_EQUITY)<g_risk.OverallFloor())
