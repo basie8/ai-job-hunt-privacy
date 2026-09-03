@@ -2159,6 +2159,7 @@ private:
    double            m_l2;                   // anchoring strength
    long              m_updates;
    int               m_warmup_needed;
+   bool              m_persist;      // false during optimisation: every pass starts clean
    string            m_file;
    CLogger          *m_log;
 
@@ -2187,16 +2188,18 @@ private:
 
 public:
                      COnlineLearner(void): m_n(0), m_bias(0.0), m_init_bias(0.0), m_lr(0.06), m_l2(0.010), m_updates(0),
-                                           m_warmup_needed(25), m_file("smc_agent_model.csv"), m_log(NULL),
+                                           m_warmup_needed(25), m_file("smc_agent_model.csv"), m_persist(true), m_log(NULL),
                                            m_mem_cnt(0), m_mem_head(0), m_logloss(0.0), m_acc(0.0),
                                            m_scored(0), m_correct(0), m_pos(0), m_neg(0), m_fn(0) {}
 
    void              Init(const int n_features,const double &priors[],CLogger *log,
-                          const string model_file,const int warmup_samples,const double init_bias=0.0)
+                          const string model_file,const int warmup_samples,const double init_bias=0.0,
+                          const bool persist=true)
      {
       m_n=(int)MathMin(n_features,LRN_MAX_FEATURES);
       m_log=log;
       m_file=model_file;
+      m_persist=persist;
       m_warmup_needed=warmup_samples;
       ArrayResize(m_w,m_n);
       ArrayResize(m_prior,m_n);
@@ -2362,6 +2365,7 @@ public:
    //--- persistence ---------------------------------------------------
    bool              Save(void)
      {
+      if(!m_persist) return(true);          // nothing to write, and nothing to corrupt
       int h=FileOpen(m_file,FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON,SMC_FIELD_SEP);
       if(h==INVALID_HANDLE) return(false);
       FileWrite(h,"SMC_AGENT_MODEL",SMC_AGENT_VERSION,m_n,DoubleToString(m_bias,8),(string)m_updates,
@@ -2379,6 +2383,7 @@ public:
 
    bool              Load(void)
      {
+      if(!m_persist) return(false);         // start from the priors, every pass
       int h=FileOpen(m_file,FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON,SMC_FIELD_SEP);
       if(h==INVALID_HANDLE) return(false);
       bool ok=false;
@@ -2521,6 +2526,7 @@ private:
 
    double            m_peak_equity;
    string            m_state_file;
+   bool              m_persist;      // false during optimisation: every pass starts clean
    string            m_capital_source;
    //--- dry run: the agent runs its whole pipeline against a simulated
    //--- balance so it can be exercised on an unfunded or disconnected
@@ -2580,7 +2586,7 @@ public:
                                          m_day_trades(0), m_day_locked(false), m_lock_reason(""),
                                          m_loss_streak(0), m_win_streak(0), m_trading_days(0), m_last_trade_day(0),
                                          m_week_trades(0), m_week_start(0), m_peak_equity(0),
-                                         m_state_file("smc_agent_state.csv"), m_capital_source(""),
+                                         m_state_file("smc_agent_state.csv"), m_persist(true), m_capital_source(""),
                                          m_sim(false), m_sim_capital(0), m_sim_pnl(0) {}
 
    void              Init(const string symbol,const long magic,CLogger *log,const double initial_capital,
@@ -2588,7 +2594,8 @@ public:
                           const double soft_daily_pct,const double hard_daily_pct,const double soft_max_pct,
                           const double base_risk_pct,const int reset_hour,const int min_days,
                           const string state_file,const string capital_source="",
-                          const bool dry_run=false,const double dry_capital=0.0)
+                          const bool dry_run=false,const double dry_capital=0.0,
+                          const bool persist=true)
      {
       m_symbol=symbol; m_magic=magic; m_log=log;
       m_phase=phase;
@@ -2602,6 +2609,7 @@ public:
       m_reset_hour=reset_hour;
       m_min_days=min_days;
       m_state_file=state_file;
+      m_persist=persist;
       m_capital_source=capital_source;
       m_sim=dry_run;
       m_sim_capital=(dry_run?(dry_capital>0.0?dry_capital:100000.0):0.0);
@@ -2948,6 +2956,7 @@ public:
    //--- persistence --------------------------------------------------------
    bool              SaveState(void)
      {
+      if(!m_persist) return(true);
       int h=FileOpen(m_state_file,FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON,SMC_FIELD_SEP);
       if(h==INVALID_HANDLE) return(false);
       FileWrite(h,"SMC_AGENT_STATE",DoubleToString(m_initial,2),(string)m_trading_days,
@@ -2959,6 +2968,7 @@ public:
 
    bool              LoadState(void)
      {
+      if(!m_persist) return(false);
       int h=FileOpen(m_state_file,FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON,SMC_FIELD_SEP);
       if(h==INVALID_HANDLE) return(false);
       bool ok=false;
@@ -5332,12 +5342,36 @@ int OnInit()
    g_eng_h.SetLabel("high");
 
    SetPriors();
+
+   //--- Where the tester is allowed to write.
+   //---
+   //--- FILE_COMMON resolves to the real shared folder for local testing
+   //--- agents, so without this a backtest writes into the very same file
+   //--- a live or dry-run chart reads back. Worse, an optimisation runs
+   //--- hundreds of passes against one path: each pass would load what the
+   //--- previous pass learned, so no two parameter sets would be judged on
+   //--- equal footing and the whole report would depend on queue order.
+   //---
+   //---   optimisation : no load, no save. Every pass starts from the
+   //---                  research priors, which is the only way passes are
+   //---                  comparable to each other.
+   //---   backtest     : its own _backtest files, never the live ones.
+   //---   live/dry run : unchanged.
+   bool optimising=(bool)MQLInfoInteger(MQL_OPTIMIZATION);
+   bool testing   =(bool)MQLInfoInteger(MQL_TESTER);
+   bool persist   =!optimising;
+   string sfx=(testing && !optimising?"_backtest":"");
+
    //--- The learned weights belong to a symbol AND a timeframe: setups on
    //--- M5 and on H1 have different base rates, so a single file would let
    //--- one contaminate the other if the chart period is ever changed.
-   string model_file=StringFormat("smc_agent_model_%s_%s.csv",_Symbol,
-                                  EnumToString((ENUM_TIMEFRAMES)Period()));
-   g_model.Init(F_COUNT,g_priors,GetPointer(g_log),model_file,InpWarmupSamples,-0.35);
+   string model_file=StringFormat("smc_agent_model_%s_%s%s.csv",_Symbol,
+                                  EnumToString((ENUM_TIMEFRAMES)Period()),sfx);
+   g_model.Init(F_COUNT,g_priors,GetPointer(g_log),model_file,InpWarmupSamples,-0.35,persist);
+   if(optimising)
+      g_log.Warn("OPTIMISATION: the model is not loaded or saved, so every pass starts from the research priors. The warm-up counter will fill inside each pass and be discarded at the end of it - that is deliberate, not a fault. Optimisation cannot be used to train the model.");
+   else if(testing)
+      g_log.Warn(StringFormat("BACKTEST: learning is written to %s, NOT to the live model. Rename it over the live file yourself if you decide the tester-trained weights are worth keeping.",model_file));
    if(InpResetModel) { g_model.Reset(); g_log.Warn("Stored model discarded on request - restarting from the research priors"); }
    else if(!g_model.Load()) g_log.Info("No stored model found - starting from the research priors and observing");
 
@@ -5355,12 +5389,12 @@ int OnInit()
    string cap_source="";
    double capital=DetectInitialCapital(cap_source);
    long   login=AccountInfoInteger(ACCOUNT_LOGIN);
-   string state_file=StringFormat("smc_agent_state_%s_%s.csv",IntegerToString(login),_Symbol);
+   string state_file=StringFormat("smc_agent_state_%s_%s%s.csv",IntegerToString(login),_Symbol,sfx);
 
    g_risk.Init(_Symbol,InpMagic,GetPointer(g_log),capital,InpPhase,PhaseTarget(),
                InpDailyLossPct,InpMaxLossPct,InpSoftDailyPct,InpHardDailyPct,InpSoftMaxPct,
                InpBaseRiskPct,InpDailyResetHour,InpMinTradingDays,state_file,cap_source,
-               InpDryRun,InpDryRunCapital);
+               InpDryRun,InpDryRunCapital,persist);
    if(InpDryRun)
       g_log.Warn(StringFormat("DRY RUN ACTIVE: simulating %.2f of capital. The agent will size and log every trade it would take, mark them to market against real candles, and learn from the outcome - but NOTHING is sent to the broker.",
                  InpDryRunCapital));

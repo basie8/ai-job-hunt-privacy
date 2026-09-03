@@ -60,6 +60,7 @@ private:
 
    double            m_peak_equity;
    string            m_state_file;
+   bool              m_persist;      // false during optimisation: every pass starts clean
    string            m_capital_source;
    //--- dry run: the agent runs its whole pipeline against a simulated
    //--- balance so it can be exercised on an unfunded or disconnected
@@ -119,7 +120,7 @@ public:
                                          m_day_trades(0), m_day_locked(false), m_lock_reason(""),
                                          m_loss_streak(0), m_win_streak(0), m_trading_days(0), m_last_trade_day(0),
                                          m_week_trades(0), m_week_start(0), m_peak_equity(0),
-                                         m_state_file("smc_agent_state.csv"), m_capital_source(""),
+                                         m_state_file("smc_agent_state.csv"), m_persist(true), m_capital_source(""),
                                          m_sim(false), m_sim_capital(0), m_sim_pnl(0) {}
 
    void              Init(const string symbol,const long magic,CLogger *log,const double initial_capital,
@@ -127,7 +128,8 @@ public:
                           const double soft_daily_pct,const double hard_daily_pct,const double soft_max_pct,
                           const double base_risk_pct,const int reset_hour,const int min_days,
                           const string state_file,const string capital_source="",
-                          const bool dry_run=false,const double dry_capital=0.0)
+                          const bool dry_run=false,const double dry_capital=0.0,
+                          const bool persist=true)
      {
       m_symbol=symbol; m_magic=magic; m_log=log;
       m_phase=phase;
@@ -141,6 +143,7 @@ public:
       m_reset_hour=reset_hour;
       m_min_days=min_days;
       m_state_file=state_file;
+      m_persist=persist;
       m_capital_source=capital_source;
       m_sim=dry_run;
       m_sim_capital=(dry_run?(dry_capital>0.0?dry_capital:100000.0):0.0);
@@ -487,6 +490,7 @@ public:
    //--- persistence --------------------------------------------------------
    bool              SaveState(void)
      {
+      if(!m_persist) return(true);
       int h=FileOpen(m_state_file,FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON,SMC_FIELD_SEP);
       if(h==INVALID_HANDLE) return(false);
       FileWrite(h,"SMC_AGENT_STATE",DoubleToString(m_initial,2),(string)m_trading_days,
@@ -498,6 +502,7 @@ public:
 
    bool              LoadState(void)
      {
+      if(!m_persist) return(false);
       int h=FileOpen(m_state_file,FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON,SMC_FIELD_SEP);
       if(h==INVALID_HANDLE) return(false);
       bool ok=false;

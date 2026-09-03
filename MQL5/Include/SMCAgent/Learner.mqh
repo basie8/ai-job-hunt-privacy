@@ -40,6 +40,7 @@ private:
    double            m_l2;                   // anchoring strength
    long              m_updates;
    int               m_warmup_needed;
+   bool              m_persist;      // false during optimisation: every pass starts clean
    string            m_file;
    CLogger          *m_log;
 
@@ -68,16 +69,18 @@ private:
 
 public:
                      COnlineLearner(void): m_n(0), m_bias(0.0), m_init_bias(0.0), m_lr(0.06), m_l2(0.010), m_updates(0),
-                                           m_warmup_needed(25), m_file("smc_agent_model.csv"), m_log(NULL),
+                                           m_warmup_needed(25), m_file("smc_agent_model.csv"), m_persist(true), m_log(NULL),
                                            m_mem_cnt(0), m_mem_head(0), m_logloss(0.0), m_acc(0.0),
                                            m_scored(0), m_correct(0), m_pos(0), m_neg(0), m_fn(0) {}
 
    void              Init(const int n_features,const double &priors[],CLogger *log,
-                          const string model_file,const int warmup_samples,const double init_bias=0.0)
+                          const string model_file,const int warmup_samples,const double init_bias=0.0,
+                          const bool persist=true)
      {
       m_n=(int)MathMin(n_features,LRN_MAX_FEATURES);
       m_log=log;
       m_file=model_file;
+      m_persist=persist;
       m_warmup_needed=warmup_samples;
       ArrayResize(m_w,m_n);
       ArrayResize(m_prior,m_n);
@@ -243,6 +246,7 @@ public:
    //--- persistence ---------------------------------------------------
    bool              Save(void)
      {
+      if(!m_persist) return(true);          // nothing to write, and nothing to corrupt
       int h=FileOpen(m_file,FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON,SMC_FIELD_SEP);
       if(h==INVALID_HANDLE) return(false);
       FileWrite(h,"SMC_AGENT_MODEL",SMC_AGENT_VERSION,m_n,DoubleToString(m_bias,8),(string)m_updates,
@@ -260,6 +264,7 @@ public:
 
    bool              Load(void)
      {
+      if(!m_persist) return(false);         // start from the priors, every pass
       int h=FileOpen(m_file,FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON,SMC_FIELD_SEP);
       if(h==INVALID_HANDLE) return(false);
       bool ok=false;

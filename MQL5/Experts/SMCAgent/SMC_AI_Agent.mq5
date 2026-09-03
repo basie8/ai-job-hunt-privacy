@@ -489,12 +489,36 @@ int OnInit()
    g_eng_h.SetLabel("high");
 
    SetPriors();
+
+   //--- Where the tester is allowed to write.
+   //---
+   //--- FILE_COMMON resolves to the real shared folder for local testing
+   //--- agents, so without this a backtest writes into the very same file
+   //--- a live or dry-run chart reads back. Worse, an optimisation runs
+   //--- hundreds of passes against one path: each pass would load what the
+   //--- previous pass learned, so no two parameter sets would be judged on
+   //--- equal footing and the whole report would depend on queue order.
+   //---
+   //---   optimisation : no load, no save. Every pass starts from the
+   //---                  research priors, which is the only way passes are
+   //---                  comparable to each other.
+   //---   backtest     : its own _backtest files, never the live ones.
+   //---   live/dry run : unchanged.
+   bool optimising=(bool)MQLInfoInteger(MQL_OPTIMIZATION);
+   bool testing   =(bool)MQLInfoInteger(MQL_TESTER);
+   bool persist   =!optimising;
+   string sfx=(testing && !optimising?"_backtest":"");
+
    //--- The learned weights belong to a symbol AND a timeframe: setups on
    //--- M5 and on H1 have different base rates, so a single file would let
    //--- one contaminate the other if the chart period is ever changed.
-   string model_file=StringFormat("smc_agent_model_%s_%s.csv",_Symbol,
-                                  EnumToString((ENUM_TIMEFRAMES)Period()));
-   g_model.Init(F_COUNT,g_priors,GetPointer(g_log),model_file,InpWarmupSamples,-0.35);
+   string model_file=StringFormat("smc_agent_model_%s_%s%s.csv",_Symbol,
+                                  EnumToString((ENUM_TIMEFRAMES)Period()),sfx);
+   g_model.Init(F_COUNT,g_priors,GetPointer(g_log),model_file,InpWarmupSamples,-0.35,persist);
+   if(optimising)
+      g_log.Warn("OPTIMISATION: the model is not loaded or saved, so every pass starts from the research priors. The warm-up counter will fill inside each pass and be discarded at the end of it - that is deliberate, not a fault. Optimisation cannot be used to train the model.");
+   else if(testing)
+      g_log.Warn(StringFormat("BACKTEST: learning is written to %s, NOT to the live model. Rename it over the live file yourself if you decide the tester-trained weights are worth keeping.",model_file));
    if(InpResetModel) { g_model.Reset(); g_log.Warn("Stored model discarded on request - restarting from the research priors"); }
    else if(!g_model.Load()) g_log.Info("No stored model found - starting from the research priors and observing");
 
@@ -512,12 +536,12 @@ int OnInit()
    string cap_source="";
    double capital=DetectInitialCapital(cap_source);
    long   login=AccountInfoInteger(ACCOUNT_LOGIN);
-   string state_file=StringFormat("smc_agent_state_%s_%s.csv",IntegerToString(login),_Symbol);
+   string state_file=StringFormat("smc_agent_state_%s_%s%s.csv",IntegerToString(login),_Symbol,sfx);
 
    g_risk.Init(_Symbol,InpMagic,GetPointer(g_log),capital,InpPhase,PhaseTarget(),
                InpDailyLossPct,InpMaxLossPct,InpSoftDailyPct,InpHardDailyPct,InpSoftMaxPct,
                InpBaseRiskPct,InpDailyResetHour,InpMinTradingDays,state_file,cap_source,
-               InpDryRun,InpDryRunCapital);
+               InpDryRun,InpDryRunCapital,persist);
    if(InpDryRun)
       g_log.Warn(StringFormat("DRY RUN ACTIVE: simulating %.2f of capital. The agent will size and log every trade it would take, mark them to market against real candles, and learn from the outcome - but NOTHING is sent to the broker.",
                  InpDryRunCapital));
