@@ -522,6 +522,18 @@ int OnInit()
       g_log.Warn(StringFormat("DRY RUN ACTIVE: simulating %.2f of capital. The agent will size and log every trade it would take, mark them to market against real candles, and learn from the outcome - but NOTHING is sent to the broker.",
                  InpDryRunCapital));
 
+   //--- A single trade may never spend more than a third of the daily
+   //--- budget nor a fifth of the hard budget. On a fresh day that is a
+   //--- hard ceiling, and a base risk percent set above it simply never
+   //--- happens - so say so at startup rather than let the log show a
+   //--- 2.50%% setting quietly producing 0.70%% positions on every trade.
+   double ceil_pct=MathMin(InpSoftDailyPct/3.0,InpHardDailyPct/5.0);
+   g_log.Info(StringFormat("Risk  | base %.2f%% per trade, scaled 0.45x-1.35x by conviction. Structural ceiling on any one trade is %.2f%% of capital (a third of the %.2f%% daily budget, a fifth of the %.2f%% hard budget) and it falls further as the day is spent.",
+              InpBaseRiskPct,ceil_pct,InpSoftDailyPct,InpHardDailyPct));
+   if(InpBaseRiskPct>ceil_pct)
+      g_log.Warn(StringFormat("Risk  | InpBaseRiskPct is %.2f%% but no trade can ever risk more than %.2f%% of capital under this envelope, so the cap will bind on every entry and the effective risk is %.2f%%. Lower the setting to stop the two numbers disagreeing, or raise InpHardDailyPct if you really want bigger positions - that widens the loss you are protecting against.",
+                 InpBaseRiskPct,ceil_pct,ceil_pct));
+
    //--- say exactly where the persistent files live, so nobody has to
    //--- hunt for the common folder. FILE_COMMON writes into the \Files
    //--- subfolder of TERMINAL_COMMONDATA_PATH.
@@ -592,7 +604,7 @@ void RedrawPanel()
   {
    g_vis.DrawPanel(GetPointer(g_ms),GetPointer(g_eng_e),GetPointer(g_conf),GetPointer(g_risk),
                    GetPointer(g_model),g_sig,ModeString(),g_threshold,g_last_action,
-                   g_exec.OpenCount(),NewsLine(),g_gmt);
+                   g_exec.OpenCount(),NewsLine(),g_gmt,g_vbook.Count());
   }
 
 //+------------------------------------------------------------------+
@@ -842,6 +854,18 @@ bool OnBarClose()
      {
       g_last_action=StringFormat("no trade - %s",(g_conf.Veto()==""?"no qualified setup":g_conf.Veto()));
       g_log.Think("DECIDE | "+g_last_action);
+      //--- A vetoed setup is still a setup: entry, stop and target are all
+      //--- real and the market will resolve it. These are the marginal
+      //--- cases the model most needs, and dropping them is what left the
+      //--- warm-up counter sitting at zero for days at a time.
+      if((InpVirtualLearning || InpDryRun) && g_sig.observable)
+        {
+         int before=g_vbook.Count();
+         g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir);
+         if(g_vbook.Count()>before)
+            g_log.Think(StringFormat("OBSERVE| watching the rejected %s setup anyway - entry %.2f sl %.2f tp %.2f (%d in the book)",
+                        SmcDirShort(g_sig.dir),g_sig.entry,g_sig.sl,g_sig.tp1,g_vbook.Count()));
+        }
       Redraw();
       return(true);
      }
@@ -885,8 +909,29 @@ bool OnBarClose()
         {
          string wc="";
          if(!g_risk.WorstCaseAcceptable(lots,risk_dist,wc)) { take=false; block=wc; }
-         else g_log.Think(StringFormat("SIZE   | risking %.2f (%.2f%% of the phase capital) with %.2f lots, stop %.2f away",
-                          money,money/g_risk.Initial()*100.0,lots,risk_dist));
+         else
+           {
+            //--- Three different numbers, and they are rarely the same:
+            //---   wanted   - what the base risk percent asked for
+            //---   allowed  - what the FTMO envelope permits right now
+            //---   realised - what the rounded lot size actually risks
+            //--- Reporting only one of them is how a 2.50% setting can look
+            //--- like it is working while every trade risks 0.70%.
+            double wanted =g_risk.RiskRequested(g_sig.prob);
+            double per_lot=risk_dist*g_risk.LossPerLot(1.0);
+            double realised=lots*per_lot;
+            double cap=g_risk.Initial();
+            g_log.Think(StringFormat("SIZE   | wanted %.2f (%.2f%%) | allowed %.2f (%.2f%%) by %s | %.2f lots risking %.2f (%.2f%%), stop %.2f",
+                        wanted,SmcSafeDiv(wanted,cap,0.0)*100.0,
+                        money,SmcSafeDiv(money,cap,0.0)*100.0,g_risk.RiskBinding(g_sig.prob),
+                        lots,realised,SmcSafeDiv(realised,cap,0.0)*100.0,risk_dist));
+            //--- one lot step is a bigger slice of the budget the wider the
+            //--- stop is, so a higher timeframe loses more to rounding
+            double shortfall=SmcSafeDiv(money-realised,money,0.0);
+            if(shortfall>0.20)
+               g_log.Warn(StringFormat("Sizing | the 0.01 lot step is worth %.2f on this %.2f stop, so the position risks %.2f instead of %.2f - %.0f%% under target. Wider stops lose more to rounding; a larger account is the only thing that fixes it.",
+                          0.01*per_lot,risk_dist,realised,money,shortfall*100.0));
+           }
         }
      }
 
@@ -895,7 +940,7 @@ bool OnBarClose()
       g_last_action="stood aside - "+block;
       g_log.Think("DECIDE | stand aside: "+block);
       //--- keep learning from what was skipped
-      if(InpVirtualLearning) g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir);
+      if(InpVirtualLearning || InpDryRun) g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir);
       Redraw();
       return(true);
      }

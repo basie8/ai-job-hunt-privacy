@@ -195,6 +195,10 @@ struct SSignal
    double            zone_bottom;
    double            idm;         // inducement guarding the zone (0 = none)
    bool              idm_taken;
+   //--- A setup complete enough to learn from, even when it was vetoed.
+   //--- Entry, stop and target are all real, so the market will resolve it
+   //--- one way or the other whether or not the agent traded it.
+   bool              observable;
   };
 
 //+------------------------------------------------------------------+
@@ -2731,6 +2735,43 @@ public:
      }
 
    //--- money that may be risked on the next trade ----------------------
+   //--- The structural ceiling on any single trade, whatever the base risk
+   //--- percent is set to. A trade may never spend more than a third of
+   //--- what is left before the soft daily stop, nor a fifth of what is
+   //--- left before the hard floor - so on a fresh day the most any one
+   //--- trade can risk is hard_daily_pct/5 of capital, which for the FTMO
+   //--- envelope (3.5%) is 0.70%. Setting the base risk above that does
+   //--- not raise it; it just makes the cap bind on every trade.
+   double            RiskCeiling(void)
+     { return(MathMin(RemainingDailyBudget()/3.0,RemainingHardBudget()/5.0)); }
+
+   //--- what the base risk percent asks for, before the envelope trims it
+   double            RiskRequested(const double confidence)
+     {
+      double risk=m_initial*m_base_risk_pct/100.0;
+      risk*=SmcClamp(0.5+(confidence-0.55)*2.8,0.45,1.35);
+      if(m_loss_streak==1) risk*=0.75;
+      if(m_loss_streak==2) risk*=0.55;
+      if(m_loss_streak>=3) risk*=0.40;
+      double prog=TargetProgress();
+      if(prog>=0.70) risk*=0.65;
+      if(prog>=0.90) risk*=0.45;
+      return(MathMax(risk,0.0));
+     }
+
+   //--- name the constraint that actually decided the size
+   string            RiskBinding(const double confidence)
+     {
+      double want=RiskRequested(confidence);
+      double c1=RemainingDailyBudget()/3.0;
+      double c2=RemainingHardBudget()/5.0;
+      if(want<=c1 && want<=c2)
+         return(StringFormat("%.2f%% base risk",m_base_risk_pct));
+      if(c2<=c1)
+         return(StringFormat("a fifth of the %.2f left before the hard floor",RemainingHardBudget()));
+      return(StringFormat("a third of the %.2f left before the daily stop",RemainingDailyBudget()));
+     }
+
    double            RiskMoney(const double confidence)
      {
       double risk=m_initial*m_base_risk_pct/100.0;
@@ -3220,6 +3261,7 @@ public:
       sig.bar_time=0;
       sig.rationale="";
       sig.model="";
+      sig.observable=false;
       m_veto="";
       m_playbook="none";
       ArrayInitialize(m_x,0.0);
@@ -3371,6 +3413,18 @@ public:
       double rr1=SmcSafeDiv(MathAbs(tp1-entry),risk,0.0);
       double rr2=SmcSafeDiv(MathAbs(tp2-entry),risk,0.0);
 
+      //--- From here the setup is fully formed: a real entry, a real
+      //--- invalidation and a real objective. Everything below only decides
+      //--- whether it is worth TRADING - the market resolves it either way,
+      //--- so it stays an observation the model can learn from even when the
+      //--- answer is no. Filling these in here is what lets a vetoed setup
+      //--- reach the observation book instead of being thrown away.
+      sig.dir=dir; sig.entry=entry; sig.sl=sl; sig.tp1=tp1; sig.tp2=tp2;
+      sig.rr1=rr1; sig.rr2=rr2; sig.bar_time=bt; sig.model=m_playbook;
+      sig.zone_top=zone.top; sig.zone_bottom=zone.bottom;
+      sig.idm=zone.idm; sig.idm_taken=zone.idm_taken;
+      sig.observable=true;
+
       //--- factor measurement ----------------------------------------
       BuildFactors(dir,zone,entry,sl,tp1,rr1,post_news,ne,why);
 
@@ -3387,10 +3441,8 @@ public:
          m_veto=StringFormat("model prices this setup at %.0f%% - too low to trade at any reward",prob*100.0);
          m_context=StringFormat("%s %s - %s. Rejected: %s",SmcDirShort(dir),m_playbook,why,m_veto);
          sig.valid=false;
-         sig.dir=dir;
          sig.prob=prob;
          sig.raw_score=score;
-         sig.rr1=rr1;
          return(false);
         }
 
@@ -3403,10 +3455,8 @@ public:
          m_veto=StringFormat("reward %.2fR below the %.2fR that a %.0f%% setup must earn",rr1,rr_needed,prob*100.0);
          m_context=StringFormat("%s %s - %s. Rejected: %s",SmcDirShort(dir),m_playbook,why,m_veto);
          sig.valid=false;
-         sig.dir=dir;
          sig.prob=prob;
          sig.raw_score=score;
-         sig.rr1=rr1;
          return(false);
         }
 
@@ -3420,10 +3470,8 @@ public:
             m_veto=StringFormat("inside the release window of %s (%+d min)",evn,mins);
             m_context=StringFormat("%s %s - %s. Rejected: %s",SmcDirShort(dir),m_playbook,why,m_veto);
             sig.valid=false;
-            sig.dir=dir;
             sig.prob=prob;
             sig.raw_score=score;
-            sig.rr1=rr1;
             return(false);
            }
         }
@@ -3435,28 +3483,14 @@ public:
          m_veto=StringFormat("spread %.2f is %.0f%% of the planned risk",spread,spread/risk*100.0);
          m_context=StringFormat("%s %s - %s. Rejected: %s",SmcDirShort(dir),m_playbook,why,m_veto);
          sig.valid=false;
-         sig.dir=dir;
          sig.prob=prob;
          sig.raw_score=score;
          return(false);
         }
 
       sig.valid=true;
-      sig.dir=dir;
-      sig.entry=entry;
-      sig.sl=sl;
-      sig.tp1=tp1;
-      sig.tp2=tp2;
       sig.prob=prob;
       sig.raw_score=score;
-      sig.rr1=rr1;
-      sig.rr2=rr2;
-      sig.model=m_playbook;
-      sig.bar_time=bt;
-      sig.zone_top=zone.top;
-      sig.zone_bottom=zone.bottom;
-      sig.idm=zone.idm;
-      sig.idm_taken=zone.idm_taken;
       sig.rationale=BuildRationale(dir,zone,why,t1name,rr1,prob);
       m_context=sig.rationale;
       return(true);
@@ -3911,9 +3945,23 @@ public:
 
    int               Count(void) { return(ArraySize(m_dir)); }
 
+   //--- the same setup can survive several closes in a row; recording it
+   //--- once per bar would let one market moment dominate the training set
+   bool              Has(const int dir,const double entry,const double sl)
+     {
+      double tol=MathMax(MathAbs(entry)*1e-6,_Point);
+      for(int i=ArraySize(m_dir)-1;i>=0;i--)
+         if(m_dir[i]==dir && MathAbs(m_entry[i]-entry)<=tol && MathAbs(m_sl[i]-sl)<=tol)
+            return(true);
+      return(false);
+     }
+
    void              Add(const double &x[],const double entry,const double sl,const double tp,const int dir,
                          const double lots=0.0)
      {
+      if(dir==DIR_NONE || entry<=0.0 || sl<=0.0 || tp<=0.0) return;
+      if(MathAbs(entry-sl)<=0.0) return;
+      if(Has(dir,entry,sl)) return;                 // already watching this exact setup
       if(ArraySize(m_dir)>=VB_MAX) Remove(0);
       int k=ArraySize(m_dir);
       ArrayResize(m_lots,k+1);
@@ -4709,7 +4757,7 @@ public:
    void              DrawPanel(CMarketState *ms,CSmcEngine *eng,CConfluence *conf,CRiskManager *risk,
                                COnlineLearner *model,const SSignal &sig,const string mode,
                                const double threshold,const string last_action,const int open_positions,
-                               const string news_line,const int gmt)
+                               const string news_line,const int gmt,const int watching=0)
      {
       if(!m_draw_panel) return;
       //--- MetaTrader paints foreground objects in creation order, and the
@@ -4729,9 +4777,12 @@ public:
           EnumToString(ms.TfEntry()),TimeToString(SmcNow(),TIME_DATE|TIME_MINUTES)),W),m_c_accent);
 
       color mode_c=(mode=="LIVE"?m_c_bull:(mode=="LOCKED"?m_c_bear:m_c_accent));
-      KV("MODE",StringFormat("%-8s  %s  acc %.0f%%  accept %.0f%%",mode,
+      //--- "watching" is the observation book: setups whose outcome the
+      //--- market has not delivered yet. Warm-up only moves when one of
+      //--- them resolves, so showing both makes a stuck counter readable.
+      KV("MODE",StringFormat("%-8s  %s  watching %d  acc %.0f%%  accept %.0f%%",mode,
          (model.IsWarm()?"model trained":StringFormat("warm-up %d/%d",(int)model.Updates(),model.WarmupNeeded())),
-         model.Accuracy()*100.0,threshold*100.0),mode_c);
+         watching,model.Accuracy()*100.0,threshold*100.0),mode_c);
 
       int pc=SmcPcGmtOffsetHours();
       KV("CLOCKS",StringFormat("srv %s GMT%+d | LDN %s | NY %s | you %s",
@@ -4789,9 +4840,12 @@ public:
       KV(StringFormat("FTMO P%d",risk.Phase()),
          StringFormat("day %+0.2f%%  total %+0.2f%%  target %.0f%%  days %d/%d",
          dp,risk.TotalPnLPct(),risk.TargetProgress()*100.0,risk.TradingDays(),risk.MinDays()),dc);
-      KV("FLOORS",StringFormat("soft %.2f  hard %.2f  room %.0f / %.0f",
+      //--- the per-trade ceiling belongs next to the floors that create it:
+      //--- it is what the base risk percent is actually allowed to spend
+      KV("FLOORS",StringFormat("soft %.2f  hard %.2f  room %.0f / %.0f  max/trade %.2f (%.2f%%)",
          risk.SoftDailyFloor(),risk.HardDailyFloor(),
-         risk.RemainingDailyBudget(),risk.RemainingHardBudget()),m_c_dim);
+         risk.RemainingDailyBudget(),risk.RemainingHardBudget(),
+         risk.RiskCeiling(),SmcSafeDiv(risk.RiskCeiling(),risk.Initial(),0.0)*100.0),m_c_dim);
       KV("CAPITAL",StringFormat("%.2f (%s)  eq %.2f  open risk %.0f",
          risk.Initial(),risk.CapitalSource(),risk.Equity(),risk.OpenRiskMoney()),m_c_dim);
       KV("NEWS",news_line,m_c_dim);
@@ -5311,6 +5365,18 @@ int OnInit()
       g_log.Warn(StringFormat("DRY RUN ACTIVE: simulating %.2f of capital. The agent will size and log every trade it would take, mark them to market against real candles, and learn from the outcome - but NOTHING is sent to the broker.",
                  InpDryRunCapital));
 
+   //--- A single trade may never spend more than a third of the daily
+   //--- budget nor a fifth of the hard budget. On a fresh day that is a
+   //--- hard ceiling, and a base risk percent set above it simply never
+   //--- happens - so say so at startup rather than let the log show a
+   //--- 2.50%% setting quietly producing 0.70%% positions on every trade.
+   double ceil_pct=MathMin(InpSoftDailyPct/3.0,InpHardDailyPct/5.0);
+   g_log.Info(StringFormat("Risk  | base %.2f%% per trade, scaled 0.45x-1.35x by conviction. Structural ceiling on any one trade is %.2f%% of capital (a third of the %.2f%% daily budget, a fifth of the %.2f%% hard budget) and it falls further as the day is spent.",
+              InpBaseRiskPct,ceil_pct,InpSoftDailyPct,InpHardDailyPct));
+   if(InpBaseRiskPct>ceil_pct)
+      g_log.Warn(StringFormat("Risk  | InpBaseRiskPct is %.2f%% but no trade can ever risk more than %.2f%% of capital under this envelope, so the cap will bind on every entry and the effective risk is %.2f%%. Lower the setting to stop the two numbers disagreeing, or raise InpHardDailyPct if you really want bigger positions - that widens the loss you are protecting against.",
+                 InpBaseRiskPct,ceil_pct,ceil_pct));
+
    //--- say exactly where the persistent files live, so nobody has to
    //--- hunt for the common folder. FILE_COMMON writes into the \Files
    //--- subfolder of TERMINAL_COMMONDATA_PATH.
@@ -5381,7 +5447,7 @@ void RedrawPanel()
   {
    g_vis.DrawPanel(GetPointer(g_ms),GetPointer(g_eng_e),GetPointer(g_conf),GetPointer(g_risk),
                    GetPointer(g_model),g_sig,ModeString(),g_threshold,g_last_action,
-                   g_exec.OpenCount(),NewsLine(),g_gmt);
+                   g_exec.OpenCount(),NewsLine(),g_gmt,g_vbook.Count());
   }
 
 //+------------------------------------------------------------------+
@@ -5631,6 +5697,18 @@ bool OnBarClose()
      {
       g_last_action=StringFormat("no trade - %s",(g_conf.Veto()==""?"no qualified setup":g_conf.Veto()));
       g_log.Think("DECIDE | "+g_last_action);
+      //--- A vetoed setup is still a setup: entry, stop and target are all
+      //--- real and the market will resolve it. These are the marginal
+      //--- cases the model most needs, and dropping them is what left the
+      //--- warm-up counter sitting at zero for days at a time.
+      if((InpVirtualLearning || InpDryRun) && g_sig.observable)
+        {
+         int before=g_vbook.Count();
+         g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir);
+         if(g_vbook.Count()>before)
+            g_log.Think(StringFormat("OBSERVE| watching the rejected %s setup anyway - entry %.2f sl %.2f tp %.2f (%d in the book)",
+                        SmcDirShort(g_sig.dir),g_sig.entry,g_sig.sl,g_sig.tp1,g_vbook.Count()));
+        }
       Redraw();
       return(true);
      }
@@ -5674,8 +5752,29 @@ bool OnBarClose()
         {
          string wc="";
          if(!g_risk.WorstCaseAcceptable(lots,risk_dist,wc)) { take=false; block=wc; }
-         else g_log.Think(StringFormat("SIZE   | risking %.2f (%.2f%% of the phase capital) with %.2f lots, stop %.2f away",
-                          money,money/g_risk.Initial()*100.0,lots,risk_dist));
+         else
+           {
+            //--- Three different numbers, and they are rarely the same:
+            //---   wanted   - what the base risk percent asked for
+            //---   allowed  - what the FTMO envelope permits right now
+            //---   realised - what the rounded lot size actually risks
+            //--- Reporting only one of them is how a 2.50% setting can look
+            //--- like it is working while every trade risks 0.70%.
+            double wanted =g_risk.RiskRequested(g_sig.prob);
+            double per_lot=risk_dist*g_risk.LossPerLot(1.0);
+            double realised=lots*per_lot;
+            double cap=g_risk.Initial();
+            g_log.Think(StringFormat("SIZE   | wanted %.2f (%.2f%%) | allowed %.2f (%.2f%%) by %s | %.2f lots risking %.2f (%.2f%%), stop %.2f",
+                        wanted,SmcSafeDiv(wanted,cap,0.0)*100.0,
+                        money,SmcSafeDiv(money,cap,0.0)*100.0,g_risk.RiskBinding(g_sig.prob),
+                        lots,realised,SmcSafeDiv(realised,cap,0.0)*100.0,risk_dist));
+            //--- one lot step is a bigger slice of the budget the wider the
+            //--- stop is, so a higher timeframe loses more to rounding
+            double shortfall=SmcSafeDiv(money-realised,money,0.0);
+            if(shortfall>0.20)
+               g_log.Warn(StringFormat("Sizing | the 0.01 lot step is worth %.2f on this %.2f stop, so the position risks %.2f instead of %.2f - %.0f%% under target. Wider stops lose more to rounding; a larger account is the only thing that fixes it.",
+                          0.01*per_lot,risk_dist,realised,money,shortfall*100.0));
+           }
         }
      }
 
@@ -5684,7 +5783,7 @@ bool OnBarClose()
       g_last_action="stood aside - "+block;
       g_log.Think("DECIDE | stand aside: "+block);
       //--- keep learning from what was skipped
-      if(InpVirtualLearning) g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir);
+      if(InpVirtualLearning || InpDryRun) g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir);
       Redraw();
       return(true);
      }

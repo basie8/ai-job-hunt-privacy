@@ -151,6 +151,10 @@ struct SSignal
    double            zone_bottom;
    double            idm;         // inducement guarding the zone (0 = none)
    bool              idm_taken;
+   //--- A setup complete enough to learn from, even when it was vetoed.
+   //--- Entry, stop and target are all real, so the market will resolve it
+   //--- one way or the other whether or not the agent traded it.
+   bool              observable;
   };
 
 //+------------------------------------------------------------------+

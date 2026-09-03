@@ -259,6 +259,7 @@ public:
       sig.bar_time=0;
       sig.rationale="";
       sig.model="";
+      sig.observable=false;
       m_veto="";
       m_playbook="none";
       ArrayInitialize(m_x,0.0);
@@ -410,6 +411,18 @@ public:
       double rr1=SmcSafeDiv(MathAbs(tp1-entry),risk,0.0);
       double rr2=SmcSafeDiv(MathAbs(tp2-entry),risk,0.0);
 
+      //--- From here the setup is fully formed: a real entry, a real
+      //--- invalidation and a real objective. Everything below only decides
+      //--- whether it is worth TRADING - the market resolves it either way,
+      //--- so it stays an observation the model can learn from even when the
+      //--- answer is no. Filling these in here is what lets a vetoed setup
+      //--- reach the observation book instead of being thrown away.
+      sig.dir=dir; sig.entry=entry; sig.sl=sl; sig.tp1=tp1; sig.tp2=tp2;
+      sig.rr1=rr1; sig.rr2=rr2; sig.bar_time=bt; sig.model=m_playbook;
+      sig.zone_top=zone.top; sig.zone_bottom=zone.bottom;
+      sig.idm=zone.idm; sig.idm_taken=zone.idm_taken;
+      sig.observable=true;
+
       //--- factor measurement ----------------------------------------
       BuildFactors(dir,zone,entry,sl,tp1,rr1,post_news,ne,why);
 
@@ -426,10 +439,8 @@ public:
          m_veto=StringFormat("model prices this setup at %.0f%% - too low to trade at any reward",prob*100.0);
          m_context=StringFormat("%s %s - %s. Rejected: %s",SmcDirShort(dir),m_playbook,why,m_veto);
          sig.valid=false;
-         sig.dir=dir;
          sig.prob=prob;
          sig.raw_score=score;
-         sig.rr1=rr1;
          return(false);
         }
 
@@ -442,10 +453,8 @@ public:
          m_veto=StringFormat("reward %.2fR below the %.2fR that a %.0f%% setup must earn",rr1,rr_needed,prob*100.0);
          m_context=StringFormat("%s %s - %s. Rejected: %s",SmcDirShort(dir),m_playbook,why,m_veto);
          sig.valid=false;
-         sig.dir=dir;
          sig.prob=prob;
          sig.raw_score=score;
-         sig.rr1=rr1;
          return(false);
         }
 
@@ -459,10 +468,8 @@ public:
             m_veto=StringFormat("inside the release window of %s (%+d min)",evn,mins);
             m_context=StringFormat("%s %s - %s. Rejected: %s",SmcDirShort(dir),m_playbook,why,m_veto);
             sig.valid=false;
-            sig.dir=dir;
             sig.prob=prob;
             sig.raw_score=score;
-            sig.rr1=rr1;
             return(false);
            }
         }
@@ -474,28 +481,14 @@ public:
          m_veto=StringFormat("spread %.2f is %.0f%% of the planned risk",spread,spread/risk*100.0);
          m_context=StringFormat("%s %s - %s. Rejected: %s",SmcDirShort(dir),m_playbook,why,m_veto);
          sig.valid=false;
-         sig.dir=dir;
          sig.prob=prob;
          sig.raw_score=score;
          return(false);
         }
 
       sig.valid=true;
-      sig.dir=dir;
-      sig.entry=entry;
-      sig.sl=sl;
-      sig.tp1=tp1;
-      sig.tp2=tp2;
       sig.prob=prob;
       sig.raw_score=score;
-      sig.rr1=rr1;
-      sig.rr2=rr2;
-      sig.model=m_playbook;
-      sig.bar_time=bt;
-      sig.zone_top=zone.top;
-      sig.zone_bottom=zone.bottom;
-      sig.idm=zone.idm;
-      sig.idm_taken=zone.idm_taken;
       sig.rationale=BuildRationale(dir,zone,why,t1name,rr1,prob);
       m_context=sig.rationale;
       return(true);

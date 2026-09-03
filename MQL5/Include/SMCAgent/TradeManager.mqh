@@ -153,9 +153,23 @@ public:
 
    int               Count(void) { return(ArraySize(m_dir)); }
 
+   //--- the same setup can survive several closes in a row; recording it
+   //--- once per bar would let one market moment dominate the training set
+   bool              Has(const int dir,const double entry,const double sl)
+     {
+      double tol=MathMax(MathAbs(entry)*1e-6,_Point);
+      for(int i=ArraySize(m_dir)-1;i>=0;i--)
+         if(m_dir[i]==dir && MathAbs(m_entry[i]-entry)<=tol && MathAbs(m_sl[i]-sl)<=tol)
+            return(true);
+      return(false);
+     }
+
    void              Add(const double &x[],const double entry,const double sl,const double tp,const int dir,
                          const double lots=0.0)
      {
+      if(dir==DIR_NONE || entry<=0.0 || sl<=0.0 || tp<=0.0) return;
+      if(MathAbs(entry-sl)<=0.0) return;
+      if(Has(dir,entry,sl)) return;                 // already watching this exact setup
       if(ArraySize(m_dir)>=VB_MAX) Remove(0);
       int k=ArraySize(m_dir);
       ArrayResize(m_lots,k+1);

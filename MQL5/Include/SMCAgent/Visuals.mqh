@@ -557,7 +557,7 @@ public:
    void              DrawPanel(CMarketState *ms,CSmcEngine *eng,CConfluence *conf,CRiskManager *risk,
                                COnlineLearner *model,const SSignal &sig,const string mode,
                                const double threshold,const string last_action,const int open_positions,
-                               const string news_line,const int gmt)
+                               const string news_line,const int gmt,const int watching=0)
      {
       if(!m_draw_panel) return;
       //--- MetaTrader paints foreground objects in creation order, and the
@@ -577,9 +577,12 @@ public:
           EnumToString(ms.TfEntry()),TimeToString(SmcNow(),TIME_DATE|TIME_MINUTES)),W),m_c_accent);
 
       color mode_c=(mode=="LIVE"?m_c_bull:(mode=="LOCKED"?m_c_bear:m_c_accent));
-      KV("MODE",StringFormat("%-8s  %s  acc %.0f%%  accept %.0f%%",mode,
+      //--- "watching" is the observation book: setups whose outcome the
+      //--- market has not delivered yet. Warm-up only moves when one of
+      //--- them resolves, so showing both makes a stuck counter readable.
+      KV("MODE",StringFormat("%-8s  %s  watching %d  acc %.0f%%  accept %.0f%%",mode,
          (model.IsWarm()?"model trained":StringFormat("warm-up %d/%d",(int)model.Updates(),model.WarmupNeeded())),
-         model.Accuracy()*100.0,threshold*100.0),mode_c);
+         watching,model.Accuracy()*100.0,threshold*100.0),mode_c);
 
       int pc=SmcPcGmtOffsetHours();
       KV("CLOCKS",StringFormat("srv %s GMT%+d | LDN %s | NY %s | you %s",
@@ -637,9 +640,12 @@ public:
       KV(StringFormat("FTMO P%d",risk.Phase()),
          StringFormat("day %+0.2f%%  total %+0.2f%%  target %.0f%%  days %d/%d",
          dp,risk.TotalPnLPct(),risk.TargetProgress()*100.0,risk.TradingDays(),risk.MinDays()),dc);
-      KV("FLOORS",StringFormat("soft %.2f  hard %.2f  room %.0f / %.0f",
+      //--- the per-trade ceiling belongs next to the floors that create it:
+      //--- it is what the base risk percent is actually allowed to spend
+      KV("FLOORS",StringFormat("soft %.2f  hard %.2f  room %.0f / %.0f  max/trade %.2f (%.2f%%)",
          risk.SoftDailyFloor(),risk.HardDailyFloor(),
-         risk.RemainingDailyBudget(),risk.RemainingHardBudget()),m_c_dim);
+         risk.RemainingDailyBudget(),risk.RemainingHardBudget(),
+         risk.RiskCeiling(),SmcSafeDiv(risk.RiskCeiling(),risk.Initial(),0.0)*100.0),m_c_dim);
       KV("CAPITAL",StringFormat("%.2f (%s)  eq %.2f  open risk %.0f",
          risk.Initial(),risk.CapitalSource(),risk.Equity(),risk.OpenRiskMoney()),m_c_dim);
       KV("NEWS",news_line,m_c_dim);

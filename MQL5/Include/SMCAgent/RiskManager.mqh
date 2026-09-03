@@ -274,6 +274,43 @@ public:
      }
 
    //--- money that may be risked on the next trade ----------------------
+   //--- The structural ceiling on any single trade, whatever the base risk
+   //--- percent is set to. A trade may never spend more than a third of
+   //--- what is left before the soft daily stop, nor a fifth of what is
+   //--- left before the hard floor - so on a fresh day the most any one
+   //--- trade can risk is hard_daily_pct/5 of capital, which for the FTMO
+   //--- envelope (3.5%) is 0.70%. Setting the base risk above that does
+   //--- not raise it; it just makes the cap bind on every trade.
+   double            RiskCeiling(void)
+     { return(MathMin(RemainingDailyBudget()/3.0,RemainingHardBudget()/5.0)); }
+
+   //--- what the base risk percent asks for, before the envelope trims it
+   double            RiskRequested(const double confidence)
+     {
+      double risk=m_initial*m_base_risk_pct/100.0;
+      risk*=SmcClamp(0.5+(confidence-0.55)*2.8,0.45,1.35);
+      if(m_loss_streak==1) risk*=0.75;
+      if(m_loss_streak==2) risk*=0.55;
+      if(m_loss_streak>=3) risk*=0.40;
+      double prog=TargetProgress();
+      if(prog>=0.70) risk*=0.65;
+      if(prog>=0.90) risk*=0.45;
+      return(MathMax(risk,0.0));
+     }
+
+   //--- name the constraint that actually decided the size
+   string            RiskBinding(const double confidence)
+     {
+      double want=RiskRequested(confidence);
+      double c1=RemainingDailyBudget()/3.0;
+      double c2=RemainingHardBudget()/5.0;
+      if(want<=c1 && want<=c2)
+         return(StringFormat("%.2f%% base risk",m_base_risk_pct));
+      if(c2<=c1)
+         return(StringFormat("a fifth of the %.2f left before the hard floor",RemainingHardBudget()));
+      return(StringFormat("a third of the %.2f left before the daily stop",RemainingDailyBudget()));
+     }
+
    double            RiskMoney(const double confidence)
      {
       double risk=m_initial*m_base_risk_pct/100.0;
