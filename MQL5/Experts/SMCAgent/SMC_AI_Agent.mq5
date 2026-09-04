@@ -82,6 +82,7 @@ input double InpDryRunCapital    = 100000; // Assumed phase capital while dry ru
 input bool   InpResetModel       = false;  // Discard the stored model on start
 
 input group "=== Trade management ==="
+input double InpMaxTargetR       = 6.00;   // Reject a setup whose first objective is further than this (0 = no cap)
 input double InpPartialAtR       = 1.00;   // Take partial profit at this R multiple
 input double InpPartialPercent   = 50.0;   // Percent of the position closed at that point
 input double InpBreakEvenAtR     = 1.00;   // Move the stop to break even at this R
@@ -529,7 +530,7 @@ int OnInit()
    if(InpUseNews) news_ptr=GetPointer(g_news);
    g_conf.Init(GetPointer(g_ms),GetPointer(g_eng_e),GetPointer(g_eng_m),GetPointer(g_eng_h),
                news_ptr,GetPointer(g_model),GetPointer(g_log),
-               g_gmt,InpNewsMinutesBefore,InpNewsMinutesAfter,InpNewsImportance);
+               g_gmt,InpNewsMinutesBefore,InpNewsMinutesAfter,InpNewsImportance,InpMaxTargetR);
 
    //--- per account and per symbol, so two challenges running side by side
    //--- can never inherit each other's capital, trading days or streaks
@@ -1003,7 +1004,13 @@ bool OnBarClose()
       return(true);
      }
 
-   if(g_exec.Open(g_sig.dir,lots,g_sig.sl,g_sig.tp2,comment))
+   //--- The order carries TP1 - the nearest unswept pool - because that is
+   //--- the objective the panel shows, the notification quotes, and the
+   //--- model is trained against. Sending TP2 here meant a live position
+   //--- was chasing a target no other part of the agent knew about, and
+   //--- dry run was simulating a different trade entirely. TP2 survives as
+   //--- the extended objective the trail can still reach.
+   if(g_exec.Open(g_sig.dir,lots,g_sig.sl,g_sig.tp1,comment))
      {
       ulong ticket=0,posid=0;
       for(int i=PositionsTotal()-1;i>=0;i--)

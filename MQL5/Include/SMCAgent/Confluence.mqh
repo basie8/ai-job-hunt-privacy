@@ -72,6 +72,7 @@ private:
    int               m_bias_htf;
    int               m_bias_mid;
    string            m_playbook;
+   double            m_max_target_r;   // reject an objective further than this
 
    //--- key levels of the day / week ---------------------------------
    double            m_pdh,m_pdl,m_pwh,m_pwl,m_ah,m_al;
@@ -200,6 +201,7 @@ public:
                                         m_model(NULL), m_log(NULL), m_gmt(0), m_news_block_before(15),
                                         m_news_block_after(10), m_news_importance(3), m_veto(""), m_context(""),
                                         m_bias_htf(DIR_NONE), m_bias_mid(DIR_NONE), m_playbook(""),
+                                        m_max_target_r(6.0),
                                         m_pdh(0), m_pdl(0), m_pwh(0), m_pwl(0), m_ah(0), m_al(0),
                                         m_has_day(false), m_has_week(false), m_has_asia(false)
      {
@@ -210,8 +212,10 @@ public:
 
    void              Init(CMarketState *ms,CSmcEngine *entry,CSmcEngine *mid,CSmcEngine *high,
                           CNewsFilter *news,COnlineLearner *model,CLogger *log,const int gmt_offset,
-                          const int news_before,const int news_after,const int news_importance)
+                          const int news_before,const int news_after,const int news_importance,
+                          const double max_target_r=6.0)
      {
+      m_max_target_r=max_target_r;
       m_ms=ms; m_e=entry; m_m=mid; m_h=high; m_news=news; m_model=model; m_log=log;
       m_gmt=gmt_offset;
       m_news_block_before=news_before;
@@ -219,6 +223,7 @@ public:
       m_news_importance=news_importance;
      }
 
+   void              SetMaxTargetR(const double r) { m_max_target_r=r; }
    void              SetGmtOffset(const int gmt_offset) { m_gmt=gmt_offset; }
    int               GmtOffset(void) const { return(m_gmt); }
 
@@ -422,6 +427,20 @@ public:
       sig.zone_top=zone.top; sig.zone_bottom=zone.bottom;
       sig.idm=zone.idm; sig.idm_taken=zone.idm_taken;
       sig.observable=true;
+
+      //--- An objective is only useful if price can plausibly reach it. The
+      //--- expectancy gate never demands more than 5R, so a first target
+      //--- beyond this is one the framework itself never asks for - and a
+      //--- hold that long usually outlives the observation window, so the
+      //--- model never learns from it either.
+      if(m_max_target_r>0.0 && rr1>m_max_target_r)
+        {
+         m_veto=StringFormat("nearest unswept liquidity is %.1fR away - beyond the %.1fR this framework will trade toward",
+                             rr1,m_max_target_r);
+         m_context=StringFormat("%s %s - %s. Rejected: %s",SmcDirShort(dir),m_playbook,why,m_veto);
+         BuildContextFactors(dir);
+         return(false);
+        }
 
       //--- factor measurement ----------------------------------------
       BuildFactors(dir,zone,entry,sl,tp1,rr1,post_news,ne,why);
