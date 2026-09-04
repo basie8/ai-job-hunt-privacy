@@ -637,9 +637,14 @@ public:
       Row(Rule("RISK",W),m_c_dim);
       double dp=risk.DayPnLPct();
       color dc=(dp>=0.0?m_c_bull:(dp<-2.0?m_c_bear:m_c_accent));
-      KV(StringFormat("FTMO P%d",risk.Phase()),
-         StringFormat("day %+0.2f%%  total %+0.2f%%  target %.0f%%  days %d/%d",
-         dp,risk.TotalPnLPct(),risk.TargetProgress()*100.0,risk.TradingDays(),risk.MinDays()),dc);
+      if(risk.HasTarget())
+         KV(StringFormat("FTMO P%d",risk.Phase()),
+            StringFormat("day %+0.2f%%  total %+0.2f%%  target %.0f%%  days %d/%d",
+            dp,risk.TotalPnLPct(),risk.TargetProgress()*100.0,risk.TradingDays(),risk.MinDays()),dc);
+      else
+         KV("FUNDED",
+            StringFormat("day %+0.2f%%  total %+0.2f%%  no target - trades on  days %d",
+            dp,risk.TotalPnLPct(),risk.TradingDays()),dc);
       //--- the per-trade ceiling belongs next to the floors that create it:
       //--- it is what the base risk percent is actually allowed to spend
       KV("FLOORS",StringFormat("soft %.2f  hard %.2f  room %.0f / %.0f  max/trade %.2f (%.2f%%)",

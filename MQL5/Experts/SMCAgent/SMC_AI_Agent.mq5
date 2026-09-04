@@ -48,7 +48,7 @@
 //+------------------------------------------------------------------+
 input group "=== FTMO 2-step compliance ==="
 input double InpInitialCapital   = 0.0;    // Initial simulated capital (0 = detect from the account)
-input int    InpPhase            = 1;      // Phase: 1 = Challenge (10%), 2 = Verification (5%)
+input int    InpPhase            = 1;      // Phase: 1 = Challenge (10%), 2 = Verification (5%), 3 = Funded (no target)
 input double InpTargetPct        = 0.0;    // Profit target % (0 = 10 in phase 1 / 5 in phase 2)
 input double InpDailyLossPct     = 5.0;    // FTMO maximum daily loss %
 input double InpMaxLossPct       = 10.0;   // FTMO maximum overall loss %
@@ -405,8 +405,12 @@ void Notify(const string subject,const string body)
 //+------------------------------------------------------------------+
 double PhaseTarget()
   {
+   //--- A funded account is not working toward anything: the drawdown
+   //--- limits still bind, but there is no profit level at which it should
+   //--- stop. Zero here means "no target" everywhere downstream.
+   if(InpPhase>=3) return(0.0);
    if(InpTargetPct>0.0) return(InpTargetPct);
-   return(InpPhase>=2?5.0:10.0);
+   return(InpPhase==2?5.0:10.0);
   }
 
 //+------------------------------------------------------------------+
@@ -557,6 +561,14 @@ int OnInit()
    //--- hard ceiling, and a base risk percent set above it simply never
    //--- happens - so say so at startup rather than let the log show a
    //--- 2.50%% setting quietly producing 0.70%% positions on every trade.
+   if(InpPhase<1 || InpPhase>3)
+     { g_log.Err("InpPhase must be 1 (challenge), 2 (verification) or 3 (funded)."); return(INIT_PARAMETERS_INCORRECT); }
+   if(InpPhase>=3)
+      g_log.Info("Phase | FUNDED: no profit target, so the agent never stops for reaching one. The daily and overall drawdown limits still bind exactly as they did in the challenge, and the end-of-phase risk reductions are off because there is no phase left to protect.");
+   else
+      g_log.Info(StringFormat("Phase | %d: target %.2f%% with a %d day minimum. Trading stops once the target is reached and the minimum is met.",
+                 InpPhase,PhaseTarget(),InpMinTradingDays));
+
    double ceil_pct=MathMin(InpSoftDailyPct/3.0,InpHardDailyPct/5.0);
    g_log.Info(StringFormat("Risk  | base %.2f%% per trade, scaled 0.45x-1.35x by conviction. Structural ceiling on any one trade is %.2f%% of capital (a third of the %.2f%% daily budget, a fifth of the %.2f%% hard budget) and it falls further as the day is spent.",
               InpBaseRiskPct,ceil_pct,InpSoftDailyPct,InpHardDailyPct));

@@ -2718,7 +2718,11 @@ public:
    double            SoftDailyFloor(void){ return(m_day_ref-m_initial*m_soft_daily_pct/100.0); }
    double            HardDailyFloor(void){ return(m_day_ref-m_initial*m_hard_daily_pct/100.0); }
    double            SoftMaxFloor(void)  { return(m_initial-m_initial*m_soft_max_pct/100.0);   }
-   double            TargetEquity(void)  { return(m_initial+m_initial*m_target_pct/100.0);     }
+   //--- A funded account has no profit target to reach, so there is nothing
+   //--- to stop for. Phase 3 (or any phase configured with a zero target)
+   //--- sets the bar out of reach rather than special-casing every caller.
+   bool              HasTarget(void)     { return(m_target_pct>0.0); }
+   double            TargetEquity(void)  { return(HasTarget()?m_initial+m_initial*m_target_pct/100.0:DBL_MAX); }
 
    //--- current state --------------------------------------------------
    double            Initial(void)  const { return(m_initial); }
@@ -2739,7 +2743,11 @@ public:
    double            DayPnL(void)   { return(AccountReady()?Eq()-m_day_ref:0.0); }
    double            DayPnLPct(void){ return(SmcSafeDiv(DayPnL(),m_initial,0.0)*100.0); }
    double            TotalPnLPct(void) { return(AccountReady()?SmcSafeDiv(Eq()-m_initial,m_initial,0.0)*100.0:0.0); }
-   double            TargetProgress(void) { return(SmcClamp(SmcSafeDiv(Eq()-m_initial,m_initial*m_target_pct/100.0,0.0),0.0,2.0)); }
+   //--- Zero on a funded account: the "protect a nearly finished phase" risk
+   //--- reductions in RiskMoney exist to lock in a pass, and there is no
+   //--- pass to lock in once the account is live.
+   double            TargetProgress(void)
+     { return(HasTarget()?SmcClamp(SmcSafeDiv(Eq()-m_initial,m_initial*m_target_pct/100.0,0.0),0.0,2.0):0.0); }
    int               DayTrades(void)const { return(m_day_trades); }
    int               WeekTrades(void)const{ return(m_week_trades); }
    int               TradingDays(void)const{ return(m_trading_days); }
@@ -2810,7 +2818,7 @@ public:
         { Lock(StringFormat("soft daily stop reached (%.2f%%)",m_soft_daily_pct)); reason="soft daily stop"; return(false); }
       if(e<=SoftMaxFloor())
         { Lock("protective overall drawdown reached"); reason="overall drawdown guard"; return(false); }
-      if(e>=TargetEquity() && m_trading_days>=m_min_days)
+      if(HasTarget() && e>=TargetEquity() && m_trading_days>=m_min_days)
         { reason=StringFormat("phase %d target reached (%.2f%%) - capital preservation mode",m_phase,m_target_pct); return(false); }
       if(RemainingDailyBudget()<=m_initial*0.0015)
         { reason="remaining daily budget too small for a compliant stop distance"; return(false); }
@@ -4997,9 +5005,14 @@ public:
       Row(Rule("RISK",W),m_c_dim);
       double dp=risk.DayPnLPct();
       color dc=(dp>=0.0?m_c_bull:(dp<-2.0?m_c_bear:m_c_accent));
-      KV(StringFormat("FTMO P%d",risk.Phase()),
-         StringFormat("day %+0.2f%%  total %+0.2f%%  target %.0f%%  days %d/%d",
-         dp,risk.TotalPnLPct(),risk.TargetProgress()*100.0,risk.TradingDays(),risk.MinDays()),dc);
+      if(risk.HasTarget())
+         KV(StringFormat("FTMO P%d",risk.Phase()),
+            StringFormat("day %+0.2f%%  total %+0.2f%%  target %.0f%%  days %d/%d",
+            dp,risk.TotalPnLPct(),risk.TargetProgress()*100.0,risk.TradingDays(),risk.MinDays()),dc);
+      else
+         KV("FUNDED",
+            StringFormat("day %+0.2f%%  total %+0.2f%%  no target - trades on  days %d",
+            dp,risk.TotalPnLPct(),risk.TradingDays()),dc);
       //--- the per-trade ceiling belongs next to the floors that create it:
       //--- it is what the base risk percent is actually allowed to spend
       KV("FLOORS",StringFormat("soft %.2f  hard %.2f  room %.0f / %.0f  max/trade %.2f (%.2f%%)",
@@ -5069,7 +5082,7 @@ public:
 //+------------------------------------------------------------------+
 input group "=== FTMO 2-step compliance ==="
 input double InpInitialCapital   = 0.0;    // Initial simulated capital (0 = detect from the account)
-input int    InpPhase            = 1;      // Phase: 1 = Challenge (10%), 2 = Verification (5%)
+input int    InpPhase            = 1;      // Phase: 1 = Challenge (10%), 2 = Verification (5%), 3 = Funded (no target)
 input double InpTargetPct        = 0.0;    // Profit target % (0 = 10 in phase 1 / 5 in phase 2)
 input double InpDailyLossPct     = 5.0;    // FTMO maximum daily loss %
 input double InpMaxLossPct       = 10.0;   // FTMO maximum overall loss %
@@ -5426,8 +5439,12 @@ void Notify(const string subject,const string body)
 //+------------------------------------------------------------------+
 double PhaseTarget()
   {
+   //--- A funded account is not working toward anything: the drawdown
+   //--- limits still bind, but there is no profit level at which it should
+   //--- stop. Zero here means "no target" everywhere downstream.
+   if(InpPhase>=3) return(0.0);
    if(InpTargetPct>0.0) return(InpTargetPct);
-   return(InpPhase>=2?5.0:10.0);
+   return(InpPhase==2?5.0:10.0);
   }
 
 //+------------------------------------------------------------------+
@@ -5578,6 +5595,14 @@ int OnInit()
    //--- hard ceiling, and a base risk percent set above it simply never
    //--- happens - so say so at startup rather than let the log show a
    //--- 2.50%% setting quietly producing 0.70%% positions on every trade.
+   if(InpPhase<1 || InpPhase>3)
+     { g_log.Err("InpPhase must be 1 (challenge), 2 (verification) or 3 (funded)."); return(INIT_PARAMETERS_INCORRECT); }
+   if(InpPhase>=3)
+      g_log.Info("Phase | FUNDED: no profit target, so the agent never stops for reaching one. The daily and overall drawdown limits still bind exactly as they did in the challenge, and the end-of-phase risk reductions are off because there is no phase left to protect.");
+   else
+      g_log.Info(StringFormat("Phase | %d: target %.2f%% with a %d day minimum. Trading stops once the target is reached and the minimum is met.",
+                 InpPhase,PhaseTarget(),InpMinTradingDays));
+
    double ceil_pct=MathMin(InpSoftDailyPct/3.0,InpHardDailyPct/5.0);
    g_log.Info(StringFormat("Risk  | base %.2f%% per trade, scaled 0.45x-1.35x by conviction. Structural ceiling on any one trade is %.2f%% of capital (a third of the %.2f%% daily budget, a fifth of the %.2f%% hard budget) and it falls further as the day is spent.",
               InpBaseRiskPct,ceil_pct,InpSoftDailyPct,InpHardDailyPct));

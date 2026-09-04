@@ -204,7 +204,11 @@ public:
    double            SoftDailyFloor(void){ return(m_day_ref-m_initial*m_soft_daily_pct/100.0); }
    double            HardDailyFloor(void){ return(m_day_ref-m_initial*m_hard_daily_pct/100.0); }
    double            SoftMaxFloor(void)  { return(m_initial-m_initial*m_soft_max_pct/100.0);   }
-   double            TargetEquity(void)  { return(m_initial+m_initial*m_target_pct/100.0);     }
+   //--- A funded account has no profit target to reach, so there is nothing
+   //--- to stop for. Phase 3 (or any phase configured with a zero target)
+   //--- sets the bar out of reach rather than special-casing every caller.
+   bool              HasTarget(void)     { return(m_target_pct>0.0); }
+   double            TargetEquity(void)  { return(HasTarget()?m_initial+m_initial*m_target_pct/100.0:DBL_MAX); }
 
    //--- current state --------------------------------------------------
    double            Initial(void)  const { return(m_initial); }
@@ -225,7 +229,11 @@ public:
    double            DayPnL(void)   { return(AccountReady()?Eq()-m_day_ref:0.0); }
    double            DayPnLPct(void){ return(SmcSafeDiv(DayPnL(),m_initial,0.0)*100.0); }
    double            TotalPnLPct(void) { return(AccountReady()?SmcSafeDiv(Eq()-m_initial,m_initial,0.0)*100.0:0.0); }
-   double            TargetProgress(void) { return(SmcClamp(SmcSafeDiv(Eq()-m_initial,m_initial*m_target_pct/100.0,0.0),0.0,2.0)); }
+   //--- Zero on a funded account: the "protect a nearly finished phase" risk
+   //--- reductions in RiskMoney exist to lock in a pass, and there is no
+   //--- pass to lock in once the account is live.
+   double            TargetProgress(void)
+     { return(HasTarget()?SmcClamp(SmcSafeDiv(Eq()-m_initial,m_initial*m_target_pct/100.0,0.0),0.0,2.0):0.0); }
    int               DayTrades(void)const { return(m_day_trades); }
    int               WeekTrades(void)const{ return(m_week_trades); }
    int               TradingDays(void)const{ return(m_trading_days); }
@@ -296,7 +304,7 @@ public:
         { Lock(StringFormat("soft daily stop reached (%.2f%%)",m_soft_daily_pct)); reason="soft daily stop"; return(false); }
       if(e<=SoftMaxFloor())
         { Lock("protective overall drawdown reached"); reason="overall drawdown guard"; return(false); }
-      if(e>=TargetEquity() && m_trading_days>=m_min_days)
+      if(HasTarget() && e>=TargetEquity() && m_trading_days>=m_min_days)
         { reason=StringFormat("phase %d target reached (%.2f%%) - capital preservation mode",m_phase,m_target_pct); return(false); }
       if(RemainingDailyBudget()<=m_initial*0.0015)
         { reason="remaining daily budget too small for a compliant stop distance"; return(false); }
