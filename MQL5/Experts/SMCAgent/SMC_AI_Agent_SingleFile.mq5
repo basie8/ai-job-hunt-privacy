@@ -1889,6 +1889,7 @@ private:
    datetime          m_last_refresh;
    bool              m_available;
    bool              m_use_csv;
+   bool              m_synthetic;   // no calendar at all: assumed release windows
    string            m_csv;
    string            m_currencies[];
    CLogger          *m_log;
@@ -1951,6 +1952,41 @@ private:
       return(total>0);
      }
 
+   //--- One synthetic event at a New York wall-clock hour on a given local day
+   void              PushNyWindow(const datetime ny_day_start,const double hour,const string label)
+     {
+      datetime t1=0,t2=0;
+      SmcZoneWindowToServer(TZ_NY,ny_day_start,hour,hour,m_gmt,t1,t2);
+      if(t1>0) Push(t1,label,"USD",3);
+     }
+
+   //--- Last resort when neither the MT5 calendar nor a CSV is available -
+   //--- common in the strategy tester and on some brokers. The US releases
+   //--- that move gold cluster at three New York times, so those windows
+   //--- are published as assumed high-importance events and every guard
+   //--- downstream works unchanged. It is coarse and it is honest: the
+   //--- alternative was claiming protection that did not exist.
+   bool              LoadTimeOfDay(const datetime from,const datetime to)
+     {
+      int total=0;
+      datetime day=SmcDayStart(from);
+      for(int d=0;d<20 && day<to;d++)
+        {
+         datetime utc=SmcServerToUtc(day,m_gmt);
+         int dow=SmcZoneDow(TZ_NY,utc);
+         if(dow>=1 && dow<=5)
+           {
+            datetime nyday=SmcZoneDayStart(TZ_NY,utc);
+            PushNyWindow(nyday, 8.5,"assumed 08:30 New York data window");
+            PushNyWindow(nyday,10.0,"assumed 10:00 New York data window");
+            PushNyWindow(nyday,14.0,"assumed 14:00 New York policy window");
+            total+=3;
+           }
+         day=SmcShift(day,86400);
+        }
+      return(total>0);
+     }
+
    bool              LoadFromCsv(void)
      {
       int h=FileOpen(m_csv,FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
@@ -1980,7 +2016,7 @@ private:
      }
 
 public:
-                     CNewsFilter(void): m_last_refresh(0), m_available(false), m_use_csv(false),
+                     CNewsFilter(void): m_last_refresh(0), m_available(false), m_use_csv(false), m_synthetic(false),
                                         m_csv("smc_news.csv"), m_log(NULL), m_gmt(0) {}
 
    void              Init(const string symbol,CLogger *log,const int gmt_offset,
@@ -2022,6 +2058,7 @@ public:
 
    bool              Available(void) const { return(m_available); }
    bool              UsingCsv(void)  const { return(m_use_csv);   }
+   bool              Synthetic(void) const { return(m_synthetic); }
    int               Count(void)           { return(ArraySize(m_events)); }
 
    void              Refresh(const bool force=false)
@@ -2036,6 +2073,7 @@ public:
       datetime to  =now+10*86400;
       bool ok=false;
       ResetLastError();
+      m_synthetic=false;
       ok=LoadFromCalendar(from,to);
       if(!ok)
         {
@@ -2044,12 +2082,22 @@ public:
          ok=LoadFromCsv();
          m_use_csv=ok;
         }
+      if(!ok)
+        {
+         ok=LoadTimeOfDay(from,to);
+         m_synthetic=ok;
+        }
       m_available=ok;
       SortEvents();
       if(m_log!=NULL)
         {
-         if(ok) m_log.Info(StringFormat("News: %d events loaded (%s)",ArraySize(m_events),m_use_csv?"CSV fallback":"MT5 calendar"));
-         else   m_log.Warn("News: no calendar data available - news guard degraded to time-of-day protection");
+         if(m_synthetic)
+            m_log.Warn(StringFormat("News: no calendar and no CSV. Falling back to %d assumed New York release windows (08:30, 10:00, 14:00 weekdays). This blocks entries around the times US data usually lands, but it knows nothing about what is actually scheduled - supply %s for real protection.",
+                       ArraySize(m_events),m_csv));
+         else if(ok)
+            m_log.Info(StringFormat("News: %d events loaded (%s)",ArraySize(m_events),m_use_csv?"CSV fallback":"MT5 calendar"));
+         else
+            m_log.Err("News: no calendar, no CSV, and the time-of-day fallback produced nothing. There is NO news protection on this run.");
         }
      }
 
@@ -5415,8 +5463,9 @@ string NewsLine()
   {
    if(!InpUseNews) return("calendar disabled");
    string s=g_news.Describe(SmcNow(),InpNewsImportance);
-   if(!g_news.Available()) s="calendar unavailable - "+s;
-   else if(g_news.UsingCsv()) s="[csv] "+s;
+   if(!g_news.Available())      s="calendar unavailable - "+s;
+   else if(g_news.Synthetic())  s="[assumed windows] "+s;
+   else if(g_news.UsingCsv())   s="[csv] "+s;
    return(StringFormat("%s  [GMT%+d]",s,g_gmt));
   }
 

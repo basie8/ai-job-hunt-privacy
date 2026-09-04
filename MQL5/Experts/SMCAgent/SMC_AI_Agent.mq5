@@ -442,8 +442,9 @@ string NewsLine()
   {
    if(!InpUseNews) return("calendar disabled");
    string s=g_news.Describe(SmcNow(),InpNewsImportance);
-   if(!g_news.Available()) s="calendar unavailable - "+s;
-   else if(g_news.UsingCsv()) s="[csv] "+s;
+   if(!g_news.Available())      s="calendar unavailable - "+s;
+   else if(g_news.Synthetic())  s="[assumed windows] "+s;
+   else if(g_news.UsingCsv())   s="[csv] "+s;
    return(StringFormat("%s  [GMT%+d]",s,g_gmt));
   }
 
