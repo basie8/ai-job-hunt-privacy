@@ -48,6 +48,7 @@ input bool   InpKillzonesOnly   = false;  // Only trade the London and New York 
 input double InpMaxStopUnits    = 4.0;    // Reject a stop wider than this many median candles
 input double InpMinRR           = 1.5;    // Minimum reward:risk to the first objective
 input double InpFallbackRR      = 2.0;    // If no pool lies beyond MinRR, use this measured R (0 = no trade)
+input double InpMaxTargetR      = 6.0;    // Reject a setup whose objective is further than this (0 = no cap)
 input double InpMaxSpreadPct    = 20.0;   // Reject if the spread exceeds this % of the stop
 input bool   InpRequireHtfAgree = false;  // Require the H4 swing trend to agree
 
@@ -134,6 +135,10 @@ bool      dayBlocked=false;
 
 //--- diagnostics
 int       nRaids=0,nCHoCH=0,nTrades=0,nExpired=0;
+//--- closed-trade record. How many setups fired and whether they made money
+//--- are different questions, and only the second one matters.
+int       resTrades=0,resWins=0;
+double    resGrossWin=0,resGrossLoss=0;
 string    lastNote="starting up";
 int       gmtOffset=0;
 
@@ -797,11 +802,23 @@ void ReportClose()
         }
      }
    if(have)
+     {
+      resTrades++;
+      if(pnl>=0.0) { resWins++; resGrossWin+=pnl; }
+      else         { resGrossLoss+=-pnl; }
+      double pf=(resGrossLoss>0.0?resGrossWin/resGrossLoss:0.0);
       lastNote=StringFormat("position closed: %s%.2f %s",(pnl>=0.0?"+":""),pnl,
                             AccountInfoString(ACCOUNT_CURRENCY));
+      Print("CLOSED | ",lastNote);
+      PrintFormat("       | record %dW/%dL over %d, net %+.2f, profit factor %s",
+                  resWins,resTrades-resWins,resTrades,resGrossWin-resGrossLoss,
+                  (pf>0.0?DoubleToString(pf,2):"n/a (no loss yet)"));
+     }
    else
+     {
       lastNote="position closed (result not yet in history)";
-   Print("CLOSED | ",lastNote);
+      Print("CLOSED | ",lastNote);
+     }
 
    posTicket=0; posId=0; posEntry=0; posStop=0; posTP=0; posRisk=0;
    posDir=0; posOpened=0; posBarTime=0; donePartial=false; doneBE=false;
@@ -885,6 +902,15 @@ void TrySignal()
       lastNote=StringFormat("objective %s is only %.2fR away",tname,rr);
       Print("SKIP   | ",lastNote); return;
      }
+   //--- An objective price will probably never reach is not an objective, and
+   //--- a hold that long outlives the time stop anyway - the risk is tied up
+   //--- for nothing.
+   if(InpMaxTargetR>0.0 && rr>InpMaxTargetR)
+     {
+      lastNote=StringFormat("nearest pool %s is %.1fR away - beyond the %.1fR this EA will trade toward",
+                            tname,rr,InpMaxTargetR);
+      Print("SKIP   | ",lastNote); return;
+     }
    if(!StopAllowed(mkt,tp))
      {
       lastNote=StringFormat("target %s at %.2f is inside the broker's minimum distance",tname,tp);
@@ -930,9 +956,19 @@ void TrySignal()
       AdoptPosition(true);
    nTrades++;
 
-   lastNote=StringFormat("%s %.2f lots at %.2f | stop %.2f (%.2f) | target %s %.2f | %.2fR | risk %.2f%%",
-                         (dir==DIR_BUY?"BUY":"SELL"),lots,posEntry,posStop,posRisk,tname,posTP,rr,InpRiskPercent);
+   //--- what was asked for versus what the lot step could actually deliver.
+   //--- One 0.01 step is worth the stop distance in money, so a wide stop
+   //--- loses far more of the risk budget to rounding than a tight one.
+   double perLot  =LossPerLot(dist);
+   double realised=lots*perLot;
+   lastNote=StringFormat("%s %.2f lots at %.2f | stop %.2f (%.2f) | target %s %.2f | %.2fR | risk %.2f of %.2f (%.2f%%)",
+                         (dir==DIR_BUY?"BUY":"SELL"),lots,posEntry,posStop,posRisk,tname,posTP,rr,
+                         realised,riskMoney,SafeDiv(realised,bal,0.0)*100.0);
    Print("ENTRY  | ",lastNote);
+   double shortfall=SafeDiv(riskMoney-realised,riskMoney,0.0);
+   if(shortfall>0.20)
+      PrintFormat("       | NOTE one 0.01 lot step is worth %.2f on this %.2f stop, so the position risks %.2f instead of %.2f - %.0f%% under target. Only a larger account fixes that.",
+                  0.01*perLot,dist,realised,riskMoney,shortfall*100.0);
    PrintFormat("       | raid on %s, rejection %.0f%%, CHoCH through %.2f, session %s",
                pool,qual*100.0,choch,SessionName(TimeCurrent()));
 
@@ -1291,6 +1327,18 @@ void DrawPanel()
    PanelRow(rows,cl,n,KV("Risk per trade",StringFormat("%.2f%% of balance",InpRiskPercent)),clrWhite);
    PanelRow(rows,cl,n,KV("Tally",StringFormat("%d raids | %d CHoCH | %d trades | %d unused",
             nRaids,nCHoCH,nTrades,nExpired)),clrWhite);
+   if(resTrades<=0)
+      PanelRow(rows,cl,n,KV("Results","no trade has closed yet - nothing to judge"),clrSilver);
+   else
+     {
+      double net=resGrossWin-resGrossLoss;
+      double pf =(resGrossLoss>0.0?resGrossWin/resGrossLoss:0.0);
+      PanelRow(rows,cl,n,KV("Results",StringFormat("%d closed  %dW/%dL (%.0f%%)  net %+.2f  PF %s",
+               resTrades,resWins,resTrades-resWins,
+               SafeDiv((double)resWins,(double)resTrades,0.0)*100.0,net,
+               (pf>0.0?DoubleToString(pf,2):"n/a"))),
+               net>=0.0?clrLime:clrTomato);
+     }
    PanelRow(rows,cl,n,Rule(COLS),clrDimGray);
 
    PanelRow(rows,cl,n,KV("Last decision",lastNote),clrYellow);
@@ -1455,6 +1503,8 @@ int OnInit()
      { Print("INIT   | the rejection wick is a fraction of the candle: use 0.0 to 0.99"); return(INIT_PARAMETERS_INCORRECT); }
    if(InpMaxStopUnits<=0.5)
      { Print("INIT   | the stop width cap must be more than 0.5 median candles"); return(INIT_PARAMETERS_INCORRECT); }
+   if(InpMaxTargetR>0.0 && InpMaxTargetR<InpMinRR)
+     { Print("INIT   | the target cap cannot be tighter than the minimum reward:risk"); return(INIT_PARAMETERS_INCORRECT); }
    if(InpMaxSpreadPct<=0.0)
      { Print("INIT   | a spread cap of 0% would reject every trade"); return(INIT_PARAMETERS_INCORRECT); }
    if(InpMaxDailyLossPct<=0.0)

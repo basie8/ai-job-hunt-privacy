@@ -87,6 +87,13 @@ against the limit, a running tally, and the last decision in plain words.
 reading, plus `RAID`, `CHoCH`, `ENTRY`, `SKIP`, `VOID`, `EXPIRE`, `PARTIAL`,
 `BE`, `TRAIL`, `TIME`, `CLOSED` and `BLOCK` lines. Every rejection says why.
 
+Each `ENTRY` reports the risk it asked for against the risk the rounded lot
+size actually carries, and warns when the 0.01 step costs more than a fifth of
+the budget. Each `CLOSED` carries the running record: wins, losses, net and
+profit factor. The panel shows the same record on its `Results` row - because
+how many setups fired and whether they made money are different questions, and
+only the second one decides anything.
+
 ## Install
 
 1. Copy `SMC_Raid_CHoCH.mq5` into
@@ -110,6 +117,7 @@ stop-width limit and pool set were chosen with M15 gold in mind.
 | `InpMaxStopUnits` | 4.0 | Cap how wide a stop the setup may ask for |
 | `InpMinRR` | 1.5 | Minimum reward:risk to the first pool |
 | `InpFallbackRR` | 2.0 | Set to 0 to skip trades with no pool objective |
+| `InpMaxTargetR` | 6.0 | Reject a setup whose objective sits further than this; 0 disables |
 | `InpRequireHtfAgree` | false | Demand the H4 swing trend agrees; fewer, cleaner trades |
 | `InpRiskPercent` | 0.5 | Risk per trade |
 | `InpMaxDailyLossPct` | 3.0 | Set to 3.0 or lower on a 5% daily-limit account |
