@@ -5118,6 +5118,7 @@ input int    InpNewsMinutesAfter = 10;     // Block new entries N minutes after 
 input int    InpNewsImportance   = 3;      // 1 = low, 2 = moderate, 3 = high impact only
 input bool   InpFlattenBeforeNews= true;   // Close positions before a high impact release
 input string InpNewsCsv          = "smc_news.csv"; // Fallback calendar (common files folder)
+input string InpFileTag          = "";     // Override the account tag in file names (blank = automatic)
 
 input group "=== Visuals and logging ==="
 input bool   InpShowChart        = true;   // Draw the SMC map on the chart
@@ -5473,7 +5474,8 @@ string NewsLine()
 int OnInit()
   {
    g_log.SetLevel(InpLogLevel);
-   if(InpLogToFile) g_log.OpenFile("smc_agent_log.txt");
+   string tag=AccountTag();
+   if(InpLogToFile) g_log.OpenFile(StringFormat("smc_agent_log_%s.txt",tag));
 
    g_log.Info(StringFormat("%s v%s starting on %s %s",SMC_AGENT_NAME,SMC_AGENT_VERSION,
               _Symbol,EnumToString((ENUM_TIMEFRAMES)Period())));
@@ -5535,7 +5537,10 @@ int OnInit()
    //--- The learned weights belong to a symbol AND a timeframe: setups on
    //--- M5 and on H1 have different base rates, so a single file would let
    //--- one contaminate the other if the chart period is ever changed.
-   string model_file=StringFormat("smc_agent_model_%s_%s%s.csv",_Symbol,
+   //--- The learned weights belong to an ACCOUNT, a symbol AND a timeframe.
+   //--- Setups on M5 and H1 have different base rates, and one account's
+   //--- experience is not another's.
+   string model_file=StringFormat("smc_agent_model_%s_%s_%s%s.csv",tag,_Symbol,
                                   EnumToString((ENUM_TIMEFRAMES)Period()),sfx);
    g_model.Init(F_COUNT,g_priors,GetPointer(g_log),model_file,InpWarmupSamples,-0.35,persist);
    if(optimising)
@@ -5558,8 +5563,7 @@ int OnInit()
    //--- can never inherit each other's capital, trading days or streaks
    string cap_source="";
    double capital=DetectInitialCapital(cap_source);
-   long   login=AccountInfoInteger(ACCOUNT_LOGIN);
-   string state_file=StringFormat("smc_agent_state_%s_%s%s.csv",IntegerToString(login),_Symbol,sfx);
+   string state_file=StringFormat("smc_agent_state_%s_%s%s.csv",tag,_Symbol,sfx);
 
    g_risk.Init(_Symbol,InpMagic,GetPointer(g_log),capital,InpPhase,PhaseTarget(),
                InpDailyLossPct,InpMaxLossPct,InpSoftDailyPct,InpHardDailyPct,InpSoftMaxPct,
@@ -5585,6 +5589,9 @@ int OnInit()
    //--- hunt for the common folder. FILE_COMMON writes into the \Files
    //--- subfolder of TERMINAL_COMMONDATA_PATH.
    string common=TerminalInfoString(TERMINAL_COMMONDATA_PATH)+"\\Files\\";
+   g_log.Info(StringFormat("Files | account tag '%s' (%s, login %I64d)%s",
+              tag,AccountInfoString(ACCOUNT_SERVER),AccountInfoInteger(ACCOUNT_LOGIN),
+              (InpFileTag!=""?" - overridden by InpFileTag":"")));
    g_log.Info("Files | model  "+common+model_file);
    g_log.Info("Files | state  "+common+state_file);
    if(InpLogToFile) g_log.Info("Files | log    "+common+"smc_agent_log.txt");
@@ -5807,6 +5814,46 @@ void ManagePositions()
 
 //+------------------------------------------------------------------+
 //| Guard rails that run on every tick                               |
+//+------------------------------------------------------------------+
+//| A file name fragment unique to this account.                      |
+//|                                                                   |
+//| Every persistent file lives in ONE shared common folder, so two    |
+//| terminals running the agent write to the same directory. Logins    |
+//| are only unique within a broker - account 12345 at one firm and    |
+//| 12345 at another are different accounts with the same number - so  |
+//| the trade server name is included to tell them apart. Without      |
+//| this, a demo account's learning would be loaded by a funded one.   |
+//+------------------------------------------------------------------+
+string SanitiseForFile(string s,const int maxlen)
+  {
+   string out="";
+   int n=StringLen(s);
+   for(int i=0;i<n && StringLen(out)<maxlen;i++)
+     {
+      ushort c=StringGetCharacter(s,i);
+      bool keep=((c>='0' && c<='9')||(c>='A' && c<='Z')||(c>='a' && c<='z')||c=='-');
+      out+=(keep?ShortToString(c):"_");
+     }
+   //--- collapse the runs of underscores a broker name full of spaces
+   //--- and punctuation would otherwise produce
+   while(StringReplace(out,"__","_")>0) {}
+   if(StringLen(out)>0 && StringGetCharacter(out,0)=='_') out=StringSubstr(out,1);
+   int L=StringLen(out);
+   if(L>0 && StringGetCharacter(out,L-1)=='_') out=StringSubstr(out,0,L-1);
+   return(out);
+  }
+
+string AccountTag()
+  {
+   if(InpFileTag!="") return(SanitiseForFile(InpFileTag,40));
+   long   login =AccountInfoInteger(ACCOUNT_LOGIN);
+   string server=SanitiseForFile(AccountInfoString(ACCOUNT_SERVER),24);
+   if(server=="") server=SanitiseForFile(AccountInfoString(ACCOUNT_COMPANY),24);
+   if(server=="") server="broker";
+   if(login<=0)   return(server+"_noaccount");
+   return(server+"_"+IntegerToString(login));
+  }
+
 //+------------------------------------------------------------------+
 void RiskGuards()
   {
