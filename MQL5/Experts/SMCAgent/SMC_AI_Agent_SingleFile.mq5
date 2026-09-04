@@ -4169,15 +4169,24 @@ public:
       double stops=MinStopDistance();
       if(stops>0.0)
         {
-         if(dir==DIR_BULL)
+         //--- The position was sized for THIS stop distance. Widening it here
+         //--- to satisfy the broker would quietly increase the real risk
+         //--- beyond the budget, and moving the target would change the R:R
+         //--- the expectancy gate already approved. Refuse instead - the
+         //--- setup will be reconsidered on the next close.
+         double sld=(dir==DIR_BULL?price-nsl:nsl-price);
+         double tpd=(dir==DIR_BULL?ntp-price:price-ntp);
+         if(sld<stops)
            {
-            if(price-nsl<stops) nsl=NormalizeDouble(price-stops*1.2,dg);
-            if(ntp-price<stops) ntp=NormalizeDouble(price+stops*1.2,dg);
+            if(m_log!=NULL)
+               m_log.Warn(StringFormat("Order refused: the stop is %.5f from price but this broker requires %.5f. Widening it would break the position sizing, so the trade is skipped rather than over-risked.",sld,stops));
+            return(false);
            }
-         else
+         if(tpd<stops)
            {
-            if(nsl-price<stops) nsl=NormalizeDouble(price+stops*1.2,dg);
-            if(price-ntp<stops) ntp=NormalizeDouble(price-stops*1.2,dg);
+            if(m_log!=NULL)
+               m_log.Warn(StringFormat("Order refused: the target is %.5f from price but this broker requires %.5f.",tpd,stops));
+            return(false);
            }
         }
       bool ok=(dir==DIR_BULL?m_trade.Buy(lots,m_symbol,0.0,nsl,ntp,comment)
@@ -4187,11 +4196,40 @@ public:
       return(ok);
      }
 
+   //--- A stop inside the broker's stops or freeze level is rejected by the
+   //--- server, so a break even or trail request that lands there fails
+   //--- silently and the position keeps its old stop. Check first, and say
+   //--- so, rather than let a risk reduction quietly not happen.
    bool              ModifySl(const ulong ticket,const double sl,const double tp)
      {
       if(!PositionSelectByTicket(ticket)) return(false);
-      int dg=(int)SymbolInfoInteger(m_symbol,SYMBOL_DIGITS);
-      return(m_trade.PositionModify(ticket,NormalizeDouble(sl,dg),NormalizeDouble(tp,dg)));
+      int    dg=(int)SymbolInfoInteger(m_symbol,SYMBOL_DIGITS);
+      double nsl=NormalizeDouble(sl,dg);
+      double stops=MinStopDistance();
+      long   type=PositionGetInteger(POSITION_TYPE);
+      double mkt=(type==POSITION_TYPE_BUY?SymbolInfoDouble(m_symbol,SYMBOL_BID)
+                                         :SymbolInfoDouble(m_symbol,SYMBOL_ASK));
+      double d=(type==POSITION_TYPE_BUY?mkt-nsl:nsl-mkt);
+      if(d<=0.0)
+        {
+         if(m_log!=NULL)
+            m_log.Debug(StringFormat("Stop move to %.5f skipped - price %.5f is already through it",nsl,mkt));
+         return(false);
+        }
+      if(stops>0.0 && d<stops)
+        {
+         if(m_log!=NULL)
+            m_log.Debug(StringFormat("Stop move to %.5f skipped - %.5f from price, broker needs %.5f. Will retry as price advances.",nsl,d,stops));
+         return(false);
+        }
+      if(!m_trade.PositionModify(ticket,nsl,NormalizeDouble(tp,dg)))
+        {
+         if(m_log!=NULL)
+            m_log.Warn(StringFormat("Stop move to %.5f rejected: %d %s",nsl,
+                       m_trade.ResultRetcode(),m_trade.ResultRetcodeDescription()));
+         return(false);
+        }
+      return(true);
      }
 
    bool              PartialClose(const ulong ticket,const double volume)
@@ -5665,10 +5703,18 @@ void ManagePositions()
          if(g_exec.PartialClose(t,part))
            {
             g_journal.SetPartial(i);
-            g_log.Think(StringFormat("MANAGE | +%.2fR reached, %.0f%% closed on #%s, remainder runs to the second pool",
+            g_log.Think(StringFormat("MANAGE | +%.2fR reached, %.0f%% closed on #%s, remainder runs to the objective",
                         r,InpPartialPercent,IntegerToString((long)t)));
            }
-         else g_journal.SetPartial(i);
+         else
+           {
+            //--- marked done either way so it is not retried every tick, but
+            //--- a silent failure here is a position carrying full size to
+            //--- its stop when it was meant to be half off
+            g_journal.SetPartial(i);
+            g_log.Warn(StringFormat("Partial close of %.2f lots on #%s did not go through - the position keeps full size",
+                       part,IntegerToString((long)t)));
+           }
         }
 
       //--- 2 break even

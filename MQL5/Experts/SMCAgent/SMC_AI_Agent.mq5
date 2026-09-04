@@ -730,10 +730,18 @@ void ManagePositions()
          if(g_exec.PartialClose(t,part))
            {
             g_journal.SetPartial(i);
-            g_log.Think(StringFormat("MANAGE | +%.2fR reached, %.0f%% closed on #%s, remainder runs to the second pool",
+            g_log.Think(StringFormat("MANAGE | +%.2fR reached, %.0f%% closed on #%s, remainder runs to the objective",
                         r,InpPartialPercent,IntegerToString((long)t)));
            }
-         else g_journal.SetPartial(i);
+         else
+           {
+            //--- marked done either way so it is not retried every tick, but
+            //--- a silent failure here is a position carrying full size to
+            //--- its stop when it was meant to be half off
+            g_journal.SetPartial(i);
+            g_log.Warn(StringFormat("Partial close of %.2f lots on #%s did not go through - the position keeps full size",
+                       part,IntegerToString((long)t)));
+           }
         }
 
       //--- 2 break even
