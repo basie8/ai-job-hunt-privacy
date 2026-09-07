@@ -148,4 +148,52 @@ for cap in sorted(shortfall):
     v=shortfall[cap]
     print(f"  {cap:>7,}: min {min(v)*100:5.1f}%  mean {sum(v)/len(v)*100:5.1f}%  max {max(v)*100:5.1f}%  of intended")
 print()
+
+# ---------------------------------------------------------------------------
+# INV6: the ORDER must not silently change what was sized.
+#
+# CTradeExec::Open() used to widen a stop that sat inside the broker's stops
+# level, and push out a target that sat too close. The position had already
+# been sized for the original distance, so widening it raised the real risk
+# above the budget - the one path where every check above could pass and the
+# trade still be over-risked. Open() now refuses instead. This models both
+# behaviours and asserts the refusing one holds the invariant.
+# ---------------------------------------------------------------------------
+def open_widening(sl, stops):          # the OLD behaviour
+    return max(sl, stops*1.2) if stops>0 and sl<stops else sl
+def open_refusing(sl, stops):          # the CURRENT behaviour: None = refused
+    return None if (stops>0 and sl<stops) else sl
+
+STOPS_LEVELS=[0.0, 0.10, 0.30, 0.50, 1.00]   # gold: 0 to 100 points
+ts,tv,vmin,vmax,vstep = BROKERS["standard gold  (tick .01 / val 1.00 / min .01 / step .01)"]
+old_overrisk=0; new_overrisk=0; refused=0; sent=0
+for cap in CAPITALS:
+    r=Risk(cap)
+    # Deliberately include stops TIGHTER than the broker minimums below, or
+    # the widening path is never reached and the test proves nothing.
+    TIGHT=[0.15,0.25,0.40,0.60,0.90,1.20]+STOPS
+    for stop,conf,streak in itertools.product(TIGHT,CONFS,STREAKS):
+        budget=r.risk_money(cap,cap,conf,streak,0.0)
+        l=lots(budget,stop,ts,tv,vmin,vmax,vstep,free_margin=cap*0.98)
+        if l==0.0: continue
+        for stops in STOPS_LEVELS:
+            eff=open_widening(stop,stops)
+            if l*(eff/ts)*tv > budget*(1+1e-9)+1e-6: old_overrisk+=1
+            eff=open_refusing(stop,stops)
+            if eff is None:
+                refused+=1
+                continue
+            sent+=1
+            actual=l*(eff/ts)*tv
+            if actual > budget*(1+1e-9)+1e-6:
+                new_overrisk+=1
+                fails.append(f"cap{cap} stop{stop} stopslevel{stops}: order over-risked after send")
+
+print()
+print("Order-send integrity (INV6), across 5 broker stops levels:")
+print(f"  orders sent            : {sent:,}")
+print(f"  orders refused         : {refused:,}  (stop inside the broker minimum)")
+print(f"  over-risked, OLD widen : {old_overrisk:,}   <- the defect that was fixed")
+print(f"  over-risked, NEW refuse: {new_overrisk:,}")
+print()
 print("RESULT:", "ALL INVARIANTS HOLD" if not fails else f"{len(fails)} FAILURES")
