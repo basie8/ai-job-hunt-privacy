@@ -66,6 +66,10 @@
 #define SMC_META_SWEEP         16   // the setup was triggered by a liquidity raid
 #define SMC_META_HTF_ALIGN     32   // the higher timeframe agreed with the trade
 #define SMC_META_POST_NEWS     64   // within an hour of a high impact release
+//--- The sequence, not the current state: an unconfirmed CHoCH the trade's
+//--- way, reversed by a CHoCH the other way with no BOS in between. The
+//--- reversal broke a low made inside the unconfirmed leg - inducement.
+#define SMC_META_CHOCH_FAILED 128
 
 //+------------------------------------------------------------------+
 //| Confirmed swing point                                            |
@@ -384,6 +388,7 @@ string SmcLiqStr(const int kind)
 string SmcMetaStr(const int m)
   {
    string s="";
+   if((m&SMC_META_CHOCH_FAILED)!=0)      s+="failed-CHoCH ";
    if((m&SMC_META_CHOCH_CONF)!=0)        s+="CHoCH+BOS ";
    else if((m&SMC_META_CHOCH_UNCONF)!=0) s+="CHoCH-unconfirmed ";
    if((m&SMC_META_SWEEP)!=0)             s+="raid ";

@@ -110,6 +110,10 @@
 #define SMC_META_SWEEP         16   // the setup was triggered by a liquidity raid
 #define SMC_META_HTF_ALIGN     32   // the higher timeframe agreed with the trade
 #define SMC_META_POST_NEWS     64   // within an hour of a high impact release
+//--- The sequence, not the current state: an unconfirmed CHoCH the trade's
+//--- way, reversed by a CHoCH the other way with no BOS in between. The
+//--- reversal broke a low made inside the unconfirmed leg - inducement.
+#define SMC_META_CHOCH_FAILED 128
 
 //+------------------------------------------------------------------+
 //| Confirmed swing point                                            |
@@ -428,6 +432,7 @@ string SmcLiqStr(const int kind)
 string SmcMetaStr(const int m)
   {
    string s="";
+   if((m&SMC_META_CHOCH_FAILED)!=0)      s+="failed-CHoCH ";
    if((m&SMC_META_CHOCH_CONF)!=0)        s+="CHoCH+BOS ";
    else if((m&SMC_META_CHOCH_UNCONF)!=0) s+="CHoCH-unconfirmed ";
    if((m&SMC_META_SWEEP)!=0)             s+="raid ";
@@ -1821,6 +1826,42 @@ public:
      { if(i<0 || i>=ArraySize(m_zones)) return(false); z=m_zones[i]; return(true); }
 
    int               EventCount(void) { return(ArraySize(m_events)); }
+
+   //--- A change of character in `dir` that never earned a BOS to confirm
+   //--- it, immediately reversed by a change of character the other way.
+   //---
+   //--- This matters because of WHERE the reversal broke. The low it took
+   //--- out was created INSIDE the unconfirmed leg - it is where everyone
+   //--- who entered on the first CHoCH placed their stop. Running it is
+   //--- inducement, not a genuine reversal, which is why price so often
+   //--- turns and runs the original way immediately afterwards.
+   //---
+   //--- Contrast a CHoCH that DID earn a BOS: the low broken then belongs
+   //--- to an established trend, and breaking it is a real change.
+   //---
+   //--- Recorded as diagnostic context, never scored. Whether the two
+   //--- resolve differently is exactly the open question.
+   bool              FailedChoch(const int dir)
+     {
+      if(dir==DIR_NONE) return(false);
+      int n=ArraySize(m_events);
+      int last=-1,prev=-1;
+      for(int i=n-1;i>=0;i--)
+        {
+         if(m_events[i].internal || m_events[i].kind!=EV_CHOCH) continue;
+         if(last<0) { last=i; continue; }
+         prev=i; break;
+        }
+      if(last<0 || prev<0) return(false);
+      //--- the latest CHoCH must oppose the trade, the one before it agree
+      if(m_events[last].dir==dir)  return(false);
+      if(m_events[prev].dir!=dir)  return(false);
+      //--- and nothing may have confirmed that earlier one in between
+      for(int i=prev+1;i<last;i++)
+         if(!m_events[i].internal && m_events[i].kind==EV_BOS && m_events[i].dir==dir)
+            return(false);
+      return(true);
+     }
    bool              GetEvent(const int i,SStructEvent &e)
      { if(i<0 || i>=ArraySize(m_events)) return(false); e=m_events[i]; return(true); }
 
@@ -3658,6 +3699,7 @@ public:
          bool bos_after=(m_e.LastBosDir()==dir && m_e.LastBosTime()>=m_e.LastChochTime());
          meta|=(bos_after?SMC_META_CHOCH_CONF:SMC_META_CHOCH_UNCONF);
         }
+      if(m_e.FailedChoch(dir))                    meta|=SMC_META_CHOCH_FAILED;
       if(zone.idm>0.0)                            meta|=SMC_META_IDM_PRESENT;
       if(zone.idm_taken)                          meta|=SMC_META_IDM_TAKEN;
       if(m_e.SweepValid() && m_e.SweepDir()==dir) meta|=SMC_META_SWEEP;

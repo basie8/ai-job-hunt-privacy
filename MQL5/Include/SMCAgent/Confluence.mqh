@@ -471,6 +471,7 @@ public:
          bool bos_after=(m_e.LastBosDir()==dir && m_e.LastBosTime()>=m_e.LastChochTime());
          meta|=(bos_after?SMC_META_CHOCH_CONF:SMC_META_CHOCH_UNCONF);
         }
+      if(m_e.FailedChoch(dir))                    meta|=SMC_META_CHOCH_FAILED;
       if(zone.idm>0.0)                            meta|=SMC_META_IDM_PRESENT;
       if(zone.idm_taken)                          meta|=SMC_META_IDM_TAKEN;
       if(m_e.SweepValid() && m_e.SweepDir()==dir) meta|=SMC_META_SWEEP;

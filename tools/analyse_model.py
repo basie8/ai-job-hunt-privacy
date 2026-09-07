@@ -52,7 +52,8 @@ META = [(1,  "CHoCH confirmed by BOS"),
         (8,  "inducement had been run"),
         (16, "triggered by a liquidity raid"),
         (32, "higher timeframe aligned"),
-        (64, "post-news")]
+        (64, "post-news"),
+        (128,"failed CHoCH (inducement sweep)")]
 
 
 def wilson(k, n):
@@ -86,6 +87,22 @@ def structural_split(S):
         lo, hi = wilson(k, len(grp))
         print(f"    {name:<32}{len(grp):>5}{k:>6}{k/len(grp)*100:>7.0f}%"
               f"{lo*100:>10.0f}%-{hi*100:.0f}%")
+
+    # the specific claim: a failed CHoCH is inducement, so it should
+    # resolve BETTER than the ordinary confirmed-reversal case
+    fail = [r for r in tagged if r[3] & 128]
+    norm = [r for r in tagged if not (r[3] & 128)]
+    if len(fail) >= 10 and len(norm) >= 10:
+        kf, kn = sum(1 for r in fail if r[1] > 0.5), sum(1 for r in norm if r[1] > 0.5)
+        rf, rn = kf/len(fail), kn/len(norm)
+        lo_f, hi_f = wilson(kf, len(fail))
+        lo_n, hi_n = wilson(kn, len(norm))
+        print(f"\n  Failed CHoCH {rf*100:.0f}% (n={len(fail)}) vs everything else"
+              f" {rn*100:.0f}% (n={len(norm)}), {rf*100-rn*100:+.0f} points")
+        if hi_f < lo_n or hi_n < lo_f:
+            print("  Intervals separate - the inducement reading is supported.")
+        else:
+            print("  Intervals overlap - not evidence yet. Keep collecting.")
 
     conf = [r for r in tagged if r[3] & 1]
     unc  = [r for r in tagged if r[3] & 2]
