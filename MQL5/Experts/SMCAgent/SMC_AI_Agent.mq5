@@ -980,7 +980,12 @@ bool OnBarClose()
    string block="";
    bool   take=true;
 
-   if(g_sig.prob<g_threshold) { take=false; block=StringFormat("probability %.0f%% below the %.0f%% the agent requires now",g_sig.prob*100.0,g_threshold*100.0); }
+   bool blocked_by_model=false;
+   if(g_sig.prob<g_threshold)
+     {
+      take=false; blocked_by_model=true;
+      block=StringFormat("probability %.0f%% below the %.0f%% the agent requires now",g_sig.prob*100.0,g_threshold*100.0);
+     }
 
    string rreason="";
    if(take && !g_risk.CanOpen(rreason)) { take=false; block="risk envelope: "+rreason; }
@@ -1040,8 +1045,12 @@ bool OnBarClose()
      {
       g_last_action="stood aside - "+block;
       g_log.Think("DECIDE | stand aside: "+block);
-      //--- keep learning from what was skipped
-      if(InpVirtualLearning || InpDryRun) g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir);
+      //--- Keep learning from what was skipped - unless the model itself is
+      //--- what skipped it. Training on your own refusals is circular: the
+      //--- book fills with setups the model disliked, they mostly lose, the
+      //--- bias sinks, and fewer setups clear the bar next time.
+      if((InpVirtualLearning || InpDryRun) && !blocked_by_model)
+         g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir);
       Redraw();
       return(true);
      }

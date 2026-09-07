@@ -426,13 +426,14 @@ public:
       sig.rr1=rr1; sig.rr2=rr2; sig.bar_time=bt; sig.model=m_playbook;
       sig.zone_top=zone.top; sig.zone_bottom=zone.bottom;
       sig.idm=zone.idm; sig.idm_taken=zone.idm_taken;
-      sig.observable=true;
-
       //--- An objective is only useful if price can plausibly reach it. The
       //--- expectancy gate never demands more than 5R, so a first target
       //--- beyond this is one the framework itself never asks for - and a
-      //--- hold that long usually outlives the observation window, so the
-      //--- model never learns from it either.
+      //--- hold that long usually outlives the observation window.
+      //---
+      //--- Judged BEFORE the signal is marked observable: this branch returns
+      //--- with only the context vector built, so booking it would put a
+      //--- half-empty feature row into the training set.
       if(m_max_target_r>0.0 && rr1>m_max_target_r)
         {
          m_veto=StringFormat("nearest unswept liquidity is %.1fR away - beyond the %.1fR this framework will trade toward",
@@ -441,6 +442,8 @@ public:
          BuildContextFactors(dir);
          return(false);
         }
+
+      sig.observable=true;
 
       //--- factor measurement ----------------------------------------
       BuildFactors(dir,zone,entry,sl,tp1,rr1,post_news,ne,why);
@@ -455,6 +458,12 @@ public:
       //--- is really the model refusing the setup. Say what is true.
       if(prob<0.35)
         {
+         //--- The model's own verdict is not evidence about the market. Booking
+         //--- it would let a rejection train the rejection: probabilities fall,
+         //--- more setups are refused, the refused ones dominate the book, and
+         //--- the bias walks to its clamp. That is the loop that collapsed the
+         //--- first model, and feeding vetoed setups back re-created it.
+         sig.observable=false;
          m_veto=StringFormat("model prices this setup at %.0f%% - too low to trade at any reward",prob*100.0);
          m_context=StringFormat("%s %s - %s. Rejected: %s",SmcDirShort(dir),m_playbook,why,m_veto);
          sig.valid=false;
