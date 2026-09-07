@@ -270,6 +270,7 @@ public:
       sig.rationale="";
       sig.model="";
       sig.observable=false;
+      sig.meta=0;
       m_veto="";
       m_playbook="none";
       ArrayInitialize(m_x,0.0);
@@ -454,6 +455,28 @@ public:
       sig.rr1=rr1; sig.rr2=rr2; sig.bar_time=bt; sig.model=m_playbook;
       sig.zone_top=zone.top; sig.zone_bottom=zone.bottom;
       sig.idm=zone.idm; sig.idm_taken=zone.idm_taken;
+
+      //--- Structural context, recorded but never scored. The distinction
+      //--- that matters here is CONF vs UNCONF: a CHoCH confirmed by a
+      //--- later BOS means the next low down is a structural low of an
+      //--- established trend, so breaking it is a genuine reversal. An
+      //--- unconfirmed CHoCH means that low was created inside the
+      //--- unconfirmed leg - it is where the early entrants put their
+      //--- stops, which makes running it inducement rather than reversal.
+      //--- The agent currently treats both sweeps identically. Whether it
+      //--- should is an empirical question, and this is how it gets asked.
+      int meta=0;
+      if(m_e.LastChochDir()==dir)
+        {
+         bool bos_after=(m_e.LastBosDir()==dir && m_e.LastBosTime()>=m_e.LastChochTime());
+         meta|=(bos_after?SMC_META_CHOCH_CONF:SMC_META_CHOCH_UNCONF);
+        }
+      if(zone.idm>0.0)                            meta|=SMC_META_IDM_PRESENT;
+      if(zone.idm_taken)                          meta|=SMC_META_IDM_TAKEN;
+      if(m_e.SweepValid() && m_e.SweepDir()==dir) meta|=SMC_META_SWEEP;
+      if(m_bias_htf==dir)                         meta|=SMC_META_HTF_ALIGN;
+      if(post_news)                               meta|=SMC_META_POST_NEWS;
+      sig.meta=meta;
       //--- An objective is only useful if price can plausibly reach it. The
       //--- expectancy gate never demands more than 5R, so a first target
       //--- beyond this is one the framework itself never asks for - and a

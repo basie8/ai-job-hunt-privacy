@@ -38,8 +38,73 @@ def parse(path):
                 if len(f) >= 4: P[i] = float(f[3])
             elif f[0] == "S" and len(f) >= 4:
                 xs = [float(v) for v in f[3].split(",")]
-                S.append((xs, float(f[1]), float(f[2])))
+                # 5th column is the SMC_META_* structural bitfield. Files
+                # written before it existed simply do not have one.
+                meta = int(f[4]) if len(f) >= 5 and f[4].strip() else 0
+                S.append((xs, float(f[1]), float(f[2]), meta))
     return head, W, P, S
+
+
+# --- structural context flags, mirroring Defs.mqh -------------------
+META = [(1,  "CHoCH confirmed by BOS"),
+        (2,  "CHoCH unconfirmed (no BOS)"),
+        (4,  "zone carried an inducement"),
+        (8,  "inducement had been run"),
+        (16, "triggered by a liquidity raid"),
+        (32, "higher timeframe aligned"),
+        (64, "post-news")]
+
+
+def wilson(k, n):
+    """95% interval for a win rate. Small samples look decisive; this says otherwise."""
+    if n == 0: return (0.0, 1.0)
+    p, z = k/n, 1.96
+    d = 1 + z*z/n
+    c = (p + z*z/(2*n)) / d
+    h = z*math.sqrt(p*(1-p)/n + z*z/(4*n*n)) / d
+    return (max(0.0, c-h), min(1.0, c+h))
+
+
+def structural_split(S):
+    """Does a structural flag separate winners from losers? The question the
+    logging exists to answer - and the honest answer is usually 'not yet'."""
+    print("\n" + "-"*76)
+    print("  STRUCTURAL CONTEXT vs OUTCOME")
+    print("-"*76)
+    tagged = [r for r in S if len(r) > 3 and r[3] != 0]
+    if not tagged:
+        print("  No structural context recorded yet. These flags are written by")
+        print("  builds from 2026-09 onward; older observations carry none.")
+        print("  Keep running - the split appears once tagged setups resolve.")
+        return
+    print(f"  {len(tagged)} of {len(S)} stored setups carry structural context.\n")
+    print(f"    {'flag':<32}{'n':>5}{'won':>6}{'rate':>8}{'95% interval':>18}")
+    for bit, name in META:
+        grp = [r for r in tagged if r[3] & bit]
+        if not grp: continue
+        k = sum(1 for r in grp if r[1] > 0.5)
+        lo, hi = wilson(k, len(grp))
+        print(f"    {name:<32}{len(grp):>5}{k:>6}{k/len(grp)*100:>7.0f}%"
+              f"{lo*100:>10.0f}%-{hi*100:.0f}%")
+
+    conf = [r for r in tagged if r[3] & 1]
+    unc  = [r for r in tagged if r[3] & 2]
+    if len(conf) >= 10 and len(unc) >= 10:
+        kc, ku = sum(1 for r in conf if r[1] > 0.5), sum(1 for r in unc if r[1] > 0.5)
+        rc, ru = kc/len(conf), ku/len(unc)
+        lo_c, hi_c = wilson(kc, len(conf))
+        lo_u, hi_u = wilson(ku, len(unc))
+        print(f"\n  Confirmed {rc*100:.0f}% vs unconfirmed {ru*100:.0f}%"
+              f" ({rc*100-ru*100:+.0f} points)")
+        if hi_c < lo_u or hi_u < lo_c:
+            print("  The intervals do NOT overlap - this separation is real. Worth")
+            print("  promoting to a model feature, accepting that it resets the model.")
+        else:
+            print("  The intervals overlap, so this is not yet evidence of anything.")
+            print("  Do not act on it. Collect more before drawing a conclusion.")
+    else:
+        print("\n  Fewer than 10 in one arm - no comparison attempted. Both arms need")
+        print("  at least 10 resolved setups before the split says anything at all.")
 
 def corr(a, b):
     n = len(a)
@@ -115,6 +180,9 @@ def main(path):
         print(f"  Only {len(S)} resolved setups stored - too few to test anything.")
         print("  Come back at 50, and treat 100+ as the point where it starts to mean")
         print("  something. Nothing below is worth computing yet.")
+        tagged = sum(1 for r in S if len(r) > 3 and r[3] != 0)
+        # not inference, just proof the plumbing works
+        print(f"  ({tagged} of them carry structural context)")
         print("-"*76)
         return 0
 
@@ -163,6 +231,7 @@ def main(path):
         v = buckets[b]
         if len(v) < 3: continue
         print(f"    {b*10:>3}-{b*10+10:<9}{len(v):>5}{sum(v)/len(v)*100:>14.0f}%")
+    structural_split(S)
     print("\n  Well calibrated means those two columns track each other. A model that")
     print("  says 70% and wins 40% of the time is confidently wrong, and the")
     print("  expectancy gate will size positions on that error.")

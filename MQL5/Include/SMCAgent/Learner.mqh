@@ -51,6 +51,7 @@ private:
    double            m_mem_x[];              // flattened [i*m_n + f]
    double            m_mem_y[];
    double            m_mem_w[];
+   int               m_mem_meta[];           // SMC_META_* context, carried but never trained on
    int               m_mem_cnt;
    int               m_mem_head;
 
@@ -103,9 +104,11 @@ public:
       ArrayResize(m_mem_x,LRN_MEMORY*m_n);
       ArrayResize(m_mem_y,LRN_MEMORY);
       ArrayResize(m_mem_w,LRN_MEMORY);
+      ArrayResize(m_mem_meta,LRN_MEMORY);
       ArrayInitialize(m_mem_x,0.0);
       ArrayInitialize(m_mem_y,0.0);
       ArrayInitialize(m_mem_w,0.0);
+      ArrayInitialize(m_mem_meta,0);
       m_mem_cnt=0; m_mem_head=0;
      }
 
@@ -180,7 +183,7 @@ public:
      }
 
    //--- one supervised update: y = 1 (target reached) / 0 (stopped) ---
-   void              Learn(const double &x[],const double y,const double sample_weight=1.0)
+   void              Learn(const double &x[],const double y,const double sample_weight=1.0,const int meta=0)
      {
       if(m_n<=0) return;
       //--- Class balancing. A stream that is 90% one label drags the bias
@@ -234,16 +237,17 @@ public:
       if((p>=0.5 && y>0.5) || (p<0.5 && y<0.5)) m_correct++;
       m_acc=SmcSafeDiv((double)m_correct,(double)m_scored,0.0);
 
-      Remember(x,y,sample_weight);
+      Remember(x,y,sample_weight,meta);
      }
 
    //--- store into the replay memory ----------------------------------
-   void              Remember(const double &x[],const double y,const double w)
+   void              Remember(const double &x[],const double y,const double w,const int meta=0)
      {
       int slot=m_mem_head;
       for(int i=0;i<m_n;i++) m_mem_x[slot*m_n+i]=(i<ArraySize(x)?x[i]:0.0);
       m_mem_y[slot]=y;
       m_mem_w[slot]=w;
+      m_mem_meta[slot]=meta;
       m_mem_head=(m_mem_head+1)%LRN_MEMORY;
       if(m_mem_cnt<LRN_MEMORY) m_mem_cnt++;
      }
@@ -285,7 +289,7 @@ public:
         {
          string row="";
          for(int i=0;i<m_n;i++) row+=DoubleToString(m_mem_x[s*m_n+i],6)+(i<m_n-1?",":"");
-         FileWrite(h,"S",DoubleToString(m_mem_y[s],3),DoubleToString(m_mem_w[s],3),row);
+         FileWrite(h,"S",DoubleToString(m_mem_y[s],3),DoubleToString(m_mem_w[s],3),row,(string)m_mem_meta[s]);
         }
       FileClose(h);
       return(true);
@@ -329,7 +333,8 @@ public:
             double xb[];
             ArrayResize(xb,m_n);
             for(int i=0;i<m_n;i++) xb[i]=StringToDouble(xs[i]);
-            Remember(xb,StringToDouble(p[1]),StringToDouble(p[2]));
+            int mt=(k>=5?(int)StringToInteger(p[4]):0);   // files written before this column default to 0
+            Remember(xb,StringToDouble(p[1]),StringToDouble(p[2]),mt);
            }
         }
       FileClose(h);

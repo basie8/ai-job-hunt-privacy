@@ -48,6 +48,25 @@
 #define EV_BOS    0
 #define EV_CHOCH  1
 
+//--- Structural context recorded alongside every observation.
+//---
+//--- These are deliberately NOT model features. Adding a feature changes
+//--- F_COUNT, which every stored model file is keyed to, and would reset
+//--- all accumulated learning. This is a diagnostic channel instead: it
+//--- rides along with each resolved observation so a hypothesis about
+//--- structure can be TESTED against real outcomes before anyone decides
+//--- it deserves a weight of its own.
+//---
+//--- CONF and UNCONF are mutually exclusive, and neither is set when there
+//--- is no CHoCH in the trade direction at all - three states, not two.
+#define SMC_META_CHOCH_CONF     1   // entry CHoCH confirmed by a later BOS the same way
+#define SMC_META_CHOCH_UNCONF   2   // CHoCH in the trade direction, no BOS since
+#define SMC_META_IDM_PRESENT    4   // the engaged zone carried an inducement
+#define SMC_META_IDM_TAKEN      8   // that inducement had been run
+#define SMC_META_SWEEP         16   // the setup was triggered by a liquidity raid
+#define SMC_META_HTF_ALIGN     32   // the higher timeframe agreed with the trade
+#define SMC_META_POST_NEWS     64   // within an hour of a high impact release
+
 //+------------------------------------------------------------------+
 //| Confirmed swing point                                            |
 //+------------------------------------------------------------------+
@@ -151,6 +170,9 @@ struct SSignal
    double            zone_bottom;
    double            idm;         // inducement guarding the zone (0 = none)
    bool              idm_taken;
+   //--- SMC_META_* bitfield: structural context for diagnostics only,
+   //--- never a model input. See the constants above.
+   int               meta;
    //--- A setup complete enough to learn from, even when it was vetoed.
    //--- Entry, stop and target are all real, so the market will resolve it
    //--- one way or the other whether or not the agent traded it.
@@ -353,6 +375,24 @@ string SmcLiqStr(const int kind)
       case LQ_IDM:     return("IDM");
      }
    return("LQ");
+  }
+
+
+//+------------------------------------------------------------------+
+//| Human readable structural context, for the log and the journal   |
+//+------------------------------------------------------------------+
+string SmcMetaStr(const int m)
+  {
+   string s="";
+   if((m&SMC_META_CHOCH_CONF)!=0)        s+="CHoCH+BOS ";
+   else if((m&SMC_META_CHOCH_UNCONF)!=0) s+="CHoCH-unconfirmed ";
+   if((m&SMC_META_SWEEP)!=0)             s+="raid ";
+   if((m&SMC_META_IDM_PRESENT)!=0)       s+=((m&SMC_META_IDM_TAKEN)!=0?"IDM-taken ":"IDM-resting ");
+   if((m&SMC_META_HTF_ALIGN)!=0)         s+="HTF-aligned ";
+   if((m&SMC_META_POST_NEWS)!=0)         s+="post-news ";
+   if(s=="") return("-");
+   StringTrimRight(s);
+   return(s);
   }
 
 #endif // __SMC_DEFS_MQH__

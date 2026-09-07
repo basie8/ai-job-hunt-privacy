@@ -710,7 +710,7 @@ void HarvestClosedTrades()
       double x[];
       g_journal.Vector(i,x);
       double y=(profit>0.0?1.0:0.0);
-      g_model.Learn(x,y,1.0);
+      g_model.Learn(x,y,1.0,g_journal.Meta(i));
       g_model.Replay(1);
       g_model.Save();
       g_risk.OnTradeClosed(profit);
@@ -718,8 +718,9 @@ void HarvestClosedTrades()
          Notify(StringFormat("closed %+.2f",profit),
                 StringFormat("day %+.2f%%  total %+.2f%%  equity %.2f",
                 g_risk.DayPnLPct(),g_risk.TotalPnLPct(),g_risk.Equity()));
-      g_log.Think(StringFormat("LEARN | real trade #%s closed at %.2f -> label %s | model acc %.0f%% after %d updates",
-                  IntegerToString((long)t),profit,(y>0.5?"WIN":"LOSS"),g_model.Accuracy()*100.0,(int)g_model.Updates()));
+      g_log.Think(StringFormat("LEARN | real trade #%s closed at %.2f -> label %s [%s] | model acc %.0f%% after %d updates",
+                  IntegerToString((long)t),profit,(y>0.5?"WIN":"LOSS"),SmcMetaStr(g_journal.Meta(i)),
+                  g_model.Accuracy()*100.0,(int)g_model.Updates()));
       g_journal.Remove(i);
      }
   }
@@ -965,7 +966,7 @@ bool OnBarClose()
       if((InpVirtualLearning || InpDryRun) && g_sig.observable)
         {
          int before=g_vbook.Count();
-         g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir);
+         g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,0.0,g_sig.meta);
          if(g_vbook.Count()>before)
             g_log.Think(StringFormat("OBSERVE| watching the rejected %s setup anyway - entry %.2f sl %.2f tp %.2f (%d in the book)",
                         SmcDirShort(g_sig.dir),g_sig.entry,g_sig.sl,g_sig.tp1,g_vbook.Count()));
@@ -1047,13 +1048,13 @@ bool OnBarClose()
    if(!take)
      {
       g_last_action="stood aside - "+block;
-      g_log.Think("DECIDE | stand aside: "+block);
+      g_log.Think("DECIDE | stand aside: "+block+"  [structure: "+SmcMetaStr(g_sig.meta)+"]");
       //--- Keep learning from what was skipped - unless the model itself is
       //--- what skipped it. Training on your own refusals is circular: the
       //--- book fills with setups the model disliked, they mostly lose, the
       //--- bias sinks, and fewer setups clear the bar next time.
       if((InpVirtualLearning || InpDryRun) && !blocked_by_model)
-         g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir);
+         g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,0.0,g_sig.meta);
       Redraw();
       return(true);
      }
@@ -1067,14 +1068,14 @@ bool OnBarClose()
       //--- trade is marked to market against real candles from here, so
       //--- the equity curve, the FTMO floors and the model all move as
       //--- they would live.
-      g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,lots);
+      g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,lots,g_sig.meta);
       g_risk.OnTradeOpened();
       g_last_signal=g_sig.bar_time;
       g_size_skips=0;
       g_last_action=StringFormat("DRY RUN %s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry);
-      g_log.Think(StringFormat("DRY RUN| WOULD OPEN %s %.2f lots @ %.2f  sl %.2f  tp %.2f  risk %.2f  (nothing sent)",
+      g_log.Think(StringFormat("DRY RUN| WOULD OPEN %s %.2f lots @ %.2f  sl %.2f  tp %.2f  risk %.2f  [structure: %s]  (nothing sent)",
                   SmcDirShort(g_sig.dir),lots,g_sig.entry,g_sig.sl,g_sig.tp1,
-                  MathAbs(g_sig.entry-g_sig.sl)*lots*g_risk.LossPerLot(1.0)));
+                  MathAbs(g_sig.entry-g_sig.sl)*lots*g_risk.LossPerLot(1.0),SmcMetaStr(g_sig.meta)));
       if(InpNotifyEntries)
          Notify(StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry),
                 StringFormat("SL %.2f  TP %.2f (%.2fR)  p %.0f%%  %s  - simulated, nothing sent",
@@ -1109,11 +1110,12 @@ bool OnBarClose()
       if(ticket>0)
         {
          g_size_skips=0;
-         g_journal.Add(ticket,posid,x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir);
+         g_journal.Add(ticket,posid,x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,g_sig.meta);
          g_risk.OnTradeOpened();
          g_last_signal=g_sig.bar_time;
          g_last_action=StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry);
-         g_log.Think(StringFormat("EXECUTE| #%s %s",IntegerToString((long)ticket),g_last_action));
+         g_log.Think(StringFormat("EXECUTE| #%s %s  [structure: %s]",IntegerToString((long)ticket),g_last_action,
+                     SmcMetaStr(g_sig.meta)));
          if(InpNotifyEntries)
             Notify(StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry),
                    StringFormat("SL %.2f  TP %.2f (%.2fR)  p %.0f%%  %s",
@@ -1125,7 +1127,7 @@ bool OnBarClose()
    else
      {
       g_last_action="order rejected by the server";
-      if(InpVirtualLearning) g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir);
+      if(InpVirtualLearning) g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,0.0,g_sig.meta);
      }
 
    Redraw();

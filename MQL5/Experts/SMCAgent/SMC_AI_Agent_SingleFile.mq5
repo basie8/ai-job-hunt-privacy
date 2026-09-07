@@ -92,6 +92,25 @@
 #define EV_BOS    0
 #define EV_CHOCH  1
 
+//--- Structural context recorded alongside every observation.
+//---
+//--- These are deliberately NOT model features. Adding a feature changes
+//--- F_COUNT, which every stored model file is keyed to, and would reset
+//--- all accumulated learning. This is a diagnostic channel instead: it
+//--- rides along with each resolved observation so a hypothesis about
+//--- structure can be TESTED against real outcomes before anyone decides
+//--- it deserves a weight of its own.
+//---
+//--- CONF and UNCONF are mutually exclusive, and neither is set when there
+//--- is no CHoCH in the trade direction at all - three states, not two.
+#define SMC_META_CHOCH_CONF     1   // entry CHoCH confirmed by a later BOS the same way
+#define SMC_META_CHOCH_UNCONF   2   // CHoCH in the trade direction, no BOS since
+#define SMC_META_IDM_PRESENT    4   // the engaged zone carried an inducement
+#define SMC_META_IDM_TAKEN      8   // that inducement had been run
+#define SMC_META_SWEEP         16   // the setup was triggered by a liquidity raid
+#define SMC_META_HTF_ALIGN     32   // the higher timeframe agreed with the trade
+#define SMC_META_POST_NEWS     64   // within an hour of a high impact release
+
 //+------------------------------------------------------------------+
 //| Confirmed swing point                                            |
 //+------------------------------------------------------------------+
@@ -195,6 +214,9 @@ struct SSignal
    double            zone_bottom;
    double            idm;         // inducement guarding the zone (0 = none)
    bool              idm_taken;
+   //--- SMC_META_* bitfield: structural context for diagnostics only,
+   //--- never a model input. See the constants above.
+   int               meta;
    //--- A setup complete enough to learn from, even when it was vetoed.
    //--- Entry, stop and target are all real, so the market will resolve it
    //--- one way or the other whether or not the agent traded it.
@@ -397,6 +419,24 @@ string SmcLiqStr(const int kind)
       case LQ_IDM:     return("IDM");
      }
    return("LQ");
+  }
+
+
+//+------------------------------------------------------------------+
+//| Human readable structural context, for the log and the journal   |
+//+------------------------------------------------------------------+
+string SmcMetaStr(const int m)
+  {
+   string s="";
+   if((m&SMC_META_CHOCH_CONF)!=0)        s+="CHoCH+BOS ";
+   else if((m&SMC_META_CHOCH_UNCONF)!=0) s+="CHoCH-unconfirmed ";
+   if((m&SMC_META_SWEEP)!=0)             s+="raid ";
+   if((m&SMC_META_IDM_PRESENT)!=0)       s+=((m&SMC_META_IDM_TAKEN)!=0?"IDM-taken ":"IDM-resting ");
+   if((m&SMC_META_HTF_ALIGN)!=0)         s+="HTF-aligned ";
+   if((m&SMC_META_POST_NEWS)!=0)         s+="post-news ";
+   if(s=="") return("-");
+   StringTrimRight(s);
+   return(s);
   }
 
 #endif // __SMC_DEFS_MQH__
@@ -2218,6 +2258,7 @@ private:
    double            m_mem_x[];              // flattened [i*m_n + f]
    double            m_mem_y[];
    double            m_mem_w[];
+   int               m_mem_meta[];           // SMC_META_* context, carried but never trained on
    int               m_mem_cnt;
    int               m_mem_head;
 
@@ -2270,9 +2311,11 @@ public:
       ArrayResize(m_mem_x,LRN_MEMORY*m_n);
       ArrayResize(m_mem_y,LRN_MEMORY);
       ArrayResize(m_mem_w,LRN_MEMORY);
+      ArrayResize(m_mem_meta,LRN_MEMORY);
       ArrayInitialize(m_mem_x,0.0);
       ArrayInitialize(m_mem_y,0.0);
       ArrayInitialize(m_mem_w,0.0);
+      ArrayInitialize(m_mem_meta,0);
       m_mem_cnt=0; m_mem_head=0;
      }
 
@@ -2347,7 +2390,7 @@ public:
      }
 
    //--- one supervised update: y = 1 (target reached) / 0 (stopped) ---
-   void              Learn(const double &x[],const double y,const double sample_weight=1.0)
+   void              Learn(const double &x[],const double y,const double sample_weight=1.0,const int meta=0)
      {
       if(m_n<=0) return;
       //--- Class balancing. A stream that is 90% one label drags the bias
@@ -2401,16 +2444,17 @@ public:
       if((p>=0.5 && y>0.5) || (p<0.5 && y<0.5)) m_correct++;
       m_acc=SmcSafeDiv((double)m_correct,(double)m_scored,0.0);
 
-      Remember(x,y,sample_weight);
+      Remember(x,y,sample_weight,meta);
      }
 
    //--- store into the replay memory ----------------------------------
-   void              Remember(const double &x[],const double y,const double w)
+   void              Remember(const double &x[],const double y,const double w,const int meta=0)
      {
       int slot=m_mem_head;
       for(int i=0;i<m_n;i++) m_mem_x[slot*m_n+i]=(i<ArraySize(x)?x[i]:0.0);
       m_mem_y[slot]=y;
       m_mem_w[slot]=w;
+      m_mem_meta[slot]=meta;
       m_mem_head=(m_mem_head+1)%LRN_MEMORY;
       if(m_mem_cnt<LRN_MEMORY) m_mem_cnt++;
      }
@@ -2452,7 +2496,7 @@ public:
         {
          string row="";
          for(int i=0;i<m_n;i++) row+=DoubleToString(m_mem_x[s*m_n+i],6)+(i<m_n-1?",":"");
-         FileWrite(h,"S",DoubleToString(m_mem_y[s],3),DoubleToString(m_mem_w[s],3),row);
+         FileWrite(h,"S",DoubleToString(m_mem_y[s],3),DoubleToString(m_mem_w[s],3),row,(string)m_mem_meta[s]);
         }
       FileClose(h);
       return(true);
@@ -2496,7 +2540,8 @@ public:
             double xb[];
             ArrayResize(xb,m_n);
             for(int i=0;i<m_n;i++) xb[i]=StringToDouble(xs[i]);
-            Remember(xb,StringToDouble(p[1]),StringToDouble(p[2]));
+            int mt=(k>=5?(int)StringToInteger(p[4]):0);   // files written before this column default to 0
+            Remember(xb,StringToDouble(p[1]),StringToDouble(p[2]),mt);
            }
         }
       FileClose(h);
@@ -3412,6 +3457,7 @@ public:
       sig.rationale="";
       sig.model="";
       sig.observable=false;
+      sig.meta=0;
       m_veto="";
       m_playbook="none";
       ArrayInitialize(m_x,0.0);
@@ -3596,6 +3642,28 @@ public:
       sig.rr1=rr1; sig.rr2=rr2; sig.bar_time=bt; sig.model=m_playbook;
       sig.zone_top=zone.top; sig.zone_bottom=zone.bottom;
       sig.idm=zone.idm; sig.idm_taken=zone.idm_taken;
+
+      //--- Structural context, recorded but never scored. The distinction
+      //--- that matters here is CONF vs UNCONF: a CHoCH confirmed by a
+      //--- later BOS means the next low down is a structural low of an
+      //--- established trend, so breaking it is a genuine reversal. An
+      //--- unconfirmed CHoCH means that low was created inside the
+      //--- unconfirmed leg - it is where the early entrants put their
+      //--- stops, which makes running it inducement rather than reversal.
+      //--- The agent currently treats both sweeps identically. Whether it
+      //--- should is an empirical question, and this is how it gets asked.
+      int meta=0;
+      if(m_e.LastChochDir()==dir)
+        {
+         bool bos_after=(m_e.LastBosDir()==dir && m_e.LastBosTime()>=m_e.LastChochTime());
+         meta|=(bos_after?SMC_META_CHOCH_CONF:SMC_META_CHOCH_UNCONF);
+        }
+      if(zone.idm>0.0)                            meta|=SMC_META_IDM_PRESENT;
+      if(zone.idm_taken)                          meta|=SMC_META_IDM_TAKEN;
+      if(m_e.SweepValid() && m_e.SweepDir()==dir) meta|=SMC_META_SWEEP;
+      if(m_bias_htf==dir)                         meta|=SMC_META_HTF_ALIGN;
+      if(post_news)                               meta|=SMC_META_POST_NEWS;
+      sig.meta=meta;
       //--- An objective is only useful if price can plausibly reach it. The
       //--- expectancy gate never demands more than 5R, so a first target
       //--- beyond this is one the framework itself never asks for - and a
@@ -4033,6 +4101,7 @@ private:
    datetime          m_open[];
    bool              m_partial[];
    bool              m_be[];
+   int               m_meta[];      // SMC_META_* structural context at entry
    int               m_n;           // feature count
 
 public:
@@ -4041,7 +4110,7 @@ public:
    void              Init(const int features) { m_n=features; }
 
    void              Add(const ulong ticket,const ulong position_id,const double &x[],const double entry,
-                         const double sl,const double tp1,const int dir)
+                         const double sl,const double tp1,const int dir,const int meta=0)
      {
       int k=ArraySize(m_ticket);
       ArrayResize(m_ticket,k+1);
@@ -4054,7 +4123,9 @@ public:
       ArrayResize(m_open,k+1);
       ArrayResize(m_partial,k+1);
       ArrayResize(m_be,k+1);
+      ArrayResize(m_meta,k+1);
       ArrayResize(m_x,(k+1)*m_n);
+      m_meta[k]=meta;
       m_ticket[k]=ticket;
       m_posid[k]=(position_id>0?position_id:ticket);
       m_fails[k]=0;
@@ -4069,6 +4140,7 @@ public:
      }
 
    int               Count(void) { return(ArraySize(m_ticket)); }
+   int               Meta(const int i) { return(i>=0 && i<ArraySize(m_meta)?m_meta[i]:0); }
    ulong             Ticket(const int i) { return(i>=0 && i<ArraySize(m_ticket)?m_ticket[i]:0); }
    ulong             PositionId(const int i) { return(i>=0 && i<ArraySize(m_posid)?m_posid[i]:0); }
    int               Fails(const int i) { return(i>=0 && i<ArraySize(m_fails)?m_fails[i]:0); }
@@ -4110,6 +4182,7 @@ public:
       ArrayRemove(m_open,i,1);
       ArrayRemove(m_partial,i,1);
       ArrayRemove(m_be,i,1);
+      ArrayRemove(m_meta,i,1);
      }
   };
 
@@ -4130,6 +4203,7 @@ private:
    int               m_dir[];
    datetime          m_time[];
    int               m_bars[];
+   int               m_meta[];      // SMC_META_* structural context at the moment it was booked
    int               m_max_bars;
    CLogger          *m_log;
 
@@ -4153,7 +4227,7 @@ public:
      }
 
    void              Add(const double &x[],const double entry,const double sl,const double tp,const int dir,
-                         const double lots=0.0)
+                         const double lots=0.0,const int meta=0)
      {
       if(dir==DIR_NONE || entry<=0.0 || sl<=0.0 || tp<=0.0) return;
       if(MathAbs(entry-sl)<=0.0) return;
@@ -4167,7 +4241,9 @@ public:
       ArrayResize(m_tp,k+1);
       ArrayResize(m_time,k+1);
       ArrayResize(m_bars,k+1);
+      ArrayResize(m_meta,k+1);
       ArrayResize(m_x,(k+1)*m_n);
+      m_meta[k]=meta;
       m_dir[k]=dir; m_entry[k]=entry; m_sl[k]=sl; m_tp[k]=tp; m_lots[k]=lots;
       m_time[k]=SmcNow(); m_bars[k]=0;
       for(int i=0;i<m_n;i++) m_x[k*m_n+i]=(i<ArraySize(x)?x[i]:0.0);
@@ -4185,6 +4261,7 @@ public:
       ArrayRemove(m_tp,i,1);
       ArrayRemove(m_time,i,1);
       ArrayRemove(m_bars,i,1);
+      ArrayRemove(m_meta,i,1);
      }
 
    //--- resolve every paper setup against the last closed bar ---------
@@ -4228,14 +4305,14 @@ public:
             for(int f=0;f<m_n;f++) xb[f]=m_x[i*m_n+f];
             //--- a dry run trade is a full observation, not a discounted one
             double weight=(m_lots[i]>0.0?1.00:0.60);
-            if(model!=NULL) model.Learn(xb,y,weight);
+            if(model!=NULL) model.Learn(xb,y,weight,m_meta[i]);
             if(m_lots[i]>0.0 && value_per_price>0.0)
               {
                double exit_px=(y>0.5?m_tp[i]:m_sl[i]);
                money_out+=(exit_px-m_entry[i])*m_dir[i]*m_lots[i]*value_per_price;
               }        // paper trades count less than real ones
             if(m_log!=NULL)
-               m_log.Debug(StringFormat("Observation resolved: %s -> %s after %d bars",
+               m_log.Debug(StringFormat("Observation resolved [%s]: %s -> %s after %d bars",SmcMetaStr(m_meta[i]),
                            SmcDirShort(m_dir[i]),(y>0.5?"objective":"invalidated"),m_bars[i]));
             Remove(i);
             resolved++;
@@ -5810,7 +5887,7 @@ void HarvestClosedTrades()
       double x[];
       g_journal.Vector(i,x);
       double y=(profit>0.0?1.0:0.0);
-      g_model.Learn(x,y,1.0);
+      g_model.Learn(x,y,1.0,g_journal.Meta(i));
       g_model.Replay(1);
       g_model.Save();
       g_risk.OnTradeClosed(profit);
@@ -5818,8 +5895,9 @@ void HarvestClosedTrades()
          Notify(StringFormat("closed %+.2f",profit),
                 StringFormat("day %+.2f%%  total %+.2f%%  equity %.2f",
                 g_risk.DayPnLPct(),g_risk.TotalPnLPct(),g_risk.Equity()));
-      g_log.Think(StringFormat("LEARN | real trade #%s closed at %.2f -> label %s | model acc %.0f%% after %d updates",
-                  IntegerToString((long)t),profit,(y>0.5?"WIN":"LOSS"),g_model.Accuracy()*100.0,(int)g_model.Updates()));
+      g_log.Think(StringFormat("LEARN | real trade #%s closed at %.2f -> label %s [%s] | model acc %.0f%% after %d updates",
+                  IntegerToString((long)t),profit,(y>0.5?"WIN":"LOSS"),SmcMetaStr(g_journal.Meta(i)),
+                  g_model.Accuracy()*100.0,(int)g_model.Updates()));
       g_journal.Remove(i);
      }
   }
@@ -6065,7 +6143,7 @@ bool OnBarClose()
       if((InpVirtualLearning || InpDryRun) && g_sig.observable)
         {
          int before=g_vbook.Count();
-         g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir);
+         g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,0.0,g_sig.meta);
          if(g_vbook.Count()>before)
             g_log.Think(StringFormat("OBSERVE| watching the rejected %s setup anyway - entry %.2f sl %.2f tp %.2f (%d in the book)",
                         SmcDirShort(g_sig.dir),g_sig.entry,g_sig.sl,g_sig.tp1,g_vbook.Count()));
@@ -6147,13 +6225,13 @@ bool OnBarClose()
    if(!take)
      {
       g_last_action="stood aside - "+block;
-      g_log.Think("DECIDE | stand aside: "+block);
+      g_log.Think("DECIDE | stand aside: "+block+"  [structure: "+SmcMetaStr(g_sig.meta)+"]");
       //--- Keep learning from what was skipped - unless the model itself is
       //--- what skipped it. Training on your own refusals is circular: the
       //--- book fills with setups the model disliked, they mostly lose, the
       //--- bias sinks, and fewer setups clear the bar next time.
       if((InpVirtualLearning || InpDryRun) && !blocked_by_model)
-         g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir);
+         g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,0.0,g_sig.meta);
       Redraw();
       return(true);
      }
@@ -6167,14 +6245,14 @@ bool OnBarClose()
       //--- trade is marked to market against real candles from here, so
       //--- the equity curve, the FTMO floors and the model all move as
       //--- they would live.
-      g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,lots);
+      g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,lots,g_sig.meta);
       g_risk.OnTradeOpened();
       g_last_signal=g_sig.bar_time;
       g_size_skips=0;
       g_last_action=StringFormat("DRY RUN %s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry);
-      g_log.Think(StringFormat("DRY RUN| WOULD OPEN %s %.2f lots @ %.2f  sl %.2f  tp %.2f  risk %.2f  (nothing sent)",
+      g_log.Think(StringFormat("DRY RUN| WOULD OPEN %s %.2f lots @ %.2f  sl %.2f  tp %.2f  risk %.2f  [structure: %s]  (nothing sent)",
                   SmcDirShort(g_sig.dir),lots,g_sig.entry,g_sig.sl,g_sig.tp1,
-                  MathAbs(g_sig.entry-g_sig.sl)*lots*g_risk.LossPerLot(1.0)));
+                  MathAbs(g_sig.entry-g_sig.sl)*lots*g_risk.LossPerLot(1.0),SmcMetaStr(g_sig.meta)));
       if(InpNotifyEntries)
          Notify(StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry),
                 StringFormat("SL %.2f  TP %.2f (%.2fR)  p %.0f%%  %s  - simulated, nothing sent",
@@ -6209,11 +6287,12 @@ bool OnBarClose()
       if(ticket>0)
         {
          g_size_skips=0;
-         g_journal.Add(ticket,posid,x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir);
+         g_journal.Add(ticket,posid,x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,g_sig.meta);
          g_risk.OnTradeOpened();
          g_last_signal=g_sig.bar_time;
          g_last_action=StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry);
-         g_log.Think(StringFormat("EXECUTE| #%s %s",IntegerToString((long)ticket),g_last_action));
+         g_log.Think(StringFormat("EXECUTE| #%s %s  [structure: %s]",IntegerToString((long)ticket),g_last_action,
+                     SmcMetaStr(g_sig.meta)));
          if(InpNotifyEntries)
             Notify(StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry),
                    StringFormat("SL %.2f  TP %.2f (%.2fR)  p %.0f%%  %s",
@@ -6225,7 +6304,7 @@ bool OnBarClose()
    else
      {
       g_last_action="order rejected by the server";
-      if(InpVirtualLearning) g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir);
+      if(InpVirtualLearning) g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,0.0,g_sig.meta);
      }
 
    Redraw();
