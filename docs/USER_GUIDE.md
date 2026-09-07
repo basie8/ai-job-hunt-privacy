@@ -271,6 +271,10 @@ characters for a crowded chart.
 Nothing here is a technical trading parameter — these are account, compliance,
 policy and display settings.
 
+The text beside each input in MetaTrader's dialog is deliberately short, because
+that column truncates. **This section is the full reference** — where a dialog
+label abbreviates something, the explanation is here.
+
 ### FTMO 2-step compliance
 | Input | Default | Notes |
 |---|---|---|
@@ -382,10 +386,28 @@ Both buffer inputs are expressed in **median candles**, not pips, so they scale
 with the instrument and the current volatility rather than being pinned to gold
 at today's range.
 
-### News, visuals
-See the input groups in the EA — the news window and importance filter, the CSV
-fallback name, panel position and log level (`3` = full decision log, `4` = adds
-observation-book detail).
+### News
+
+| Input | Default | Notes |
+|---|---|---|
+| `InpUseNews` | true | Use the MetaTrader economic calendar |
+| `InpNewsMinutesBefore` | 15 | Block new entries this many minutes before a release |
+| `InpNewsMinutesAfter` | 10 | Block new entries this many minutes after one |
+| `InpNewsImportance` | 3 | 1 = low, 2 = moderate, 3 = high impact only |
+| `InpFlattenBeforeNews` | true | Close open positions before a high-impact release |
+| `InpNewsCsv` | `smc_news.csv` | Fallback calendar in the common files folder, written by `ExportCalendar.mq5`. The Strategy Tester cannot reach the live calendar, so this is how a backtest gets real news |
+
+### Files and identity
+
+| Input | Default | Notes |
+|---|---|---|
+| `InpFileTag` | *(blank)* | Overrides the tag used in model, state and log filenames. Blank means it is derived automatically as `<server>_<login>`, which is what keeps two accounts on one terminal from sharing — and contaminating — a single model. Set it only if you deliberately want two instances to share one model file, or to keep a name stable across a broker migration |
+| `InpMagic` | 20260901 | Magic number. Change it if you run more than one instance on the same symbol |
+
+### Visuals and logging
+Panel position, size and font are self-explanatory. `InpLogLevel` `3` gives the
+full decision log and `4` adds observation-book detail. `InpPanelCompact` hides
+the per-factor reading column for a narrower panel.
 
 ## 4b. How the account size is determined
 

@@ -47,17 +47,17 @@
 //| Inputs - account and compliance only, no technical parameters    |
 //+------------------------------------------------------------------+
 input group "=== FTMO 2-step compliance ==="
-input double InpInitialCapital   = 0.0;    // Initial simulated capital (0 = detect from the account)
-input int    InpPhase            = 1;      // Phase: 1 = Challenge (10%), 2 = Verification (5%), 3 = Funded (no target)
-input double InpTargetPct        = 0.0;    // Profit target % (0 = 10 in phase 1 / 5 in phase 2)
+input double InpInitialCapital   = 0.0;    // Starting capital (0 = detect from account)
+input int    InpPhase            = 1;      // 1 = Challenge, 2 = Verification, 3 = Funded
+input double InpTargetPct        = 0.0;    // Profit target % (0 = the phase default)
 input double InpDailyLossPct     = 5.0;    // FTMO maximum daily loss %
 input double InpMaxLossPct       = 10.0;   // FTMO maximum overall loss %
 input double InpSoftDailyPct     = 2.5;    // Stop trading for the day at this daily loss %
 input double InpHardDailyPct     = 3.5;    // Flatten everything at this daily loss %
 input double InpSoftMaxPct       = 7.0;    // Protective overall drawdown %
 input double InpBaseRiskPct      = 0.5;    // Base risk per trade % of initial capital
-input int    InpDailyResetHour   = 0;      // Server hour of the FTMO daily reset (midnight CE(S)T)
-input int    InpGmtOffsetHours   = 99;     // Broker GMT offset in hours (99 = detect automatically)
+input int    InpDailyResetHour   = 0;      // Server hour of the daily loss reset
+input int    InpGmtOffsetHours   = 99;     // Broker GMT offset, hours (99 = auto detect)
 input int    InpMinTradingDays   = 4;      // Minimum trading days required by the phase
 
 input group "=== Agent behaviour ==="
@@ -67,10 +67,10 @@ input double InpMinProbFloor     = 0.55;   // Never accept below this probabilit
 input int    InpTargetTradesWeek = 2;      // Minimum trades per week the agent aims for
 input int    InpWarmupSamples    = 25;     // Resolved setups observed before the model votes
 input bool   InpVirtualLearning  = true;   // Keep learning from setups that were not traded
-input bool   InpLiveAfterWarmup  = true;   // Observe only until the model is trained, then trade live automatically
+input bool   InpLiveAfterWarmup  = true;   // Observe until trained, then go live by itself
 
 input group "=== Notifications ==="
-input bool   InpNotifyPush       = false;  // Push to the MetaTrader mobile app (needs your MetaQuotes ID in Tools > Options > Notifications)
+input bool   InpNotifyPush       = false;  // Push to MT5 mobile (set MetaQuotes ID first)
 input bool   InpNotifyEmail      = false;  // Email (needs SMTP in Tools > Options > Email)
 input bool   InpNotifyPopup      = false;  // Terminal popup alert
 input bool   InpNotifyEntries    = true;   // Notify on buy / sell entries
@@ -78,19 +78,19 @@ input bool   InpNotifyExits      = true;   // Notify when a trade closes
 input bool   InpNotifyRisk       = true;   // Notify when the risk envelope locks or flattens
 
 input group "=== Dry run ==="
-input bool   InpDryRun           = false;  // Dry run: full pipeline, orders logged not sent (works with no account)
+input bool   InpDryRun           = false;  // Simulate only: orders logged, never sent
 input double InpDryRunCapital    = 100000; // Assumed phase capital while dry running
 input bool   InpResetModel       = false;  // Discard the stored model on start
 
 input group "=== Trade management ==="
-input double InpMaxTargetR       = 6.00;   // Reject a setup whose first objective is further than this (0 = no cap)
-input double InpStopBufferUnits  = 0.35;   // Stop clearance beyond structure, in median candles (raise to survive sweeps)
-input double InpTargetPullUnits  = 0.10;   // Pull the objective this far short of the pool, in median candles
+input double InpMaxTargetR       = 6.00;   // Reject a target beyond this R (0 = no cap)
+input double InpStopBufferUnits  = 0.35;   // Stop clearance past structure, in candles
+input double InpTargetPullUnits  = 0.10;   // Stop this far short of the pool, in candles
 input double InpPartialAtR       = 1.00;   // Take partial profit at this R multiple
 input double InpPartialPercent   = 50.0;   // Percent of the position closed at that point
 input double InpBreakEvenAtR     = 1.00;   // Move the stop to break even at this R
 input double InpTrailAfterR      = 1.50;   // Start structural trailing after this R
-input int    InpTimeStopBars     = 0;      // Give up after N bars without expansion (0 = adaptive)
+input int    InpTimeStopBars     = 0;      // Give up after N stalled bars (0 = adaptive)
 input int    InpSlippagePoints   = 40;     // Maximum deviation in points
 
 input group "=== News ==="
@@ -100,7 +100,7 @@ input int    InpNewsMinutesAfter = 10;     // Block new entries N minutes after 
 input int    InpNewsImportance   = 3;      // 1 = low, 2 = moderate, 3 = high impact only
 input bool   InpFlattenBeforeNews= true;   // Close positions before a high impact release
 input string InpNewsCsv          = "smc_news.csv"; // Fallback calendar (common files folder)
-input string InpFileTag          = "";     // Override the account tag in file names (blank = automatic)
+input string InpFileTag          = "";     // Account tag in file names (blank = auto)
 
 input group "=== Visuals and logging ==="
 input bool   InpShowChart        = true;   // Draw the SMC map on the chart
@@ -109,7 +109,7 @@ input int    InpPanelX           = 8;      // Panel X
 input int    InpPanelY           = 22;     // Panel Y
 input int    InpPanelFontSize    = 10;     // Panel font size (6-16; raise it on a 4K screen)
 input int    InpPanelWidthChars   = 88;     // Panel width in characters (46-140)
-input bool   InpPanelCompact     = false;  // Compact panel (drops the per-factor reading column)
+input bool   InpPanelCompact     = false;  // Compact panel (hides the readings column)
 input int    InpLogLevel         = 3;      // 0 err 1 warn 2 info 3 decisions 4 debug
 input bool   InpLogToFile        = false;  // Also write the decision log to a file
 input long   InpMagic            = 20260901;// Magic number
