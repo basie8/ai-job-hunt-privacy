@@ -5286,6 +5286,7 @@ input double InpMinProbFloor     = 0.55;   // Never accept below this probabilit
 input int    InpTargetTradesWeek = 2;      // Minimum trades per week the agent aims for
 input int    InpWarmupSamples    = 25;     // Resolved setups observed before the model votes
 input bool   InpVirtualLearning  = true;   // Keep learning from setups that were not traded
+input bool   InpLiveAfterWarmup  = true;   // Observe only until the model is trained, then trade live automatically
 
 input group "=== Notifications ==="
 input bool   InpNotifyPush       = false;  // Push to the MetaTrader mobile app (needs your MetaQuotes ID in Tools > Options > Notifications)
@@ -5805,6 +5806,9 @@ int OnInit()
    g_log.Info(StringFormat("Files | account tag '%s' (%s, login %I64d)%s",
               tag,AccountInfoString(ACCOUNT_SERVER),AccountInfoInteger(ACCOUNT_LOGIN),
               (InpFileTag!=""?" - overridden by InpFileTag":"")));
+   if(InpLiveAfterWarmup && !InpDryRun)
+      g_log.Info(StringFormat("Start | OBSERVING until the model is trained (%d/%d). The full pipeline runs and every setup is learned from at full weight, but no order is sent until warm-up completes - then it goes live on its own. Your real capital and drawdown floors apply throughout. Observing accrues no trading days; set InpLiveAfterWarmup=false to trade from the first bar.",
+                 (int)g_model.Updates(),g_model.WarmupNeeded()));
    g_log.Info("Files | model  "+common+model_file);
    g_log.Info("Files | state  "+common+state_file);
    if(InpLogToFile) g_log.Info("Files | log    "+common+"smc_agent_log.txt");
@@ -5875,6 +5879,30 @@ void RedrawPanel()
   }
 
 //+------------------------------------------------------------------+
+//| Warm-up is not a trading pause unless it is made one.            |
+//|                                                                  |
+//| Until the model has learned from enough resolved setups its       |
+//| probability comes from the research priors alone - the strategy   |
+//| as designed, not as measured on this market. Position sizing      |
+//| reads that probability and cannot tell the difference, so the     |
+//| agent would stake full size on its least informed opinion.        |
+//|                                                                  |
+//| While this holds, the whole pipeline runs and every setup is      |
+//| recorded and learned from at full weight - only the order is      |
+//| withheld. The risk envelope, the capital and the floors stay      |
+//| REAL throughout: this is not a dry run, and it must never         |
+//| substitute dry run capital on a funded account.                   |
+//|                                                                  |
+//| The cost is that observing accrues no trading days, which some    |
+//| evaluations require a minimum of. Switch it off to trade from     |
+//| the first bar.                                                    |
+//+------------------------------------------------------------------+
+bool ObservingOnly()
+  {
+   return(!InpDryRun && InpLiveAfterWarmup && !g_model.IsWarm());
+  }
+
+//+------------------------------------------------------------------+
 //| Full redraw: the chart layer only changes when the SMC map does, |
 //| so it is rebuilt on bar closes, not on every timer tick.         |
 //+------------------------------------------------------------------+
@@ -5894,6 +5922,7 @@ string ModeString()
    if(g_risk.DryRun())    return("DRY RUN");
    if(!g_risk.Ready())    return("NO ACCOUNT");
    if(g_risk.DayLocked()) return("LOCKED");
+   if(ObservingOnly())    return("OBSERVING");
    if(!g_model.IsWarm())  return("WARM-UP");
    return("LIVE");
   }
@@ -6299,6 +6328,29 @@ bool OnBarClose()
          Notify(StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry),
                 StringFormat("SL %.2f  TP %.2f (%.2fR)  p %.0f%%  %s  - simulated, nothing sent",
                 g_sig.sl,g_sig.tp1,g_sig.rr1,g_sig.prob*100.0,g_sig.model));
+      g_vis.DrawSignal(g_sig,g_ms.ETime(1));
+      Redraw();
+      return(true);
+     }
+
+   if(ObservingOnly())
+     {
+      //--- Booked with its lot size, so it carries the same full weight a
+      //--- dry run trade does - this setup passed every gate, it is not a
+      //--- discounted paper observation. No OnTradeOpened(): nothing was
+      //--- traded, so it is not a trading day.
+      g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,lots,g_sig.meta);
+      g_last_signal=g_sig.bar_time;
+      g_size_skips=0;
+      g_last_action=StringFormat("OBSERVING %s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry);
+      g_log.Think(StringFormat("OBSERVE| WOULD OPEN %s %.2f lots @ %.2f  sl %.2f  tp %.2f  [structure: %s] - learning first, %d/%d resolved (InpLiveAfterWarmup)",
+                  SmcDirShort(g_sig.dir),lots,g_sig.entry,g_sig.sl,g_sig.tp1,SmcMetaStr(g_sig.meta),
+                  (int)g_model.Updates(),g_model.WarmupNeeded()));
+      if(InpNotifyEntries)
+         Notify(StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry),
+                StringFormat("SL %.2f  TP %.2f (%.2fR)  p %.0f%%  %s  - OBSERVING, nothing sent (%d/%d)",
+                g_sig.sl,g_sig.tp1,g_sig.rr1,g_sig.prob*100.0,g_sig.model,
+                (int)g_model.Updates(),g_model.WarmupNeeded()));
       g_vis.DrawSignal(g_sig,g_ms.ETime(1));
       Redraw();
       return(true);

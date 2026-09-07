@@ -99,76 +99,70 @@ Enable **AutoTrading**, and in *Tools → Options → Expert Advisors* allow
 `Algo Trading`. The agent writes its model and state to the **common files** folder,
 so nothing is lost when you move it between charts or terminals.
 
-## 1c. Warm up before you risk money
+## 1c. What happens while the agent is learning
 
-**Read this before you attach the agent to a funded account.**
+By default the agent **observes before it trades**. On a live account with
+stock settings it runs the entire pipeline from the first bar — reads structure,
+forms setups, sizes them, applies every risk control — and records each one,
+but **does not send the order** until it has learned from enough resolved
+setups. When warm-up completes it starts trading live on its own. You do not
+have to come back and change anything.
 
-The agent trades from the first bar. Warm-up is **not** a trading gate — it
-governs whose opinion is being used, not whether an order is sent. With
-`InpDryRun = false` and the counter at `0/25`, real orders go to the broker at
-full size.
+The panel shows `MODE OBSERVING` throughout, and each withheld setup is logged:
 
-### What is actually deciding those trades
+```
+OBSERVE| WOULD OPEN BUY 0.42 lots @ 4333.55  sl 4321.35  tp 4358.90  [structure: failed-CHoCH raid] - learning first, 12/25 resolved (InpLiveAfterWarmup)
+```
 
-Until 25 setups have resolved, the probability comes entirely from the research
-priors — the strategy as designed, not as measured. Those priors are more than
-strong enough to clear the acceptance threshold:
+### Why this is the default
 
-| Average factor score | Probability | Decision | Position size |
+Until the model has learned from enough resolved setups, its probability comes
+from the research priors alone — the strategy as designed, not as measured on
+your market. That probability is what sizes the position, and the sizing logic
+cannot tell whether the confidence was researched or earned. Left unguarded, the
+agent stakes full size on its least informed opinion.
+
+Worse, it is not only a sizing question. The same probability decides **whether**
+a setup is taken, through both the acceptance threshold and the expectancy gate.
+A setup the priors like at 72% is taken at nearly full size; if experience later
+prices the same setup at 46%, it is declined outright — *and* the reward it would
+have to offer rises from 1.30R to 2.11R. So the agent trades a different, less
+selective population of setups while it is learning, at close to full size. That
+is tuition, and it is paid in real currency.
+
+### The three modes
+
+| Setting | Orders sent | Capital and floors | Use it for |
 |---|---|---|---|
-| 0.20 | 56% | declined | — |
-| **0.28** | **62%** | **← threshold** | 0.70× |
-| 0.40 | 70% | trades | 0.92× |
-| **0.45** | **73%** | trades | **1.00× — full requested risk** |
-| 0.60 | 81% | trades | 1.22× |
+| `InpLiveAfterWarmup = true` (default) | Withheld until trained, then live automatically | **Real** | Normal live running |
+| `InpLiveAfterWarmup = false` | Live from the first bar | **Real** | You accept the tuition cost, or you are short of trading days |
+| `InpDryRun = true` | Never | **Simulated** (`InpDryRunCapital`) | Unfunded terminal, testing sizing, watching the logic before funding |
 
-A setup averaging 0.45 across its factors receives your full requested risk. The
-sizing logic reads the probability and cannot tell that it came from an untested
-hypothesis rather than a measured result.
+`InpDryRun` overrides everything and is independent — it still exists, and it is
+still the right tool for exercising the agent on an account with no equity.
 
-That is defensible — you are trading a defined strategy from day one — but it
-means the agent is at its **least** informed exactly when it is staking real
-money at full confidence.
+The distinction that matters: **observing is not a dry run.** In observing mode
+your real capital, real balance and real drawdown floors apply throughout. A dry
+run substitutes `InpDryRunCapital` for the phase capital, which is correct for a
+simulation and would be badly wrong on a funded account.
 
-### The recommended sequence
+### The one real cost — read this before a timed evaluation
 
-1. **Attach with `InpDryRun = true`.** Everything runs: the agent sizes each
-   trade as it would live, marks it to market against real candles, moves a
-   simulated equity curve, applies the drawdown floors to that curve, and trains
-   the model at full weight. Nothing reaches the broker.
-2. **Set `InpLogToFile = true`** so the decision log is preserved.
-3. **Leave it alone until the panel reads `25/25`** and `MODE` changes from
-   `WARM-UP` to `LIVE`. The counter fills from *resolved setups*, not trades —
-   setups the agent declined resolve too, so it fills faster than the trade rate
-   suggests.
-4. **Read the log before funding.** Look at what it took and what it refused. If
-   the reasoning does not match how you read the chart, that is worth knowing
-   before money is involved.
-5. **Run `analyse_model.py` against the model CSV.** It reports whether the
-   learning means anything yet, and it refuses to compute below 20 setups
-   precisely because small samples mislead.
-6. **Set `InpDryRun = false`** and remove the EA from the chart and re-attach.
-   The model file persists, so the learning carries over — the counter does not
-   reset.
+**Observing accrues no trading days.** No order is sent, so no trading day is
+counted, and most prop evaluations require a minimum number of them. If you are
+on a challenge with a deadline, budget for the learning period or set
+`InpLiveAfterWarmup = false` and accept the trade-off knowingly.
 
-### If you would rather not wait
+Warm-up fills from *resolved setups*, not trades — setups the agent declined
+resolve too — so it completes considerably faster than the trade rate suggests.
 
-Two weaker alternatives, in order of preference:
+### What completing warm-up does not mean
 
-- **Halve `InpBaseRiskPct`** for the warm-up period, raise it once `LIVE`.
-- **Raise `InpMinProbability` to ~0.75** initially. From the table above that
-  demands a 0.48 factor average instead of 0.28, so far fewer setups qualify.
-
-Neither gives you a measured starting point. They only reduce what an untested
-opinion can cost you.
-
-### What warm-up does not protect against
-
-Completing warm-up means the model now outweighs the priors. It does **not** mean
-the model is good. Twenty-five samples across seventeen factors is a very small
-training set; treat `LIVE` as "the blend has finished", not as validation. The
-figures that would constitute evidence are set out in `analyse_model.py` and the
-methodology document.
+It means the agent's own experience now outweighs its starting position. It does
+**not** mean the agent has been validated. Twenty-five samples across seventeen
+factors is a very small training set; treat `LIVE` as "the blend has finished",
+not as a result. What would constitute evidence is set out in
+`tools/analyse_model.py` and the methodology document.
 
 ## 2. First run — what you should see
 
@@ -176,9 +170,9 @@ methodology document.
    `FTMO envelope: initial 100000.00  daily floor 95000.00  overall floor 90000.00  target 110000.00`
 2. The chart fills with order blocks, imbalances, BOS/CHoCH labels, liquidity lines
    and the premium/discount range.
-3. The panel appears top-left showing `MODE WARM-UP 0/25`. If `InpDryRun` is
-   false, **it is already trading real money at full size** — see
-   [section 1c](#1c-warm-up-before-you-risk-money).
+3. The panel appears top-left showing `MODE OBSERVING` with the warm-up count.
+   With stock settings no order is sent until the model is trained — see
+   [section 1c](#1c-what-happens-while-the-agent-is-learning).
 4. On each bar close a decision block is printed:
 
 ```
@@ -294,6 +288,7 @@ policy and display settings.
 | `InpMinProbFloor` | 0.55 | the governor never goes below this |
 | `InpTargetTradesWeek` | 2 | the brief's minimum cadence |
 | `InpWarmupSamples` | 25 | resolved setups before the model outweighs the priors |
+| `InpLiveAfterWarmup` | true | Observe only until the model is trained, then trade live automatically. Real capital and floors apply throughout; no trading days accrue while observing |
 | `InpVirtualLearning` | true | learn from setups that were skipped |
 | `InpResetModel` | false | discard the stored model and restart from the priors |
 
@@ -353,9 +348,10 @@ logic on a fresh install before funding, or to sanity check sizing against your
 broker's contract specs. The panel shows `MODE  DRY RUN` throughout so a dry run
 can never be mistaken for live trading.
 
-**This is the recommended way to start.** See [section 1c](#1c-warm-up-before-you-risk-money)
-— the agent places real, full-size orders while the warm-up counter is still at
-`0/25`, and a dry run is how you get past that on simulated money instead.
+Note that a dry run is **not** the same as the default observing behaviour: a dry
+run substitutes `InpDryRunCapital` for the phase capital, while observing keeps
+your real capital and real floors. See
+[section 1c](#1c-what-happens-while-the-agent-is-learning).
 
 **Note on forcing live orders instead:** there is deliberately no switch to send
 real orders on a zero-equity account. The server rejects them for want of margin,
