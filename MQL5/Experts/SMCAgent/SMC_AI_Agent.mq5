@@ -587,6 +587,12 @@ int OnInit()
    g_log.Info(StringFormat("Files | account tag '%s' (%s, login %I64d)%s",
               tag,AccountInfoString(ACCOUNT_SERVER),AccountInfoInteger(ACCOUNT_LOGIN),
               (InpFileTag!=""?" - overridden by InpFileTag":"")));
+   //--- Dry run is an instruction never to touch the broker, so it must win
+   //--- over an automation flag - but silently ignoring the other setting is
+   //--- how someone ends up waiting weeks for a go-live that was never
+   //--- coming. Say so at startup instead.
+   if(InpDryRun && InpLiveAfterWarmup)
+      g_log.Warn("InpLiveAfterWarmup is on, but InpDryRun overrides it. NOTHING will be sent to the broker - not now, not when warm-up completes, not ever. Dry run is a permanent simulation against InpDryRunCapital, not a phase the agent grows out of. To have the agent observe on your REAL capital and then go live by itself once trained, set InpDryRun=false and leave InpLiveAfterWarmup on.");
    if(InpLiveAfterWarmup && !InpDryRun)
       g_log.Info(StringFormat("Start | OBSERVING until the model is trained (%d/%d). The full pipeline runs and every setup is learned from at full weight, but no order is sent until warm-up completes - then it goes live on its own. Your real capital and drawdown floors apply throughout. Observing accrues no trading days; set InpLiveAfterWarmup=false to trade from the first bar.",
                  (int)g_model.Updates(),g_model.WarmupNeeded()));

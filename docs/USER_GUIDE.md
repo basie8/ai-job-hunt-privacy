@@ -138,8 +138,15 @@ is tuition, and it is paid in real currency.
 | `InpLiveAfterWarmup = false` | Live from the first bar | **Real** | You accept the tuition cost, or you are short of trading days |
 | `InpDryRun = true` | Never | **Simulated** (`InpDryRunCapital`) | Unfunded terminal, testing sizing, watching the logic before funding |
 
-`InpDryRun` overrides everything and is independent — it still exists, and it is
-still the right tool for exercising the agent on an account with no equity.
+**`InpDryRun` overrides everything.** If both are set, dry run wins and
+`InpLiveAfterWarmup` is ignored entirely: nothing reaches the broker when
+warm-up completes, or ever. Dry run is a permanent simulation, not a phase the
+agent grows out of — there is no automatic transition out of it, by design,
+because it is the mode for terminals that must never send an order. The EA warns
+at startup if you set both.
+
+To get the automatic go-live, set `InpDryRun = false` and leave
+`InpLiveAfterWarmup` on. That is the stock configuration.
 
 The distinction that matters: **observing is not a dry run.** In observing mode
 your real capital, real balance and real drawdown floors apply throughout. A dry
