@@ -27,6 +27,9 @@
 
 #define LRN_MAX_FEATURES 24
 #define LRN_MEMORY       400      // replay memory of resolved observations
+//--- Floor under the decayed learning rate, as a fraction of the base rate.
+//--- See LearnRate() for why a live model must never stop responding.
+#define LRN_LR_FLOOR     0.30
 
 class COnlineLearner
   {
@@ -125,6 +128,30 @@ public:
       return(MathSqrt(m_fm2[i]/(double)(m_fn-1)));
      }
 
+   //--- Current step size: 1/sqrt(n) decay, with a floor.
+   //---
+   //--- Decaying the rate is what stops a converged model thrashing on
+   //--- noise, and for a fixed relationship it is exactly right - the
+   //--- steps shrink because there is less left to learn. A market is not
+   //--- a fixed relationship. It is non-stationary: volatility regimes
+   //--- turn over, session behaviour shifts, and the thing this model is
+   //--- fitting genuinely changes underneath it.
+   //---
+   //--- Without a floor the decay eventually wins outright. At 5,000
+   //--- observations the raw rate is 6% of where it started, so an agent
+   //--- with a long history would barely register a regime change it had
+   //--- never seen. The floor holds a permanent minimum responsiveness.
+   //---
+   //--- The cost is real and worth stating: a constant step size never
+   //--- settles on a point, it circles the optimum. That is the correct
+   //--- trade here - a model that tracks a moving target beats one that
+   //--- converges precisely on where the target used to be.
+   double            LearnRate(void) const
+     {
+      double decayed=m_lr/MathSqrt(1.0+(double)m_updates*0.05);
+      return(MathMax(decayed,m_lr*LRN_LR_FLOOR));
+     }
+
    //--- raw linear score (used for the "confluence score" display) ----
    double            Score(const double &x[])
      {
@@ -181,7 +208,7 @@ public:
 
       double p=Probability(x);
       double err=p-y;
-      double lr=m_lr/MathSqrt(1.0+(double)m_updates*0.05);
+      double lr=LearnRate();
       for(int i=0;i<m_n && i<ArraySize(x);i++)
         {
          //--- damp the learning of a feature that barely moves; the pull
@@ -233,13 +260,15 @@ public:
             for(int i=0;i<m_n;i++) xb[i]=m_mem_x[s*m_n+i];
             double p=Probability(xb);
             double err=p-m_mem_y[s];
-            double lr=m_lr*0.35/MathSqrt(1.0+(double)m_updates*0.05);
+            double lr=LearnRate()*0.35;
             for(int i=0;i<m_n;i++)
               {
                double grad=err*xb[i]*m_mem_w[s]+m_l2*(m_w[i]-m_prior[i]);
                m_w[i]=SmcClamp(m_w[i]-lr*grad,-4.0,4.0);
               }
-            m_bias=SmcClamp(m_bias-lr*err*m_mem_w[s],-2.0,2.0);
+            //--- the same clamp Learn() enforces: replay must not be a
+            //--- back door past the bound that stops the model giving up
+            m_bias=SmcClamp(m_bias-lr*err*m_mem_w[s],-1.0,1.0);
            }
      }
 
