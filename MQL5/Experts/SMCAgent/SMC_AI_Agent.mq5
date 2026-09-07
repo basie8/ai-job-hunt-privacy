@@ -83,6 +83,8 @@ input bool   InpResetModel       = false;  // Discard the stored model on start
 
 input group "=== Trade management ==="
 input double InpMaxTargetR       = 6.00;   // Reject a setup whose first objective is further than this (0 = no cap)
+input double InpStopBufferUnits  = 0.35;   // Stop clearance beyond structure, in median candles (raise to survive sweeps)
+input double InpTargetPullUnits  = 0.10;   // Pull the objective this far short of the pool, in median candles
 input double InpPartialAtR       = 1.00;   // Take partial profit at this R multiple
 input double InpPartialPercent   = 50.0;   // Percent of the position closed at that point
 input double InpBreakEvenAtR     = 1.00;   // Move the stop to break even at this R
@@ -540,7 +542,8 @@ int OnInit()
    if(InpUseNews) news_ptr=GetPointer(g_news);
    g_conf.Init(GetPointer(g_ms),GetPointer(g_eng_e),GetPointer(g_eng_m),GetPointer(g_eng_h),
                news_ptr,GetPointer(g_model),GetPointer(g_log),
-               g_gmt,InpNewsMinutesBefore,InpNewsMinutesAfter,InpNewsImportance,InpMaxTargetR);
+               g_gmt,InpNewsMinutesBefore,InpNewsMinutesAfter,InpNewsImportance,InpMaxTargetR,
+               InpStopBufferUnits,InpTargetPullUnits);
 
    //--- per account and per symbol, so two challenges running side by side
    //--- can never inherit each other's capital, trading days or streaks

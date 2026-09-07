@@ -73,6 +73,8 @@ private:
    int               m_bias_mid;
    string            m_playbook;
    double            m_max_target_r;   // reject an objective further than this
+   double            m_stop_buf_units; // stop clearance beyond structure, in median candles
+   double            m_tp_pull_units;  // pull the objective this far short of the pool
 
    //--- key levels of the day / week ---------------------------------
    double            m_pdh,m_pdl,m_pwh,m_pwl,m_ah,m_al;
@@ -201,7 +203,7 @@ public:
                                         m_model(NULL), m_log(NULL), m_gmt(0), m_news_block_before(15),
                                         m_news_block_after(10), m_news_importance(3), m_veto(""), m_context(""),
                                         m_bias_htf(DIR_NONE), m_bias_mid(DIR_NONE), m_playbook(""),
-                                        m_max_target_r(6.0),
+                                        m_max_target_r(6.0), m_stop_buf_units(0.35), m_tp_pull_units(0.10),
                                         m_pdh(0), m_pdl(0), m_pwh(0), m_pwl(0), m_ah(0), m_al(0),
                                         m_has_day(false), m_has_week(false), m_has_asia(false)
      {
@@ -213,9 +215,12 @@ public:
    void              Init(CMarketState *ms,CSmcEngine *entry,CSmcEngine *mid,CSmcEngine *high,
                           CNewsFilter *news,COnlineLearner *model,CLogger *log,const int gmt_offset,
                           const int news_before,const int news_after,const int news_importance,
-                          const double max_target_r=6.0)
+                          const double max_target_r=6.0,
+                          const double stop_buf_units=0.35,const double tp_pull_units=0.10)
      {
       m_max_target_r=max_target_r;
+      m_stop_buf_units=MathMax(stop_buf_units,0.0);
+      m_tp_pull_units =MathMax(tp_pull_units,0.0);
       m_ms=ms; m_e=entry; m_m=mid; m_h=high; m_news=news; m_model=model; m_log=log;
       m_gmt=gmt_offset;
       m_news_block_before=news_before;
@@ -361,7 +366,11 @@ public:
 
       //--- entry, protective stop and objectives ----------------------
       double entry=(dir==DIR_BULL?ask:bid);
-      double buffer=unit*0.35+m_ms.SpreadPrice()*2.0;
+      //--- Clearance beyond the structural level. Everyone's stop sits on the
+      //--- same swing low, which is exactly why it gets swept - the buffer is
+      //--- what keeps this one out of the obvious pile. Expressed in median
+      //--- candles so it scales with the tape, plus the spread it must cross.
+      double buffer=unit*m_stop_buf_units+m_ms.SpreadPrice()*2.0;
       double sl;
       if(dir==DIR_BULL)
         {
@@ -399,7 +408,10 @@ public:
       double tp1=0.0,tp2=0.0;
       string t1name="",t2name="";
       double t1w=0.0;
-      if(!m_e.NextTarget(dir,entry,risk*1.2,tp1,t1name,t1w))
+      //--- Ask for a pool far enough out that it still clears 1.2R AFTER the
+      //--- objective is pulled back toward entry.
+      double pull=unit*m_tp_pull_units;
+      if(!m_e.NextTarget(dir,entry,risk*1.2+pull,tp1,t1name,t1w))
         {
          if(!m_e.RangeTarget(dir,entry,tp1))
            {
@@ -413,6 +425,22 @@ public:
       if(!m_e.RangeTarget(dir,entry,tp2) || (dir==DIR_BULL?tp2<=tp1:tp2>=tp1))
          tp2=(dir==DIR_BULL?entry+(tp1-entry)*1.8:entry-(entry-tp1)*1.8);
 
+      //--- Stop short of the pool rather than at it. Price frequently turns a
+      //--- few tenths of a candle before touching resting liquidity, because
+      //--- that is where the opposing orders are. Filling reliably at a
+      //--- slightly smaller objective beats missing a larger one.
+      if(pull>0.0)
+        {
+         double t1=(dir==DIR_BULL?tp1-pull:tp1+pull);
+         double t2=(dir==DIR_BULL?tp2-pull:tp2+pull);
+         //--- never let the pullback drag an objective back through the entry
+         if((dir==DIR_BULL && t1>entry) || (dir==DIR_BEAR && t1<entry)) tp1=t1;
+         if((dir==DIR_BULL && t2>tp1)   || (dir==DIR_BEAR && t2<tp1))   tp2=t2;
+        }
+
+      //--- R is measured AFTER both adjustments, so the expectancy gate and
+      //--- the position size are judged on the trade that will actually be
+      //--- sent, not on the geometry before it was made realistic.
       double rr1=SmcSafeDiv(MathAbs(tp1-entry),risk,0.0);
       double rr2=SmcSafeDiv(MathAbs(tp2-entry),risk,0.0);
 
