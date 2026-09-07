@@ -99,13 +99,86 @@ Enable **AutoTrading**, and in *Tools → Options → Expert Advisors* allow
 `Algo Trading`. The agent writes its model and state to the **common files** folder,
 so nothing is lost when you move it between charts or terminals.
 
+## 1c. Warm up before you risk money
+
+**Read this before you attach the agent to a funded account.**
+
+The agent trades from the first bar. Warm-up is **not** a trading gate — it
+governs whose opinion is being used, not whether an order is sent. With
+`InpDryRun = false` and the counter at `0/25`, real orders go to the broker at
+full size.
+
+### What is actually deciding those trades
+
+Until 25 setups have resolved, the probability comes entirely from the research
+priors — the strategy as designed, not as measured. Those priors are more than
+strong enough to clear the acceptance threshold:
+
+| Average factor score | Probability | Decision | Position size |
+|---|---|---|---|
+| 0.20 | 56% | declined | — |
+| **0.28** | **62%** | **← threshold** | 0.70× |
+| 0.40 | 70% | trades | 0.92× |
+| **0.45** | **73%** | trades | **1.00× — full requested risk** |
+| 0.60 | 81% | trades | 1.22× |
+
+A setup averaging 0.45 across its factors receives your full requested risk. The
+sizing logic reads the probability and cannot tell that it came from an untested
+hypothesis rather than a measured result.
+
+That is defensible — you are trading a defined strategy from day one — but it
+means the agent is at its **least** informed exactly when it is staking real
+money at full confidence.
+
+### The recommended sequence
+
+1. **Attach with `InpDryRun = true`.** Everything runs: the agent sizes each
+   trade as it would live, marks it to market against real candles, moves a
+   simulated equity curve, applies the drawdown floors to that curve, and trains
+   the model at full weight. Nothing reaches the broker.
+2. **Set `InpLogToFile = true`** so the decision log is preserved.
+3. **Leave it alone until the panel reads `25/25`** and `MODE` changes from
+   `WARM-UP` to `LIVE`. The counter fills from *resolved setups*, not trades —
+   setups the agent declined resolve too, so it fills faster than the trade rate
+   suggests.
+4. **Read the log before funding.** Look at what it took and what it refused. If
+   the reasoning does not match how you read the chart, that is worth knowing
+   before money is involved.
+5. **Run `analyse_model.py` against the model CSV.** It reports whether the
+   learning means anything yet, and it refuses to compute below 20 setups
+   precisely because small samples mislead.
+6. **Set `InpDryRun = false`** and remove the EA from the chart and re-attach.
+   The model file persists, so the learning carries over — the counter does not
+   reset.
+
+### If you would rather not wait
+
+Two weaker alternatives, in order of preference:
+
+- **Halve `InpBaseRiskPct`** for the warm-up period, raise it once `LIVE`.
+- **Raise `InpMinProbability` to ~0.75** initially. From the table above that
+  demands a 0.48 factor average instead of 0.28, so far fewer setups qualify.
+
+Neither gives you a measured starting point. They only reduce what an untested
+opinion can cost you.
+
+### What warm-up does not protect against
+
+Completing warm-up means the model now outweighs the priors. It does **not** mean
+the model is good. Twenty-five samples across seventeen factors is a very small
+training set; treat `LIVE` as "the blend has finished", not as validation. The
+figures that would constitute evidence are set out in `analyse_model.py` and the
+methodology document.
+
 ## 2. First run — what you should see
 
 1. The journal prints the calibration and the FTMO envelope it computed:
    `FTMO envelope: initial 100000.00  daily floor 95000.00  overall floor 90000.00  target 110000.00`
 2. The chart fills with order blocks, imbalances, BOS/CHoCH labels, liquidity lines
    and the premium/discount range.
-3. The panel appears top-left showing `MODE WARM-UP 0/25`.
+3. The panel appears top-left showing `MODE WARM-UP 0/25`. If `InpDryRun` is
+   false, **it is already trading real money at full size** — see
+   [section 1c](#1c-warm-up-before-you-risk-money).
 4. On each bar close a decision block is printed:
 
 ```
@@ -116,16 +189,23 @@ FACTORS| HTF structure +0.20; Liquidity raid +0.24; Entry structure +0.30; Premi
 PLAN   | BUY A - liquidity raid + CHoCH. sell-side liquidity taken at ASIA-L then structure shifted BULLISH. Trading from the BULLISH OB at 4321.10-4324.60 towards EQH for 2.41R. Model confidence 68%. Top evidence: Entry structure(+0.30) Liquidity raid(+0.24) HTF structure(+0.20).
 MODEL  | probability 68.0% vs acceptance 62.0% (warm-up, 7 observations, accuracy 57%)
 SIZE   | risking 512.30 (0.51% of the phase capital) with 0.42 lots, stop 12.20 away
-EXECUTE| #123456789 BUY 0.42 lots @ 4333.55
+EXECUTE| #123456789 BUY 0.42 lots @ 4333.55  [structure: failed-CHoCH raid HTF-aligned]
 ```
 
 When it stands aside it says exactly why:
 
 ```
-DECIDE | stand aside: reward 1.18R below the 1.42R that a 56% setup must earn
-DECIDE | stand aside: inside the release window of Non-Farm Payrolls (USD) (+8 min)
-DECIDE | stand aside: risk envelope: soft daily stop
+DECIDE | stand aside: reward 1.18R below the 1.42R that a 56% setup must earn  [structure: CHoCH+BOS raid]
+DECIDE | stand aside: inside the release window of Non-Farm Payrolls (USD) (+8 min)  [structure: -]
+DECIDE | stand aside: risk envelope: soft daily stop  [structure: CHoCH-unconfirmed IDM-resting]
 ```
+
+The `[structure: ...]` tag records the structural context of the setup —
+whether the change of character was confirmed by a break of structure, whether
+an inducement was present and had been run, and whether the sweep followed a
+*failed* CHoCH. These are recorded for analysis only. **They are never scored**
+and never influence a decision; `analyse_model.py` splits outcomes on them so a
+structural hypothesis can be tested before anyone gives it a weight.
 
 ## 3. Reading the panel
 
@@ -273,15 +353,36 @@ logic on a fresh install before funding, or to sanity check sizing against your
 broker's contract specs. The panel shows `MODE  DRY RUN` throughout so a dry run
 can never be mistaken for live trading.
 
+**This is the recommended way to start.** See [section 1c](#1c-warm-up-before-you-risk-money)
+— the agent places real, full-size orders while the warm-up counter is still at
+`0/25`, and a dry run is how you get past that on simulated money instead.
+
 **Note on forcing live orders instead:** there is deliberately no switch to send
 real orders on a zero-equity account. The server rejects them for want of margin,
 so it would produce a log full of `TRADE_RETCODE_NO_MONEY` and teach you nothing
 a dry run does not.
 
-### Trade management, news, visuals
-See the input groups in the EA — partial/break-even/trail R multiples, the news
-window and importance filter, the CSV fallback name, panel position and log level
-(`3` = full decision log, `4` = adds observation-book detail).
+### Trade management
+
+| Input | Default | Notes |
+|---|---|---|
+| `InpStopBufferUnits` | 0.35 | Stop clearance beyond structure, in median candles. Raise it if stops are being swept before the move; expect fewer trades, because a wider stop shrinks R and more setups then fail the expectancy gate |
+| `InpTargetPullUnits` | 0.10 | Pull the objective this far short of the pool, in median candles. Price often turns just before resting liquidity |
+| `InpMaxTargetR` | 6.00 | Reject a setup whose first objective is further than this |
+| `InpPartialAtR` | 1.00 | Take partial profit at this R multiple |
+| `InpPartialPercent` | 50.0 | Percent closed at that point |
+| `InpBreakEvenAtR` | 1.00 | Move the stop to break even at this R |
+| `InpTrailAfterR` | 1.50 | Start structural trailing after this R |
+| `InpTimeStopBars` | 0 | Give up after N bars without expansion (0 = adaptive) |
+
+Both buffer inputs are expressed in **median candles**, not pips, so they scale
+with the instrument and the current volatility rather than being pinned to gold
+at today's range.
+
+### News, visuals
+See the input groups in the EA — the news window and importance filter, the CSV
+fallback name, panel position and log level (`3` = full decision log, `4` = adds
+observation-book detail).
 
 ## 4b. How the account size is determined
 
