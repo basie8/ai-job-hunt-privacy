@@ -1186,6 +1186,7 @@ bool OnBarClose()
    if(g_exec.Open(g_sig.dir,lots,g_sig.sl,g_sig.tp1,comment))
      {
       ulong ticket=0,posid=0;
+      double fill=0.0,fsl=0.0,ftp=0.0;
       for(int i=PositionsTotal()-1;i>=0;i--)
         {
          ulong t=PositionGetTicket(i);
@@ -1197,12 +1198,30 @@ bool OnBarClose()
          //--- history is indexed by the position identifier, which is not
          //--- always the same number as the position ticket
          posid=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
+         //--- The price the order FILLED at, not the price the signal was
+         //--- built on. Every R the trade manager computes comes off this
+         //--- number: the partial, the break even and the trail all trigger
+         //--- from (price - entry) / risk. Recording the intended entry made
+         //--- break-even settle on a price the position never traded at, so
+         //--- after adverse slippage "break even" was quietly a small loss.
+         fill=PositionGetDouble(POSITION_PRICE_OPEN);
+         fsl =PositionGetDouble(POSITION_SL);
+         ftp =PositionGetDouble(POSITION_TP);
          break;
         }
+      if(fill<=0.0) fill=g_sig.entry;
+      if(fsl <=0.0) fsl =g_sig.sl;
+      if(ftp <=0.0) ftp =g_sig.tp1;
       if(ticket>0)
         {
          g_size_skips=0;
-         g_journal.Add(ticket,posid,x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,g_sig.meta);
+         g_journal.Add(ticket,posid,x,fill,fsl,ftp,g_sig.dir,g_sig.meta);
+         //--- slippage worth knowing about: it moves every R trigger
+         double slip=MathAbs(fill-g_sig.entry);
+         double rr  =MathAbs(fill-fsl);
+         if(rr>0.0 && slip/rr>0.02)
+            g_log.Warn(StringFormat("Filled at %.5f, %.5f from the %.5f the setup was built on - %.1f%% of the stop distance. Every R trigger now runs off the fill, not the plan.",
+                       fill,slip,g_sig.entry,slip/rr*100.0));
          g_risk.OnTradeOpened();
          g_last_signal=g_sig.bar_time;
          g_last_action=StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry);

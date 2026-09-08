@@ -432,6 +432,11 @@ public:
 
    bool              PartialClose(const ulong ticket,const double volume)
      {
+      //--- POSITION_VOLUME below reads whichever position is currently
+      //--- selected. Every caller happens to select first today, so this has
+      //--- never misfired - but the function has to be correct on its own,
+      //--- not correct because of what its callers remember to do.
+      if(!PositionSelectByTicket(ticket)) return(false);
       double step=SymbolInfoDouble(m_symbol,SYMBOL_VOLUME_STEP);
       double vmin=SymbolInfoDouble(m_symbol,SYMBOL_VOLUME_MIN);
       if(step<=0.0) step=0.01;
