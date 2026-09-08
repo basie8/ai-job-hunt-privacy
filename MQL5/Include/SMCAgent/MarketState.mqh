@@ -317,7 +317,12 @@ public:
       datetime now_utc=SmcServerToUtc(SmcNow(),gmt_offset);
       datetime today_local=SmcZoneDayStart(TZ_LONDON,now_utc);
       hi=-DBL_MAX; lo=DBL_MAX;
-      for(int i=0;i<cnt;i++)
+      //--- from bar 1: the forming candle's extremes are incomplete, and the
+      //--- Asian high and low become the highest weighted session pools in
+      //--- the book. A raid measured against a level that is still moving is
+      //--- not a raid. Everything else in this codebase reads closed bars
+      //--- only; this was the one place that did not.
+      for(int i=1;i<cnt;i++)
         {
          datetime b_utc=SmcServerToUtc(m[i].time,gmt_offset);
          datetime b_loc=SmcUtcToZone(TZ_LONDON,b_utc);

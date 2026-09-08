@@ -151,7 +151,12 @@ private:
          string cur=parts[1];
          int imp=(int)StringToInteger(parts[2]);
          if(!CurrencyWatched(cur)) continue;
-         Push(t,parts[3],cur,imp);
+         //--- rejoin the tail: an event name containing a semicolon would
+         //--- otherwise be truncated at the first one, so "GDP; Preliminary"
+         //--- reached the log and the panel as "GDP"
+         string nm=parts[3];
+         for(int q=4;q<k;q++) nm+=";"+parts[q];
+         Push(t,nm,cur,imp);
          total++;
         }
       FileClose(h);

@@ -1163,7 +1163,12 @@ public:
       datetime now_utc=SmcServerToUtc(SmcNow(),gmt_offset);
       datetime today_local=SmcZoneDayStart(TZ_LONDON,now_utc);
       hi=-DBL_MAX; lo=DBL_MAX;
-      for(int i=0;i<cnt;i++)
+      //--- from bar 1: the forming candle's extremes are incomplete, and the
+      //--- Asian high and low become the highest weighted session pools in
+      //--- the book. A raid measured against a level that is still moving is
+      //--- not a raid. Everything else in this codebase reads closed bars
+      //--- only; this was the one place that did not.
+      for(int i=1;i<cnt;i++)
         {
          datetime b_utc=SmcServerToUtc(m[i].time,gmt_offset);
          datetime b_loc=SmcUtcToZone(TZ_LONDON,b_utc);
@@ -2159,7 +2164,12 @@ private:
          string cur=parts[1];
          int imp=(int)StringToInteger(parts[2]);
          if(!CurrencyWatched(cur)) continue;
-         Push(t,parts[3],cur,imp);
+         //--- rejoin the tail: an event name containing a semicolon would
+         //--- otherwise be truncated at the first one, so "GDP; Preliminary"
+         //--- reached the log and the panel as "GDP"
+         string nm=parts[3];
+         for(int q=4;q<k;q++) nm+=";"+parts[q];
+         Push(t,nm,cur,imp);
          total++;
         }
       FileClose(h);
