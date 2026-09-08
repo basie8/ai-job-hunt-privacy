@@ -4254,7 +4254,8 @@ private:
    int               m_bars[];
    int               m_meta[];      // SMC_META_* structural context at the moment it was booked
    datetime          m_zone[];      // creating candle of the engaged zone: the setup's durable identity
-   int               m_max_bars;
+   int               m_budget[];    // bars this observation is allowed, scaled to how far its target is
+   int               m_max_bars;    // the budget a median setup gets; others are scaled from it
    CLogger          *m_log;
 
 public:
@@ -4313,7 +4314,23 @@ public:
       ArrayResize(m_bars,k+1);
       ArrayResize(m_meta,k+1);
       ArrayResize(m_zone,k+1);
+      ArrayResize(m_budget,k+1);
       ArrayResize(m_x,(k+1)*m_n);
+      //--- A far target needs longer to reach, so giving every observation
+      //--- the same fixed window is not neutral: it quietly discards the
+      //--- distant setups that were slowly WINNING while keeping the ones
+      //--- that hit their stop early. That selection manufactures the
+      //--- appearance that distant targets fail, and it cannot be measured
+      //--- around because the discarded rows are never written down.
+      //---
+      //--- The budget is therefore proportional to the distance price has
+      //--- to travel, anchored so a 1.5R setup keeps exactly the window it
+      //--- had before. Clamped either side: a very tight target still gets
+      //--- a fair look, and a very distant one cannot occupy a slot forever.
+      double rr=SmcSafeDiv(MathAbs(tp-entry),MathAbs(entry-sl),1.5);
+      int budget=(int)MathRound(m_max_bars*rr/1.5);
+      budget=(int)SmcClamp(budget,m_max_bars/2,m_max_bars*3);
+      m_budget[k]=budget;
       m_meta[k]=meta;
       m_zone[k]=zone_from;
       m_dir[k]=dir; m_entry[k]=entry; m_sl[k]=sl; m_tp[k]=tp; m_lots[k]=lots;
@@ -4335,6 +4352,7 @@ public:
       ArrayRemove(m_bars,i,1);
       ArrayRemove(m_meta,i,1);
       ArrayRemove(m_zone,i,1);
+      ArrayRemove(m_budget,i,1);
      }
 
    //--- resolve every paper setup against the last closed bar ---------
@@ -4355,7 +4373,7 @@ public:
          if(hit_sl && hit_tp) y=0.0;                       // ambiguous bar: assume the stop first
          else if(hit_tp) y=1.0;
          else if(hit_sl) y=0.0;
-         else if(m_bars[i]>=m_max_bars) timed_out=true;    // neither side reached
+         else if(m_bars[i]>=m_budget[i]) timed_out=true;   // neither side reached in its own window
 
          //--- A setup that reached neither its objective nor its stop is
          //--- UNRESOLVED, not a failure. Training on it as a loss is what
@@ -4366,7 +4384,8 @@ public:
          if(timed_out)
            {
             if(m_log!=NULL)
-               m_log.Debug(StringFormat("Observation discarded unresolved after %d bars - not trained on",m_bars[i]));
+               m_log.Debug(StringFormat("Observation discarded unresolved after %d of its %d allowed bars (%.2fR target) - not trained on",
+                           m_bars[i],m_budget[i],SmcSafeDiv(MathAbs(m_tp[i]-m_entry[i]),MathAbs(m_entry[i]-m_sl[i]),0.0)));
             Remove(i);
             continue;
            }
