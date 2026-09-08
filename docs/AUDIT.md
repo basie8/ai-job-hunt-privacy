@@ -220,6 +220,7 @@ no trades taken) and never below the 0.550 floor.
 | `94d67cb` | 0 errors, 2 warnings | bare `int` used as a ternary condition, lines 2573–2574 |
 | `96b7378` | — | warnings fixed |
 | **`646e665`** | **0 errors, 0 warnings** | MetaEditor, X64 Regular, 4642 ms — the first clean build of the fully audited source |
+| **`6956140`** | **0 errors, 0 warnings** | Current build. Adds per-instrument price precision on top of the audited source |
 
 Confirmed by the user in MetaTrader 5. This is the only execution evidence
 that exists: everything else in this document is static reading, structural
