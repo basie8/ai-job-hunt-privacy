@@ -1023,7 +1023,7 @@ bool OnBarClose()
       if((InpVirtualLearning || InpDryRun) && g_sig.observable)
         {
          int before=g_vbook.Count();
-         g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,0.0,g_sig.meta);
+         g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,0.0,g_sig.meta,g_sig.zone_from);
          if(g_vbook.Count()>before)
             g_log.Think(StringFormat("OBSERVE| watching the rejected %s setup anyway - entry %.2f sl %.2f tp %.2f (%d in the book)",
                         SmcDirShort(g_sig.dir),g_sig.entry,g_sig.sl,g_sig.tp1,g_vbook.Count()));
@@ -1111,7 +1111,7 @@ bool OnBarClose()
       //--- book fills with setups the model disliked, they mostly lose, the
       //--- bias sinks, and fewer setups clear the bar next time.
       if((InpVirtualLearning || InpDryRun) && !blocked_by_model)
-         g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,0.0,g_sig.meta);
+         g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,0.0,g_sig.meta,g_sig.zone_from);
       Redraw();
       return(true);
      }
@@ -1125,7 +1125,7 @@ bool OnBarClose()
       //--- trade is marked to market against real candles from here, so
       //--- the equity curve, the FTMO floors and the model all move as
       //--- they would live.
-      g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,lots,g_sig.meta);
+      g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,lots,g_sig.meta,g_sig.zone_from);
       g_risk.OnTradeOpened();
       g_last_signal=g_sig.bar_time;
       g_size_skips=0;
@@ -1148,7 +1148,7 @@ bool OnBarClose()
       //--- dry run trade does - this setup passed every gate, it is not a
       //--- discounted paper observation. No OnTradeOpened(): nothing was
       //--- traded, so it is not a trading day.
-      g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,lots,g_sig.meta);
+      g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,lots,g_sig.meta,g_sig.zone_from);
       g_last_signal=g_sig.bar_time;
       g_size_skips=0;
       g_last_action=StringFormat("OBSERVING %s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry);
@@ -1207,7 +1207,7 @@ bool OnBarClose()
    else
      {
       g_last_action="order rejected by the server";
-      if(InpVirtualLearning) g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,0.0,g_sig.meta);
+      if(InpVirtualLearning) g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,0.0,g_sig.meta,g_sig.zone_from);
      }
 
    Redraw();

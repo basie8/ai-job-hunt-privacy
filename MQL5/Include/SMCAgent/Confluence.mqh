@@ -271,6 +271,7 @@ public:
       sig.model="";
       sig.observable=false;
       sig.meta=0;
+      sig.zone_from=0;
       m_veto="";
       m_playbook="none";
       ArrayInitialize(m_x,0.0);
@@ -454,6 +455,7 @@ public:
       sig.dir=dir; sig.entry=entry; sig.sl=sl; sig.tp1=tp1; sig.tp2=tp2;
       sig.rr1=rr1; sig.rr2=rr2; sig.bar_time=bt; sig.model=m_playbook;
       sig.zone_top=zone.top; sig.zone_bottom=zone.bottom;
+      sig.zone_from=zone.t_from;
       sig.idm=zone.idm; sig.idm_taken=zone.idm_taken;
 
       //--- Structural context, recorded but never scored. The distinction

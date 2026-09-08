@@ -216,6 +216,11 @@ struct SSignal
    datetime          bar_time;
    double            zone_top;
    double            zone_bottom;
+   //--- Timestamp of the candle that created the engaged zone. Stable
+   //--- across rebuilds - unlike SZone.uid, which is reassigned every
+   //--- time MapStructure re-derives the zones - so it is the only
+   //--- durable identity a setup has. The observation book keys on it.
+   datetime          zone_from;
    double            idm;         // inducement guarding the zone (0 = none)
    bool              idm_taken;
    //--- SMC_META_* bitfield: structural context for diagnostics only,
@@ -3499,6 +3504,7 @@ public:
       sig.model="";
       sig.observable=false;
       sig.meta=0;
+      sig.zone_from=0;
       m_veto="";
       m_playbook="none";
       ArrayInitialize(m_x,0.0);
@@ -3682,6 +3688,7 @@ public:
       sig.dir=dir; sig.entry=entry; sig.sl=sl; sig.tp1=tp1; sig.tp2=tp2;
       sig.rr1=rr1; sig.rr2=rr2; sig.bar_time=bt; sig.model=m_playbook;
       sig.zone_top=zone.top; sig.zone_bottom=zone.bottom;
+      sig.zone_from=zone.t_from;
       sig.idm=zone.idm; sig.idm_taken=zone.idm_taken;
 
       //--- Structural context, recorded but never scored. The distinction
@@ -4246,6 +4253,7 @@ private:
    datetime          m_time[];
    int               m_bars[];
    int               m_meta[];      // SMC_META_* structural context at the moment it was booked
+   datetime          m_zone[];      // creating candle of the engaged zone: the setup's durable identity
    int               m_max_bars;
    CLogger          *m_log;
 
@@ -4257,10 +4265,30 @@ public:
 
    int               Count(void) { return(ArraySize(m_dir)); }
 
-   //--- the same setup can survive several closes in a row; recording it
-   //--- once per bar would let one market moment dominate the training set
-   bool              Has(const int dir,const double entry,const double sl)
+   //--- The same setup survives many closes in a row, and booking it once
+   //--- per bar lets one market moment dominate the training set.
+   //---
+   //--- This used to compare entry and stop prices. Entry is the live
+   //--- bid/ask, which moves every bar, so the test almost never matched
+   //--- and a single structure was booked over and over - measured at up
+   //--- to 2.9 stored rows per real setup on live M5 and M15 files. The
+   //--- model then trained repeatedly on one market moment, and every
+   //--- statistic computed from the file was inflated by the same factor.
+   //---
+   //--- The zone's creating candle is the durable identity. It survives
+   //--- the rebuild that reassigns SZone.uid, and a timestamp compares
+   //--- exactly. Entries leave the book when they resolve, so this blocks
+   //--- CONCURRENT duplicates only: the same zone may legitimately produce
+   //--- a fresh setup later, and that is still recorded.
+   bool              Has(const int dir,const double entry,const double sl,const datetime zone_from)
      {
+      if(zone_from>0)
+        {
+         for(int i=ArraySize(m_dir)-1;i>=0;i--)
+            if(m_dir[i]==dir && m_zone[i]==zone_from) return(true);
+         return(false);
+        }
+      //--- no zone identity available: fall back to the price comparison
       double tol=MathMax(MathAbs(entry)*1e-6,_Point);
       for(int i=ArraySize(m_dir)-1;i>=0;i--)
          if(m_dir[i]==dir && MathAbs(m_entry[i]-entry)<=tol && MathAbs(m_sl[i]-sl)<=tol)
@@ -4269,11 +4297,11 @@ public:
      }
 
    void              Add(const double &x[],const double entry,const double sl,const double tp,const int dir,
-                         const double lots=0.0,const int meta=0)
+                         const double lots=0.0,const int meta=0,const datetime zone_from=0)
      {
       if(dir==DIR_NONE || entry<=0.0 || sl<=0.0 || tp<=0.0) return;
       if(MathAbs(entry-sl)<=0.0) return;
-      if(Has(dir,entry,sl)) return;                 // already watching this exact setup
+      if(Has(dir,entry,sl,zone_from)) return;       // already watching this structure
       if(ArraySize(m_dir)>=VB_MAX) Remove(0);
       int k=ArraySize(m_dir);
       ArrayResize(m_lots,k+1);
@@ -4284,8 +4312,10 @@ public:
       ArrayResize(m_time,k+1);
       ArrayResize(m_bars,k+1);
       ArrayResize(m_meta,k+1);
+      ArrayResize(m_zone,k+1);
       ArrayResize(m_x,(k+1)*m_n);
       m_meta[k]=meta;
+      m_zone[k]=zone_from;
       m_dir[k]=dir; m_entry[k]=entry; m_sl[k]=sl; m_tp[k]=tp; m_lots[k]=lots;
       m_time[k]=SmcNow(); m_bars[k]=0;
       for(int i=0;i<m_n;i++) m_x[k*m_n+i]=(i<ArraySize(x)?x[i]:0.0);
@@ -4304,6 +4334,7 @@ public:
       ArrayRemove(m_time,i,1);
       ArrayRemove(m_bars,i,1);
       ArrayRemove(m_meta,i,1);
+      ArrayRemove(m_zone,i,1);
      }
 
    //--- resolve every paper setup against the last closed bar ---------
@@ -6242,7 +6273,7 @@ bool OnBarClose()
       if((InpVirtualLearning || InpDryRun) && g_sig.observable)
         {
          int before=g_vbook.Count();
-         g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,0.0,g_sig.meta);
+         g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,0.0,g_sig.meta,g_sig.zone_from);
          if(g_vbook.Count()>before)
             g_log.Think(StringFormat("OBSERVE| watching the rejected %s setup anyway - entry %.2f sl %.2f tp %.2f (%d in the book)",
                         SmcDirShort(g_sig.dir),g_sig.entry,g_sig.sl,g_sig.tp1,g_vbook.Count()));
@@ -6330,7 +6361,7 @@ bool OnBarClose()
       //--- book fills with setups the model disliked, they mostly lose, the
       //--- bias sinks, and fewer setups clear the bar next time.
       if((InpVirtualLearning || InpDryRun) && !blocked_by_model)
-         g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,0.0,g_sig.meta);
+         g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,0.0,g_sig.meta,g_sig.zone_from);
       Redraw();
       return(true);
      }
@@ -6344,7 +6375,7 @@ bool OnBarClose()
       //--- trade is marked to market against real candles from here, so
       //--- the equity curve, the FTMO floors and the model all move as
       //--- they would live.
-      g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,lots,g_sig.meta);
+      g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,lots,g_sig.meta,g_sig.zone_from);
       g_risk.OnTradeOpened();
       g_last_signal=g_sig.bar_time;
       g_size_skips=0;
@@ -6367,7 +6398,7 @@ bool OnBarClose()
       //--- dry run trade does - this setup passed every gate, it is not a
       //--- discounted paper observation. No OnTradeOpened(): nothing was
       //--- traded, so it is not a trading day.
-      g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,lots,g_sig.meta);
+      g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,lots,g_sig.meta,g_sig.zone_from);
       g_last_signal=g_sig.bar_time;
       g_size_skips=0;
       g_last_action=StringFormat("OBSERVING %s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry);
@@ -6426,7 +6457,7 @@ bool OnBarClose()
    else
      {
       g_last_action="order rejected by the server";
-      if(InpVirtualLearning) g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,0.0,g_sig.meta);
+      if(InpVirtualLearning) g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,0.0,g_sig.meta,g_sig.zone_from);
      }
 
    Redraw();

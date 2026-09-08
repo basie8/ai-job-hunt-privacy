@@ -172,6 +172,11 @@ struct SSignal
    datetime          bar_time;
    double            zone_top;
    double            zone_bottom;
+   //--- Timestamp of the candle that created the engaged zone. Stable
+   //--- across rebuilds - unlike SZone.uid, which is reassigned every
+   //--- time MapStructure re-derives the zones - so it is the only
+   //--- durable identity a setup has. The observation book keys on it.
+   datetime          zone_from;
    double            idm;         // inducement guarding the zone (0 = none)
    bool              idm_taken;
    //--- SMC_META_* bitfield: structural context for diagnostics only,
