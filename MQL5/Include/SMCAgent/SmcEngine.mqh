@@ -21,6 +21,10 @@
 #define SMC_MAX_SWINGS   80
 #define SMC_MAX_ZONES    60
 #define SMC_MAX_EVENTS   40
+//--- a break older than this is history, not a breaker waiting for a retest
+#define SMC_BREAKER_BARS 60
+//--- a raid may reclaim the level over this many bars, not only the one it breached on
+#define SMC_SWEEP_RECLAIM 3
 #define SMC_MAX_LIQ      40
 
 class CSmcEngine
@@ -408,12 +412,40 @@ private:
               }
            }
         }
-      //--- drop broken / stale zones, keep the freshest ones
+      //--- Keep the freshest zones. A broken one is not simply discarded:
+      //--- once price has displaced through an order block, the same levels
+      //--- frequently hold on the retest as the OPPOSITE polarity. That is a
+      //--- breaker, and ZONE_BREAKER has been a declared kind since the
+      //--- beginning with nothing anywhere creating one.
+      //---
+      //--- It carries reduced strength on purpose: these levels have already
+      //--- failed once in their original direction, so a breaker is a weaker
+      //--- claim than a fresh block and should not outrank one.
       SZone keep[];
       int kept=0;
       for(int z=zn-1;z>=0 && kept<SMC_MAX_ZONES;z--)
         {
-         if(m_zones[z].broken) continue;
+         if(m_zones[z].broken)
+           {
+            //--- only a real order block flips; an imbalance that fills is
+            //--- simply filled, and a breaker that breaks again is finished
+            if(m_zones[z].kind!=ZONE_OB) continue;
+            int bb=iBarShiftLocal(m_zones[z].t_to);
+            if(bb<1 || bb>SMC_BREAKER_BARS) continue;      // stale break, let it go
+            SZone br=m_zones[z];
+            br.kind=ZONE_BREAKER;
+            br.dir=-m_zones[z].dir;                        // polarity flips
+            br.broken=false;
+            br.mitigated=false;
+            br.t_active=m_zones[z].t_to;                   // it becomes live at the break
+            br.idm=0.0; br.idm_time=0; br.idm_taken=true;  // its inducement belonged to the old block
+            br.strength=SmcClamp(m_zones[z].strength*0.70,0.0,1.0);
+            br.uid=++m_uid;
+            ArrayResize(keep,kept+1);
+            keep[kept]=br;
+            kept++;
+            continue;
+           }
          ArrayResize(keep,kept+1);
          keep[kept]=m_zones[z];
          kept++;
@@ -457,6 +489,19 @@ private:
         {
          int kind=(m_swings[i].dir==DIR_BULL?LQ_SWING_H:LQ_SWING_L);
          AddLiquidity(kind,m_swings[i].dir,m_swings[i].price,m_swings[i].time,0.55);
+        }
+      //--- Inducement is resting liquidity in its own right: it is where the
+      //--- traders who entered on the first move placed their stops. Until
+      //--- now it only gated zone arming and stop placement, and LQ_IDM was
+      //--- a declared pool kind that nothing ever created - so a raid ON an
+      //--- inducement could never trigger a setup. It can now.
+      int zc=ArraySize(m_zones);
+      for(int z=0;z<zc;z++)
+        {
+         if(m_zones[z].broken || m_zones[z].idm<=0.0 || m_zones[z].idm_taken) continue;
+         //--- a demand zone's inducement is the low beneath it: sell-side
+         int ldir=(m_zones[z].dir==DIR_BULL?DIR_BEAR:DIR_BULL);
+         AddLiquidity(LQ_IDM,ldir,m_zones[z].idm,m_zones[z].idm_time,0.70);
         }
       MarkSweptPools();
      }
@@ -521,11 +566,25 @@ private:
             double p=m_liq[i].price;
             if(m_liq[i].dir==DIR_BULL)
               {
-               //--- raid above buy-side liquidity, close back below = bearish reaction
-               if(H(b)>p && C(b)<p)
+               //--- Raid above buy-side liquidity, then price closes back below it.
+               //--- The reclaim used to be required on the breaching candle
+               //--- itself, which only ever caught a single-bar wick rejection.
+               //--- A raid that holds above the level for two or three bars
+               //--- before failing is just as much a stop run, and was
+               //--- completely invisible. It is allowed a few bars now, at a
+               //--- discount, because a slower reclaim is a weaker signal.
+               double mult=1.0;
+               bool reject=(C(b)<p);
+               if(!reject)
+                  for(int k=b-1;k>=1 && k>=b-SMC_SWEEP_RECLAIM;k--)
+                     if(C(k)<p) { reject=true; mult=0.75; break; }
+               if(H(b)>p && reject)
                  {
                   double wick=H(b)-MathMax(C(b),O(b));
-                  double q=SmcClamp(SmcSafeDiv(wick,tr,0.0),0.0,1.0)*m_liq[i].weight
+                  //--- reclaimed on a later bar, so the breach candle has no
+                  //--- rejection wick to measure: use how far it overshot
+                  if(wick<=0.0) wick=MathMin(H(b)-p,tr);
+                  double q=SmcClamp(SmcSafeDiv(wick,tr,0.0),0.0,1.0)*m_liq[i].weight*mult
                            *SmcClamp(1.0-(double)(b-1)/(double)window,0.15,1.0);
                   if(q>best_q)
                     {
@@ -537,10 +596,16 @@ private:
               }
             else
               {
-               if(L(b)<p && C(b)>p)
+               double mult=1.0;
+               bool reject=(C(b)>p);
+               if(!reject)
+                  for(int k=b-1;k>=1 && k>=b-SMC_SWEEP_RECLAIM;k--)
+                     if(C(k)>p) { reject=true; mult=0.75; break; }
+               if(L(b)<p && reject)
                  {
                   double wick=MathMin(C(b),O(b))-L(b);
-                  double q=SmcClamp(SmcSafeDiv(wick,tr,0.0),0.0,1.0)*m_liq[i].weight
+                  if(wick<=0.0) wick=MathMin(p-L(b),tr);
+                  double q=SmcClamp(SmcSafeDiv(wick,tr,0.0),0.0,1.0)*m_liq[i].weight*mult
                            *SmcClamp(1.0-(double)(b-1)/(double)window,0.15,1.0);
                   if(q>best_q)
                     {

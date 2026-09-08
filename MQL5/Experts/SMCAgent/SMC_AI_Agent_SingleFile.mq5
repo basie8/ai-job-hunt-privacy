@@ -1210,6 +1210,10 @@ public:
 #define SMC_MAX_SWINGS   80
 #define SMC_MAX_ZONES    60
 #define SMC_MAX_EVENTS   40
+//--- a break older than this is history, not a breaker waiting for a retest
+#define SMC_BREAKER_BARS 60
+//--- a raid may reclaim the level over this many bars, not only the one it breached on
+#define SMC_SWEEP_RECLAIM 3
 #define SMC_MAX_LIQ      40
 
 class CSmcEngine
@@ -1597,12 +1601,40 @@ private:
               }
            }
         }
-      //--- drop broken / stale zones, keep the freshest ones
+      //--- Keep the freshest zones. A broken one is not simply discarded:
+      //--- once price has displaced through an order block, the same levels
+      //--- frequently hold on the retest as the OPPOSITE polarity. That is a
+      //--- breaker, and ZONE_BREAKER has been a declared kind since the
+      //--- beginning with nothing anywhere creating one.
+      //---
+      //--- It carries reduced strength on purpose: these levels have already
+      //--- failed once in their original direction, so a breaker is a weaker
+      //--- claim than a fresh block and should not outrank one.
       SZone keep[];
       int kept=0;
       for(int z=zn-1;z>=0 && kept<SMC_MAX_ZONES;z--)
         {
-         if(m_zones[z].broken) continue;
+         if(m_zones[z].broken)
+           {
+            //--- only a real order block flips; an imbalance that fills is
+            //--- simply filled, and a breaker that breaks again is finished
+            if(m_zones[z].kind!=ZONE_OB) continue;
+            int bb=iBarShiftLocal(m_zones[z].t_to);
+            if(bb<1 || bb>SMC_BREAKER_BARS) continue;      // stale break, let it go
+            SZone br=m_zones[z];
+            br.kind=ZONE_BREAKER;
+            br.dir=-m_zones[z].dir;                        // polarity flips
+            br.broken=false;
+            br.mitigated=false;
+            br.t_active=m_zones[z].t_to;                   // it becomes live at the break
+            br.idm=0.0; br.idm_time=0; br.idm_taken=true;  // its inducement belonged to the old block
+            br.strength=SmcClamp(m_zones[z].strength*0.70,0.0,1.0);
+            br.uid=++m_uid;
+            ArrayResize(keep,kept+1);
+            keep[kept]=br;
+            kept++;
+            continue;
+           }
          ArrayResize(keep,kept+1);
          keep[kept]=m_zones[z];
          kept++;
@@ -1646,6 +1678,19 @@ private:
         {
          int kind=(m_swings[i].dir==DIR_BULL?LQ_SWING_H:LQ_SWING_L);
          AddLiquidity(kind,m_swings[i].dir,m_swings[i].price,m_swings[i].time,0.55);
+        }
+      //--- Inducement is resting liquidity in its own right: it is where the
+      //--- traders who entered on the first move placed their stops. Until
+      //--- now it only gated zone arming and stop placement, and LQ_IDM was
+      //--- a declared pool kind that nothing ever created - so a raid ON an
+      //--- inducement could never trigger a setup. It can now.
+      int zc=ArraySize(m_zones);
+      for(int z=0;z<zc;z++)
+        {
+         if(m_zones[z].broken || m_zones[z].idm<=0.0 || m_zones[z].idm_taken) continue;
+         //--- a demand zone's inducement is the low beneath it: sell-side
+         int ldir=(m_zones[z].dir==DIR_BULL?DIR_BEAR:DIR_BULL);
+         AddLiquidity(LQ_IDM,ldir,m_zones[z].idm,m_zones[z].idm_time,0.70);
         }
       MarkSweptPools();
      }
@@ -1710,11 +1755,25 @@ private:
             double p=m_liq[i].price;
             if(m_liq[i].dir==DIR_BULL)
               {
-               //--- raid above buy-side liquidity, close back below = bearish reaction
-               if(H(b)>p && C(b)<p)
+               //--- Raid above buy-side liquidity, then price closes back below it.
+               //--- The reclaim used to be required on the breaching candle
+               //--- itself, which only ever caught a single-bar wick rejection.
+               //--- A raid that holds above the level for two or three bars
+               //--- before failing is just as much a stop run, and was
+               //--- completely invisible. It is allowed a few bars now, at a
+               //--- discount, because a slower reclaim is a weaker signal.
+               double mult=1.0;
+               bool reject=(C(b)<p);
+               if(!reject)
+                  for(int k=b-1;k>=1 && k>=b-SMC_SWEEP_RECLAIM;k--)
+                     if(C(k)<p) { reject=true; mult=0.75; break; }
+               if(H(b)>p && reject)
                  {
                   double wick=H(b)-MathMax(C(b),O(b));
-                  double q=SmcClamp(SmcSafeDiv(wick,tr,0.0),0.0,1.0)*m_liq[i].weight
+                  //--- reclaimed on a later bar, so the breach candle has no
+                  //--- rejection wick to measure: use how far it overshot
+                  if(wick<=0.0) wick=MathMin(H(b)-p,tr);
+                  double q=SmcClamp(SmcSafeDiv(wick,tr,0.0),0.0,1.0)*m_liq[i].weight*mult
                            *SmcClamp(1.0-(double)(b-1)/(double)window,0.15,1.0);
                   if(q>best_q)
                     {
@@ -1726,10 +1785,16 @@ private:
               }
             else
               {
-               if(L(b)<p && C(b)>p)
+               double mult=1.0;
+               bool reject=(C(b)>p);
+               if(!reject)
+                  for(int k=b-1;k>=1 && k>=b-SMC_SWEEP_RECLAIM;k--)
+                     if(C(k)>p) { reject=true; mult=0.75; break; }
+               if(L(b)<p && reject)
                  {
                   double wick=MathMin(C(b),O(b))-L(b);
-                  double q=SmcClamp(SmcSafeDiv(wick,tr,0.0),0.0,1.0)*m_liq[i].weight
+                  if(wick<=0.0) wick=MathMin(p-L(b),tr);
+                  double q=SmcClamp(SmcSafeDiv(wick,tr,0.0),0.0,1.0)*m_liq[i].weight*mult
                            *SmcClamp(1.0-(double)(b-1)/(double)window,0.15,1.0);
                   if(q>best_q)
                     {
@@ -2105,6 +2170,48 @@ public:
                      CNewsFilter(void): m_last_refresh(0), m_available(false), m_use_csv(false), m_synthetic(false),
                                         m_csv("smc_news.csv"), m_log(NULL), m_gmt(0) {}
 
+   //--- Instruments whose macro drivers are not readable from the ticker.
+   //--- Returns false when the symbol is not one of these, so the caller
+   //--- can fall back to an FX split or to the default basket.
+   bool              MapKnownSymbol(const string root)
+     {
+      string cur[];
+      if(StringFind(root,"XAU")==0 || StringFind(root,"GOLD")==0 ||
+         StringFind(root,"XAG")==0 || StringFind(root,"SILVER")==0)
+        { ArrayResize(cur,3); cur[0]="USD"; cur[1]="EUR"; cur[2]="GBP"; }
+      else if(StringFind(root,"US30")==0   || StringFind(root,"NAS")==0  ||
+              StringFind(root,"SPX")==0    || StringFind(root,"US500")==0 ||
+              StringFind(root,"USTEC")==0  || StringFind(root,"DJI")==0   ||
+              StringFind(root,"WTI")==0    || StringFind(root,"USOIL")==0 ||
+              StringFind(root,"XTI")==0    || StringFind(root,"BTC")==0)
+        { ArrayResize(cur,1); cur[0]="USD"; }
+      else if(StringFind(root,"GER")==0 || StringFind(root,"DAX")==0 ||
+              StringFind(root,"EUSTX")==0)
+        { ArrayResize(cur,2); cur[0]="EUR"; cur[1]="USD"; }
+      else if(StringFind(root,"UK100")==0 || StringFind(root,"FTSE")==0)
+        { ArrayResize(cur,2); cur[0]="GBP"; cur[1]="USD"; }
+      else if(StringFind(root,"JP225")==0 || StringFind(root,"NIK")==0)
+        { ArrayResize(cur,2); cur[0]="JPY"; cur[1]="USD"; }
+      else if(StringFind(root,"AUS200")==0)
+        { ArrayResize(cur,2); cur[0]="AUD"; cur[1]="USD"; }
+      else return(false);
+      ArrayResize(m_currencies,ArraySize(cur));
+      for(int i=0;i<ArraySize(cur);i++) m_currencies[i]=cur[i];
+      return(true);
+     }
+
+   //--- six letters, both halves plausible ISO codes
+   bool              IsFxPair(const string root)
+     {
+      if(StringLen(root)!=6) return(false);
+      for(int i=0;i<6;i++)
+        {
+         ushort c=StringGetCharacter(root,i);
+         if(c<'A' || c>'Z') return(false);
+        }
+      return(true);
+     }
+
    void              Init(const string symbol,CLogger *log,const int gmt_offset,
                           const string csv_fallback="smc_news.csv")
      {
@@ -2117,14 +2224,30 @@ public:
       m_currencies[0]="USD";
       m_currencies[1]="EUR";
       m_currencies[2]="GBP";
-      //--- if the symbol carries an explicit currency pair, honour it
+      //--- If the symbol carries an explicit currency pair, honour it.
+      //---
+      //--- The old test was "six characters or more", which silently split
+      //--- NAS100 into 'NAS' and '100'. Neither matches any calendar event,
+      //--- so an index ran with no news protection at all and no warning
+      //--- that it had none. Non-FX instruments are named explicitly, and
+      //--- anything unrecognised keeps the USD/EUR/GBP default rather than
+      //--- being chopped into nonsense.
       string s=symbol;
       StringToUpper(s);
-      if(StringFind(s,"XAU")<0 && StringLen(s)>=6)
+      string root=s;
+      //--- strip a broker suffix: EURUSD.raw, XAUUSDm, US30.cash
+      int dot=StringFind(root,".");
+      if(dot>0) root=StringSubstr(root,0,dot);
+      if(!MapKnownSymbol(root))
         {
-         m_currencies[0]=StringSubstr(s,0,3);
-         m_currencies[1]=StringSubstr(s,3,3);
-         ArrayResize(m_currencies,2);
+         if(IsFxPair(root))
+           {
+            m_currencies[0]=StringSubstr(root,0,3);
+            m_currencies[1]=StringSubstr(root,3,3);
+            ArrayResize(m_currencies,2);
+           }
+         else if(m_log!=NULL)
+            m_log.Warn(StringFormat("%s is not a recognised FX pair or index, so news is filtered on USD/EUR/GBP. Releases specific to this instrument will not be seen.",symbol));
         }
      }
 
@@ -2323,12 +2446,14 @@ private:
    double            m_fmean[];
    double            m_fm2[];
    long              m_fn;
+   bool              m_degen_warned;   // the forming-model alarm fires once
 
 public:
                      COnlineLearner(void): m_n(0), m_bias(0.0), m_init_bias(0.0), m_lr(0.06), m_l2(0.010), m_updates(0),
                                            m_warmup_needed(25), m_file("smc_agent_model.csv"), m_persist(true), m_log(NULL),
                                            m_mem_cnt(0), m_mem_head(0), m_logloss(0.0), m_acc(0.0),
-                                           m_scored(0), m_correct(0), m_pos(0), m_neg(0), m_fn(0) {}
+                                           m_scored(0), m_correct(0), m_pos(0), m_neg(0), m_fn(0),
+                                           m_degen_warned(false) {}
 
    void              Init(const int n_features,const double &priors[],CLogger *log,
                           const string model_file,const int warmup_samples,const double init_bias=0.0,
@@ -2435,6 +2560,27 @@ public:
       return(pp*(1.0-k)+pl*k);
      }
 
+   //--- Which features actually carried information during warm-up.
+   void              ReportFeatureHealth(void)
+     {
+      if(m_log==NULL) return;
+      string dead="";
+      string thin="";
+      int nd=0,nt=0;
+      for(int i=0;i<m_n;i++)
+        {
+         double sd=FeatureSd(i);
+         if(sd<0.02)      { dead+=(nd++?", ":"")+IntegerToString(i)+StringFormat("(sd %.3f)",sd); }
+         else if(sd<0.15) { thin+=(nt++?", ":"")+IntegerToString(i)+StringFormat("(sd %.2f)",sd); }
+        }
+      m_log.Info(StringFormat("Model | warm-up complete at %d resolved setups. Feature variability: %d of %d carried no usable variation, %d carried little.",
+                 (int)m_updates,nd,m_n,nt));
+      if(nd>0)
+         m_log.Warn(StringFormat("Model | features %s never varied during warm-up. A constant feature is perfectly confounded with whatever happened while it was constant, so any weight it has learned is an artefact rather than a finding. Damping holds it back, but treat conclusions drawn from these with suspicion.",dead));
+      if(nt>0)
+         m_log.Info(StringFormat("Model | features %s varied only slightly - their weights are weakly supported.",thin));
+     }
+
    //--- one supervised update: y = 1 (target reached) / 0 (stopped) ---
    void              Learn(const double &x[],const double y,const double sample_weight=1.0,const int meta=0)
      {
@@ -2470,8 +2616,20 @@ public:
          //--- damp the learning of a feature that barely moves; the pull
          //--- back towards its research prior is left at full strength, so
          //--- a dead feature decays to its prior instead of drifting
+         //--- Damping used to switch on at 30 samples. Warm-up completes at
+         //--- 25, so a constant feature could act as a second bias term for
+         //--- the whole formative period and still be voting by the time the
+         //--- guard arrived. It now ramps in from 8, reaching full strength
+         //--- at 30: no cliff, and it is already biting well before the
+         //--- model's own opinion carries any weight.
          double sd=(m_fn>1?MathSqrt(m_fm2[i]/(double)(m_fn-1)):1.0);
-         double info=(m_fn>=30?SmcClamp(sd/0.15,0.0,1.0):1.0);
+         double info=1.0;
+         if(m_fn>=8)
+           {
+            double raw =SmcClamp(sd/0.15,0.0,1.0);
+            double conf=SmcClamp((double)(m_fn-8)/22.0,0.0,1.0);
+            info=1.0-conf*(1.0-raw);
+           }
          double grad=err*x[i]*sw*info + m_l2*(m_w[i]-m_prior[i]);
          m_w[i]-=lr*grad;
          m_w[i]=SmcClamp(m_w[i],-4.0,4.0);
@@ -2481,6 +2639,34 @@ public:
       //--- than discriminating
       m_bias=SmcClamp(m_bias,-1.0,1.0);
       m_updates++;
+
+      //--- FeatureSd has existed since the beginning, described in its own
+      //--- comment as being "for the diagnostics log", and was never called
+      //--- from anywhere. A feature that does not vary is the single most
+      //--- dangerous thing in this model - it acts as a second bias term and
+      //--- is perfectly confounded with whatever happened while it was
+      //--- constant. Report it at the moment the model starts voting, which
+      //--- is the last point where the run can still be abandoned cheaply.
+      if(m_updates==(long)m_warmup_needed) ReportFeatureHealth();
+
+      //--- A one-sided stream is already unrecoverable well before anyone
+      //--- reloads the file: there is no boundary to learn, the bias walks
+      //--- to its clamp, every probability collapses and the expectancy gate
+      //--- starts demanding the impossible. The loader has always warned
+      //--- about this; nothing watched it happen. Say it while it is
+      //--- happening, once, so the run can be abandoned early.
+      if(!m_degen_warned && m_updates>=15)
+        {
+         int    tot =m_pos+m_neg;
+         double rate=(tot>0?(double)m_pos/(double)tot:0.5);
+         if((rate<=0.05 || rate>=0.95) && MathAbs(m_bias)>=0.55)
+           {
+            m_degen_warned=true;
+            if(m_log!=NULL)
+               m_log.Err(StringFormat("Model is collapsing: %.0f%% of %d resolved setups share one outcome and the bias has reached %+.2f. It cannot learn a boundary from a single class and will price every setup the same way. Delete this model file and investigate why one side never resolves - do not wait for warm-up to finish.",
+                         rate*100.0,tot,m_bias));
+           }
+        }
 
       //--- metrics
       double eps=1e-6;
@@ -3280,7 +3466,8 @@ public:
 #define F_VOLUME       14
 #define F_NEWS         15
 #define F_INDUCEMENT   16
-#define F_COUNT        17
+#define F_HTF_POI      17
+#define F_COUNT        18
 
 class CConfluence
   {
@@ -3333,6 +3520,60 @@ private:
    //--- Windows are expressed in the local time of the exchange that
    //--- owns them, so each one follows its own daylight saving rule and
    //--- stays correct through the weeks when the US and Europe disagree.
+   //--- Is price trading inside a higher-timeframe point of interest?
+   //---
+   //--- The agent has always built a full SMC map on two higher timeframes
+   //--- and then read seven bias accessors from it. Every order block and
+   //--- imbalance it derived there was discarded. That is the wrong half to
+   //--- throw away: an entry-chart order block on M5 is a five-minute
+   //--- artefact, while an H4 block is where size actually rests. The
+   //--- canonical workflow is higher-timeframe POI, then a lower-timeframe
+   //--- trigger inside it.
+   //---
+   //--- Scored rather than required. Making it mandatory would be a large
+   //--- unmeasured bet on an untested claim; as a factor the model can
+   //--- decide for itself how much it is worth, and the priors give it a
+   //--- sensible starting opinion.
+   double            PoiScore(const int dir,const double price,string &note)
+     {
+      note="no higher timeframe zone at this price";
+      double best=0.0;
+      string bestname="";
+      CSmcEngine *engines[2];
+      engines[0]=m_h; engines[1]=m_m;
+      string labels[2]; labels[0]="HTF"; labels[1]="MID";
+      for(int e=0;e<2;e++)
+        {
+         if(engines[e]==NULL) continue;
+         double u=engines[e].Unit();
+         if(u<=0.0) continue;
+         int zn=engines[e].ZoneCount();
+         for(int i=0;i<zn;i++)
+           {
+            SZone z;
+            if(!engines[e].GetZone(i,z)) continue;
+            if(z.dir!=dir || z.broken) continue;
+            //--- inside the zone, or within a quarter of one of its candles
+            double reach=u*0.25;
+            if(price>z.top+reach || price<z.bottom-reach) continue;
+            //--- a deeper timeframe counts for more, and a mitigated zone
+            //--- for less, exactly as on the entry chart
+            double tf_w=(e==0?1.00:0.80);
+            double fresh=(z.mitigated?0.55:1.0);
+            double sc=SmcClamp(z.strength*fresh*tf_w,0.0,1.0);
+            if(sc>best)
+              {
+               best=sc;
+               bestname=StringFormat("%s %s (strength %.2f%s)",labels[e],SmcZoneStr(z.kind),
+                                     z.strength,(z.mitigated?", tapped":""));
+              }
+           }
+        }
+      if(best<=0.0) return(0.0);
+      note="price is inside a "+bestname;
+      return(best);
+     }
+
    double            SessionScore(const datetime t,string &label)
      {
       datetime utc=SmcServerToUtc(t,m_gmt);
@@ -3383,6 +3624,27 @@ private:
         {
          m_e.AddLiquidity(LQ_ASIA_H,DIR_BULL,m_ah,SmcDayStart(now),0.90);
          m_e.AddLiquidity(LQ_ASIA_L,DIR_BEAR,m_al,SmcDayStart(now),0.90);
+        }
+      //--- Higher-timeframe swing extremes are a major draw on price, and
+      //--- until now the target search could not see them: it drew only on
+      //--- entry-chart swings plus the daily, weekly and session levels.
+      //--- An unswept H4 high is exactly the kind of objective this strategy
+      //--- is supposed to be trading toward.
+      for(int e=0;e<2;e++)
+        {
+         CSmcEngine *eng=(e==0?m_h:m_m);
+         if(eng==NULL) continue;
+         double w=(e==0?0.95:0.85);
+         int ln=eng.LiqCount();
+         for(int i=0;i<ln;i++)
+           {
+            SLiquidity q;
+            if(!eng.GetLiq(i,q)) continue;
+            if(q.swept) continue;
+            if(q.kind!=LQ_SWING_H && q.kind!=LQ_SWING_L &&
+               q.kind!=LQ_EQH     && q.kind!=LQ_EQL) continue;
+            m_e.AddLiquidity(q.kind,q.dir,q.price,q.time,w);
+           }
         }
       m_e.RefreshSweeps();
      }
@@ -3844,6 +4106,10 @@ public:
       double nsc=NewsScore(false);
       SetFactor(F_NEWS,"News context",nsc,nsc,(m_news!=NULL?m_news.Describe(SmcNow(),m_news_importance):"news feed off"));
       SetFactor(F_INDUCEMENT,"Inducement",0.0,0.0,"no zone engaged");
+      string n_poi_c="";
+      double s_poi_c=(dir==DIR_NONE?0.0:PoiScore(dir,m_ms.EClose(1),n_poi_c));
+      if(dir==DIR_NONE) n_poi_c="no direction to test a higher timeframe zone against";
+      SetFactor(F_HTF_POI,"HTF point of interest",s_poi_c,s_poi_c,n_poi_c);
      }
 
    double            VolScore(const double vr)
@@ -4008,7 +4274,11 @@ public:
                 StringFormat("%s, %.0f%% of this stop",exec_note,sp_ratio*100.0));
 
       //--- 11 reward to risk
-      double s_rr=SmcClamp((rr1-1.5)/1.5,-1.0,1.0);
+      //--- Saturated at 3.0R, so a 3R and a 6R objective were indistinguishable
+      //--- to the model - exactly the distinction the data keeps raising. The
+      //--- scale now runs to 6.0R, matching the InpMaxTargetR ceiling, so the
+      //--- whole tradeable range is visible. Centre unchanged at 1.5R.
+      double s_rr=SmcClamp((rr1-1.5)/4.5,-1.0,1.0);
       SetFactor(F_RR,"Reward:risk",rr1,s_rr,StringFormat("%.2fR to the first liquidity objective",rr1));
 
       //--- 12 key level confluence
@@ -4063,6 +4333,13 @@ public:
          n_idm=StringFormat("inducement at %.2f still resting - the trap has not been sprung",zone.idm);
         }
       SetFactor(F_INDUCEMENT,"Inducement",zone.idm,s_idm,n_idm);
+
+      //--- the higher-timeframe point of interest the entry is being taken
+      //--- from, if any. Zero is neutral, not a penalty: plenty of valid
+      //--- setups form away from a deeper zone.
+      string n_poi="";
+      double s_poi=PoiScore(dir,m_ms.EClose(1),n_poi);
+      SetFactor(F_HTF_POI,"HTF point of interest",s_poi,s_poi,n_poi);
 
       //--- 15 news context
       double s_news=NewsScore(post_news);
@@ -4358,16 +4635,28 @@ public:
    //--- resolve every paper setup against the last closed bar ---------
    //--- value_per_price is what one full price unit is worth per 1.00 lot,
    //--- so a dry run trade can be marked to money exactly as a real one is
+   //--- cost_price: what a round trip costs, expressed as a price distance.
+   //--- A real trade is labelled from realised profit, which is already net
+   //--- of spread and commission. An observation was labelled on price alone,
+   //--- so the two streams disagreed about what counts as a win by an amount
+   //--- that varies from broker to broker - and the model was trained on both.
+   //--- Charging the observation the same cost makes the label mean the same
+   //--- thing in either stream, and makes the learned model portable.
    int               Resolve(const double bar_high,const double bar_low,COnlineLearner *model,
-                             const double value_per_price,double &money_out)
+                             const double value_per_price,double &money_out,
+                             const double cost_price=0.0)
      {
       int resolved=0;
       for(int i=ArraySize(m_dir)-1;i>=0;i--)
         {
          m_bars[i]++;
          bool hit_tp=false,hit_sl=false;
-         if(m_dir[i]==DIR_BULL) { hit_sl=(bar_low<=m_sl[i]); hit_tp=(bar_high>=m_tp[i]); }
-         else                   { hit_sl=(bar_high>=m_sl[i]); hit_tp=(bar_low<=m_tp[i]); }
+         //--- the objective has to clear the round trip to count as a win;
+         //--- the stop does not need adjusting, since a costed loss is still
+         //--- a loss and the label would not change
+         double c=MathMax(cost_price,0.0);
+         if(m_dir[i]==DIR_BULL) { hit_sl=(bar_low<=m_sl[i]);  hit_tp=(bar_high>=m_tp[i]+c); }
+         else                   { hit_sl=(bar_high>=m_sl[i]); hit_tp=(bar_low <=m_tp[i]-c); }
          double y=-1.0;
          bool   timed_out=false;
          if(hit_sl && hit_tp) y=0.0;                       // ambiguous bar: assume the stop first
@@ -5361,6 +5650,7 @@ input double InpBreakEvenAtR     = 1.00;   // Move the stop to break even at thi
 input double InpTrailAfterR      = 1.50;   // Start structural trailing after this R
 input int    InpTimeStopBars     = 0;      // Give up after N stalled bars (0 = adaptive)
 input int    InpSlippagePoints   = 40;     // Maximum deviation in points
+input double InpCommissionPerLot = 0.0;    // Round-trip commission per 1.00 lot (0 = spread only)
 
 input group "=== News ==="
 input bool   InpUseNews          = true;   // Use the economic calendar
@@ -5433,6 +5723,10 @@ void SetPriors()
    g_priors[F_VOLUME]       = 0.08;   // participation on the confirmation
    g_priors[F_NEWS]         = 0.16;   // macro context
    g_priors[F_INDUCEMENT]   = 0.20;   // has the pullback liquidity in front of the zone been run
+   //--- Entering from a zone the higher timeframe also cares about is the
+   //--- canonical SMC workflow, so it opens with a weight in line with the
+   //--- other structural factors rather than as an afterthought.
+   g_priors[F_HTF_POI]      = 0.24;   // price is inside a higher timeframe point of interest
   }
 
 //+------------------------------------------------------------------+
@@ -6226,7 +6520,14 @@ bool OnBarClose()
      {
       double sim_money=0.0;
       double value_per_price=g_risk.LossPerLot(1.0);
-      int done=g_vbook.Resolve(g_ms.EHigh(1),g_ms.ELow(1),GetPointer(g_model),value_per_price,sim_money);
+      //--- What a round trip costs this account, as a price distance. The
+      //--- spread is observable; commission is not retrievable per symbol in
+      //--- MQL5, so it is an input and defaults to spread only.
+      double per_price=g_risk.LossPerLot(1.0);
+      double cost_price=g_ms.SpreadPrice();
+      if(InpCommissionPerLot>0.0 && per_price>0.0)
+         cost_price+=InpCommissionPerLot/per_price;
+      int done=g_vbook.Resolve(g_ms.EHigh(1),g_ms.ELow(1),GetPointer(g_model),value_per_price,sim_money,cost_price);
       if(done>0)
         {
          //--- A real closed trade gets a replay pass over the memory before

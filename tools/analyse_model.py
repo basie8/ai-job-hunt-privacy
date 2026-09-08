@@ -17,7 +17,7 @@ from collections import Counter
 FACTORS = ["HTF structure","Mid structure","Entry structure","Liquidity raid",
            "Order block","Imbalance","Premium/discount","Displacement","Session",
            "Volatility regime","Execution cost","Reward:risk","Key levels",
-           "Confirmation","Participation","News context","Inducement"]
+           "Confirmation","Participation","News context","Inducement","HTF point of interest"]
 
 def sigmoid(z): return 1/(1+math.exp(-max(-30.0,min(30.0,z))))
 

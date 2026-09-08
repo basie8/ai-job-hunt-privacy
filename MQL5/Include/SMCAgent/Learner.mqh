@@ -70,12 +70,14 @@ private:
    double            m_fmean[];
    double            m_fm2[];
    long              m_fn;
+   bool              m_degen_warned;   // the forming-model alarm fires once
 
 public:
                      COnlineLearner(void): m_n(0), m_bias(0.0), m_init_bias(0.0), m_lr(0.06), m_l2(0.010), m_updates(0),
                                            m_warmup_needed(25), m_file("smc_agent_model.csv"), m_persist(true), m_log(NULL),
                                            m_mem_cnt(0), m_mem_head(0), m_logloss(0.0), m_acc(0.0),
-                                           m_scored(0), m_correct(0), m_pos(0), m_neg(0), m_fn(0) {}
+                                           m_scored(0), m_correct(0), m_pos(0), m_neg(0), m_fn(0),
+                                           m_degen_warned(false) {}
 
    void              Init(const int n_features,const double &priors[],CLogger *log,
                           const string model_file,const int warmup_samples,const double init_bias=0.0,
@@ -182,6 +184,27 @@ public:
       return(pp*(1.0-k)+pl*k);
      }
 
+   //--- Which features actually carried information during warm-up.
+   void              ReportFeatureHealth(void)
+     {
+      if(m_log==NULL) return;
+      string dead="";
+      string thin="";
+      int nd=0,nt=0;
+      for(int i=0;i<m_n;i++)
+        {
+         double sd=FeatureSd(i);
+         if(sd<0.02)      { dead+=(nd++?", ":"")+IntegerToString(i)+StringFormat("(sd %.3f)",sd); }
+         else if(sd<0.15) { thin+=(nt++?", ":"")+IntegerToString(i)+StringFormat("(sd %.2f)",sd); }
+        }
+      m_log.Info(StringFormat("Model | warm-up complete at %d resolved setups. Feature variability: %d of %d carried no usable variation, %d carried little.",
+                 (int)m_updates,nd,m_n,nt));
+      if(nd>0)
+         m_log.Warn(StringFormat("Model | features %s never varied during warm-up. A constant feature is perfectly confounded with whatever happened while it was constant, so any weight it has learned is an artefact rather than a finding. Damping holds it back, but treat conclusions drawn from these with suspicion.",dead));
+      if(nt>0)
+         m_log.Info(StringFormat("Model | features %s varied only slightly - their weights are weakly supported.",thin));
+     }
+
    //--- one supervised update: y = 1 (target reached) / 0 (stopped) ---
    void              Learn(const double &x[],const double y,const double sample_weight=1.0,const int meta=0)
      {
@@ -217,8 +240,20 @@ public:
          //--- damp the learning of a feature that barely moves; the pull
          //--- back towards its research prior is left at full strength, so
          //--- a dead feature decays to its prior instead of drifting
+         //--- Damping used to switch on at 30 samples. Warm-up completes at
+         //--- 25, so a constant feature could act as a second bias term for
+         //--- the whole formative period and still be voting by the time the
+         //--- guard arrived. It now ramps in from 8, reaching full strength
+         //--- at 30: no cliff, and it is already biting well before the
+         //--- model's own opinion carries any weight.
          double sd=(m_fn>1?MathSqrt(m_fm2[i]/(double)(m_fn-1)):1.0);
-         double info=(m_fn>=30?SmcClamp(sd/0.15,0.0,1.0):1.0);
+         double info=1.0;
+         if(m_fn>=8)
+           {
+            double raw =SmcClamp(sd/0.15,0.0,1.0);
+            double conf=SmcClamp((double)(m_fn-8)/22.0,0.0,1.0);
+            info=1.0-conf*(1.0-raw);
+           }
          double grad=err*x[i]*sw*info + m_l2*(m_w[i]-m_prior[i]);
          m_w[i]-=lr*grad;
          m_w[i]=SmcClamp(m_w[i],-4.0,4.0);
@@ -228,6 +263,34 @@ public:
       //--- than discriminating
       m_bias=SmcClamp(m_bias,-1.0,1.0);
       m_updates++;
+
+      //--- FeatureSd has existed since the beginning, described in its own
+      //--- comment as being "for the diagnostics log", and was never called
+      //--- from anywhere. A feature that does not vary is the single most
+      //--- dangerous thing in this model - it acts as a second bias term and
+      //--- is perfectly confounded with whatever happened while it was
+      //--- constant. Report it at the moment the model starts voting, which
+      //--- is the last point where the run can still be abandoned cheaply.
+      if(m_updates==(long)m_warmup_needed) ReportFeatureHealth();
+
+      //--- A one-sided stream is already unrecoverable well before anyone
+      //--- reloads the file: there is no boundary to learn, the bias walks
+      //--- to its clamp, every probability collapses and the expectancy gate
+      //--- starts demanding the impossible. The loader has always warned
+      //--- about this; nothing watched it happen. Say it while it is
+      //--- happening, once, so the run can be abandoned early.
+      if(!m_degen_warned && m_updates>=15)
+        {
+         int    tot =m_pos+m_neg;
+         double rate=(tot>0?(double)m_pos/(double)tot:0.5);
+         if((rate<=0.05 || rate>=0.95) && MathAbs(m_bias)>=0.55)
+           {
+            m_degen_warned=true;
+            if(m_log!=NULL)
+               m_log.Err(StringFormat("Model is collapsing: %.0f%% of %d resolved setups share one outcome and the bias has reached %+.2f. It cannot learn a boundary from a single class and will price every setup the same way. Delete this model file and investigate why one side never resolves - do not wait for warm-up to finish.",
+                         rate*100.0,tot,m_bias));
+           }
+        }
 
       //--- metrics
       double eps=1e-6;

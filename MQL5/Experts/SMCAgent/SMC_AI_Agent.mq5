@@ -92,6 +92,7 @@ input double InpBreakEvenAtR     = 1.00;   // Move the stop to break even at thi
 input double InpTrailAfterR      = 1.50;   // Start structural trailing after this R
 input int    InpTimeStopBars     = 0;      // Give up after N stalled bars (0 = adaptive)
 input int    InpSlippagePoints   = 40;     // Maximum deviation in points
+input double InpCommissionPerLot = 0.0;    // Round-trip commission per 1.00 lot (0 = spread only)
 
 input group "=== News ==="
 input bool   InpUseNews          = true;   // Use the economic calendar
@@ -164,6 +165,10 @@ void SetPriors()
    g_priors[F_VOLUME]       = 0.08;   // participation on the confirmation
    g_priors[F_NEWS]         = 0.16;   // macro context
    g_priors[F_INDUCEMENT]   = 0.20;   // has the pullback liquidity in front of the zone been run
+   //--- Entering from a zone the higher timeframe also cares about is the
+   //--- canonical SMC workflow, so it opens with a weight in line with the
+   //--- other structural factors rather than as an afterthought.
+   g_priors[F_HTF_POI]      = 0.24;   // price is inside a higher timeframe point of interest
   }
 
 //+------------------------------------------------------------------+
@@ -957,7 +962,14 @@ bool OnBarClose()
      {
       double sim_money=0.0;
       double value_per_price=g_risk.LossPerLot(1.0);
-      int done=g_vbook.Resolve(g_ms.EHigh(1),g_ms.ELow(1),GetPointer(g_model),value_per_price,sim_money);
+      //--- What a round trip costs this account, as a price distance. The
+      //--- spread is observable; commission is not retrievable per symbol in
+      //--- MQL5, so it is an input and defaults to spread only.
+      double per_price=g_risk.LossPerLot(1.0);
+      double cost_price=g_ms.SpreadPrice();
+      if(InpCommissionPerLot>0.0 && per_price>0.0)
+         cost_price+=InpCommissionPerLot/per_price;
+      int done=g_vbook.Resolve(g_ms.EHigh(1),g_ms.ELow(1),GetPointer(g_model),value_per_price,sim_money,cost_price);
       if(done>0)
         {
          //--- A real closed trade gets a replay pass over the memory before

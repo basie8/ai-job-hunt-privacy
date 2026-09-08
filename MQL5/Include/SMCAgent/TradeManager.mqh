@@ -253,16 +253,28 @@ public:
    //--- resolve every paper setup against the last closed bar ---------
    //--- value_per_price is what one full price unit is worth per 1.00 lot,
    //--- so a dry run trade can be marked to money exactly as a real one is
+   //--- cost_price: what a round trip costs, expressed as a price distance.
+   //--- A real trade is labelled from realised profit, which is already net
+   //--- of spread and commission. An observation was labelled on price alone,
+   //--- so the two streams disagreed about what counts as a win by an amount
+   //--- that varies from broker to broker - and the model was trained on both.
+   //--- Charging the observation the same cost makes the label mean the same
+   //--- thing in either stream, and makes the learned model portable.
    int               Resolve(const double bar_high,const double bar_low,COnlineLearner *model,
-                             const double value_per_price,double &money_out)
+                             const double value_per_price,double &money_out,
+                             const double cost_price=0.0)
      {
       int resolved=0;
       for(int i=ArraySize(m_dir)-1;i>=0;i--)
         {
          m_bars[i]++;
          bool hit_tp=false,hit_sl=false;
-         if(m_dir[i]==DIR_BULL) { hit_sl=(bar_low<=m_sl[i]); hit_tp=(bar_high>=m_tp[i]); }
-         else                   { hit_sl=(bar_high>=m_sl[i]); hit_tp=(bar_low<=m_tp[i]); }
+         //--- the objective has to clear the round trip to count as a win;
+         //--- the stop does not need adjusting, since a costed loss is still
+         //--- a loss and the label would not change
+         double c=MathMax(cost_price,0.0);
+         if(m_dir[i]==DIR_BULL) { hit_sl=(bar_low<=m_sl[i]);  hit_tp=(bar_high>=m_tp[i]+c); }
+         else                   { hit_sl=(bar_high>=m_sl[i]); hit_tp=(bar_low <=m_tp[i]-c); }
          double y=-1.0;
          bool   timed_out=false;
          if(hit_sl && hit_tp) y=0.0;                       // ambiguous bar: assume the stop first

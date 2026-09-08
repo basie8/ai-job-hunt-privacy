@@ -162,6 +162,48 @@ public:
                      CNewsFilter(void): m_last_refresh(0), m_available(false), m_use_csv(false), m_synthetic(false),
                                         m_csv("smc_news.csv"), m_log(NULL), m_gmt(0) {}
 
+   //--- Instruments whose macro drivers are not readable from the ticker.
+   //--- Returns false when the symbol is not one of these, so the caller
+   //--- can fall back to an FX split or to the default basket.
+   bool              MapKnownSymbol(const string root)
+     {
+      string cur[];
+      if(StringFind(root,"XAU")==0 || StringFind(root,"GOLD")==0 ||
+         StringFind(root,"XAG")==0 || StringFind(root,"SILVER")==0)
+        { ArrayResize(cur,3); cur[0]="USD"; cur[1]="EUR"; cur[2]="GBP"; }
+      else if(StringFind(root,"US30")==0   || StringFind(root,"NAS")==0  ||
+              StringFind(root,"SPX")==0    || StringFind(root,"US500")==0 ||
+              StringFind(root,"USTEC")==0  || StringFind(root,"DJI")==0   ||
+              StringFind(root,"WTI")==0    || StringFind(root,"USOIL")==0 ||
+              StringFind(root,"XTI")==0    || StringFind(root,"BTC")==0)
+        { ArrayResize(cur,1); cur[0]="USD"; }
+      else if(StringFind(root,"GER")==0 || StringFind(root,"DAX")==0 ||
+              StringFind(root,"EUSTX")==0)
+        { ArrayResize(cur,2); cur[0]="EUR"; cur[1]="USD"; }
+      else if(StringFind(root,"UK100")==0 || StringFind(root,"FTSE")==0)
+        { ArrayResize(cur,2); cur[0]="GBP"; cur[1]="USD"; }
+      else if(StringFind(root,"JP225")==0 || StringFind(root,"NIK")==0)
+        { ArrayResize(cur,2); cur[0]="JPY"; cur[1]="USD"; }
+      else if(StringFind(root,"AUS200")==0)
+        { ArrayResize(cur,2); cur[0]="AUD"; cur[1]="USD"; }
+      else return(false);
+      ArrayResize(m_currencies,ArraySize(cur));
+      for(int i=0;i<ArraySize(cur);i++) m_currencies[i]=cur[i];
+      return(true);
+     }
+
+   //--- six letters, both halves plausible ISO codes
+   bool              IsFxPair(const string root)
+     {
+      if(StringLen(root)!=6) return(false);
+      for(int i=0;i<6;i++)
+        {
+         ushort c=StringGetCharacter(root,i);
+         if(c<'A' || c>'Z') return(false);
+        }
+      return(true);
+     }
+
    void              Init(const string symbol,CLogger *log,const int gmt_offset,
                           const string csv_fallback="smc_news.csv")
      {
@@ -174,14 +216,30 @@ public:
       m_currencies[0]="USD";
       m_currencies[1]="EUR";
       m_currencies[2]="GBP";
-      //--- if the symbol carries an explicit currency pair, honour it
+      //--- If the symbol carries an explicit currency pair, honour it.
+      //---
+      //--- The old test was "six characters or more", which silently split
+      //--- NAS100 into 'NAS' and '100'. Neither matches any calendar event,
+      //--- so an index ran with no news protection at all and no warning
+      //--- that it had none. Non-FX instruments are named explicitly, and
+      //--- anything unrecognised keeps the USD/EUR/GBP default rather than
+      //--- being chopped into nonsense.
       string s=symbol;
       StringToUpper(s);
-      if(StringFind(s,"XAU")<0 && StringLen(s)>=6)
+      string root=s;
+      //--- strip a broker suffix: EURUSD.raw, XAUUSDm, US30.cash
+      int dot=StringFind(root,".");
+      if(dot>0) root=StringSubstr(root,0,dot);
+      if(!MapKnownSymbol(root))
         {
-         m_currencies[0]=StringSubstr(s,0,3);
-         m_currencies[1]=StringSubstr(s,3,3);
-         ArrayResize(m_currencies,2);
+         if(IsFxPair(root))
+           {
+            m_currencies[0]=StringSubstr(root,0,3);
+            m_currencies[1]=StringSubstr(root,3,3);
+            ArrayResize(m_currencies,2);
+           }
+         else if(m_log!=NULL)
+            m_log.Warn(StringFormat("%s is not a recognised FX pair or index, so news is filtered on USD/EUR/GBP. Releases specific to this instrument will not be seen.",symbol));
         }
      }
 

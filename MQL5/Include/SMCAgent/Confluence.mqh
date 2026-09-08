@@ -47,7 +47,8 @@
 #define F_VOLUME       14
 #define F_NEWS         15
 #define F_INDUCEMENT   16
-#define F_COUNT        17
+#define F_HTF_POI      17
+#define F_COUNT        18
 
 class CConfluence
   {
@@ -100,6 +101,60 @@ private:
    //--- Windows are expressed in the local time of the exchange that
    //--- owns them, so each one follows its own daylight saving rule and
    //--- stays correct through the weeks when the US and Europe disagree.
+   //--- Is price trading inside a higher-timeframe point of interest?
+   //---
+   //--- The agent has always built a full SMC map on two higher timeframes
+   //--- and then read seven bias accessors from it. Every order block and
+   //--- imbalance it derived there was discarded. That is the wrong half to
+   //--- throw away: an entry-chart order block on M5 is a five-minute
+   //--- artefact, while an H4 block is where size actually rests. The
+   //--- canonical workflow is higher-timeframe POI, then a lower-timeframe
+   //--- trigger inside it.
+   //---
+   //--- Scored rather than required. Making it mandatory would be a large
+   //--- unmeasured bet on an untested claim; as a factor the model can
+   //--- decide for itself how much it is worth, and the priors give it a
+   //--- sensible starting opinion.
+   double            PoiScore(const int dir,const double price,string &note)
+     {
+      note="no higher timeframe zone at this price";
+      double best=0.0;
+      string bestname="";
+      CSmcEngine *engines[2];
+      engines[0]=m_h; engines[1]=m_m;
+      string labels[2]; labels[0]="HTF"; labels[1]="MID";
+      for(int e=0;e<2;e++)
+        {
+         if(engines[e]==NULL) continue;
+         double u=engines[e].Unit();
+         if(u<=0.0) continue;
+         int zn=engines[e].ZoneCount();
+         for(int i=0;i<zn;i++)
+           {
+            SZone z;
+            if(!engines[e].GetZone(i,z)) continue;
+            if(z.dir!=dir || z.broken) continue;
+            //--- inside the zone, or within a quarter of one of its candles
+            double reach=u*0.25;
+            if(price>z.top+reach || price<z.bottom-reach) continue;
+            //--- a deeper timeframe counts for more, and a mitigated zone
+            //--- for less, exactly as on the entry chart
+            double tf_w=(e==0?1.00:0.80);
+            double fresh=(z.mitigated?0.55:1.0);
+            double sc=SmcClamp(z.strength*fresh*tf_w,0.0,1.0);
+            if(sc>best)
+              {
+               best=sc;
+               bestname=StringFormat("%s %s (strength %.2f%s)",labels[e],SmcZoneStr(z.kind),
+                                     z.strength,(z.mitigated?", tapped":""));
+              }
+           }
+        }
+      if(best<=0.0) return(0.0);
+      note="price is inside a "+bestname;
+      return(best);
+     }
+
    double            SessionScore(const datetime t,string &label)
      {
       datetime utc=SmcServerToUtc(t,m_gmt);
@@ -150,6 +205,27 @@ private:
         {
          m_e.AddLiquidity(LQ_ASIA_H,DIR_BULL,m_ah,SmcDayStart(now),0.90);
          m_e.AddLiquidity(LQ_ASIA_L,DIR_BEAR,m_al,SmcDayStart(now),0.90);
+        }
+      //--- Higher-timeframe swing extremes are a major draw on price, and
+      //--- until now the target search could not see them: it drew only on
+      //--- entry-chart swings plus the daily, weekly and session levels.
+      //--- An unswept H4 high is exactly the kind of objective this strategy
+      //--- is supposed to be trading toward.
+      for(int e=0;e<2;e++)
+        {
+         CSmcEngine *eng=(e==0?m_h:m_m);
+         if(eng==NULL) continue;
+         double w=(e==0?0.95:0.85);
+         int ln=eng.LiqCount();
+         for(int i=0;i<ln;i++)
+           {
+            SLiquidity q;
+            if(!eng.GetLiq(i,q)) continue;
+            if(q.swept) continue;
+            if(q.kind!=LQ_SWING_H && q.kind!=LQ_SWING_L &&
+               q.kind!=LQ_EQH     && q.kind!=LQ_EQL) continue;
+            m_e.AddLiquidity(q.kind,q.dir,q.price,q.time,w);
+           }
         }
       m_e.RefreshSweeps();
      }
@@ -611,6 +687,10 @@ public:
       double nsc=NewsScore(false);
       SetFactor(F_NEWS,"News context",nsc,nsc,(m_news!=NULL?m_news.Describe(SmcNow(),m_news_importance):"news feed off"));
       SetFactor(F_INDUCEMENT,"Inducement",0.0,0.0,"no zone engaged");
+      string n_poi_c="";
+      double s_poi_c=(dir==DIR_NONE?0.0:PoiScore(dir,m_ms.EClose(1),n_poi_c));
+      if(dir==DIR_NONE) n_poi_c="no direction to test a higher timeframe zone against";
+      SetFactor(F_HTF_POI,"HTF point of interest",s_poi_c,s_poi_c,n_poi_c);
      }
 
    double            VolScore(const double vr)
@@ -775,7 +855,11 @@ public:
                 StringFormat("%s, %.0f%% of this stop",exec_note,sp_ratio*100.0));
 
       //--- 11 reward to risk
-      double s_rr=SmcClamp((rr1-1.5)/1.5,-1.0,1.0);
+      //--- Saturated at 3.0R, so a 3R and a 6R objective were indistinguishable
+      //--- to the model - exactly the distinction the data keeps raising. The
+      //--- scale now runs to 6.0R, matching the InpMaxTargetR ceiling, so the
+      //--- whole tradeable range is visible. Centre unchanged at 1.5R.
+      double s_rr=SmcClamp((rr1-1.5)/4.5,-1.0,1.0);
       SetFactor(F_RR,"Reward:risk",rr1,s_rr,StringFormat("%.2fR to the first liquidity objective",rr1));
 
       //--- 12 key level confluence
@@ -830,6 +914,13 @@ public:
          n_idm=StringFormat("inducement at %.2f still resting - the trap has not been sprung",zone.idm);
         }
       SetFactor(F_INDUCEMENT,"Inducement",zone.idm,s_idm,n_idm);
+
+      //--- the higher-timeframe point of interest the entry is being taken
+      //--- from, if any. Zero is neutral, not a penalty: plenty of valid
+      //--- setups form away from a deeper zone.
+      string n_poi="";
+      double s_poi=PoiScore(dir,m_ms.EClose(1),n_poi);
+      SetFactor(F_HTF_POI,"HTF point of interest",s_poi,s_poi,n_poi);
 
       //--- 15 news context
       double s_news=NewsScore(post_news);
