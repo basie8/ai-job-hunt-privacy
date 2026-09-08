@@ -212,11 +212,35 @@ Expectancy gate: `p=0.50 → 1.80R`, `p=0.55 → 1.47R`, `p≥0.60 → 1.30R` fl
 Frequency governor: threshold falls from 0.620 (Monday) to 0.555 (Friday midday,
 no trades taken) and never below the 0.550 floor.
 
+## 4b. Compilation record
+
+| Commit | Result | Notes |
+|---|---|---|
+| `930b51b` | 0 errors | first clean build of the single-file amalgamation |
+| `94d67cb` | 0 errors, 2 warnings | bare `int` used as a ternary condition, lines 2573–2574 |
+| `96b7378` | — | warnings fixed |
+| **`646e665`** | **0 errors, 0 warnings** | MetaEditor, X64 Regular, 4642 ms — the first clean build of the fully audited source |
+
+Confirmed by the user in MetaTrader 5. This is the only execution evidence
+that exists: everything else in this document is static reading, structural
+checks, and Python replicas of the logic. A replica tests the algorithm as
+understood, not the MQL5 as written.
+
 ## 5. Known limitations (unchanged, by design)
 
-- Not compiled and not backtested in this environment.
-- The model is linear in its 17 factors — interpretable and stable on small
+- Compiles clean; **not backtested or executed in this environment.**
+- The strategy itself remains unvalidated. No clean dataset has yet been
+  gathered — the observation de-duplication (`db27e44`) and the proportional
+  observation window (`ca56b7f`) were the prerequisites for one, and no data
+  has been collected since.
+- The model is linear in its 18 factors — interpretable and stable on small
   samples, but it cannot discover an interaction no factor expresses.
+- The `Reward:risk` prior is `+0.16`, yet the model predicts P(target reached)
+  and a further target is mechanically harder to reach; live M5 data showed a
+  −0.393 correlation. The prior may carry the wrong sign, and prior anchoring
+  will keep pulling toward it. Flagged, deliberately not changed — altering a
+  research prior is a strategy decision, not an audit fix.
+- 35 unused one-line accessors remain. Unused API surface, not placeholders.
 - Broker GMT offset auto-detection rounds to whole hours.
 - `TimeGMT()` depends on the terminal machine's clock; a jump larger than one
   hour is now flagged as an error, and `InpGmtOffsetHours` pins it outright.
