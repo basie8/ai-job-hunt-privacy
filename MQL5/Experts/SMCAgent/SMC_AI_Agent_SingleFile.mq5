@@ -432,6 +432,20 @@ string SmcLiqStr(const int kind)
 
 
 //+------------------------------------------------------------------+
+//| A price at the instrument's own precision                        |
+//|                                                                  |
+//| Gold quotes two decimals, EURUSD and GBPUSD five, USDJPY three.  |
+//| A fixed "%.2f" renders 1.08234 as "1.08" and 147.123 as "147.12" |
+//| in every log line, panel row and notification. On a five digit    |
+//| pair that is not merely untidy: the numbers being truncated are  |
+//| entries, stops and targets, so two setups four pips apart print  |
+//| as the same trade and a stop reads as though it sits on the       |
+//| entry. Order sending was always correct - it normalises to        |
+//| SYMBOL_DIGITS - but everything a human reads was not.             |
+//+------------------------------------------------------------------+
+string SmcPx(const double p) { return(DoubleToString(p,_Digits)); }
+
+//+------------------------------------------------------------------+
 //| Human readable structural context, for the log and the journal   |
 //+------------------------------------------------------------------+
 string SmcMetaStr(const int m)
@@ -4333,7 +4347,7 @@ public:
       else if(zone.idm_taken)
         {
          s_idm=1.00;
-         n_idm=StringFormat("inducement at %.2f has been run - the zone is armed",zone.idm);
+         n_idm=StringFormat("inducement at %s has been run - the zone is armed",SmcPx(zone.idm));
         }
       else
         {
@@ -4341,7 +4355,7 @@ public:
          //--- the classic premature tap; after a major raid it is milder
          bool continuation=(StringFind(m_playbook,"C -")==0);
          s_idm=(continuation?-0.90:-0.45);
-         n_idm=StringFormat("inducement at %.2f still resting - the trap has not been sprung",zone.idm);
+         n_idm=StringFormat("inducement at %s still resting - the trap has not been sprung",SmcPx(zone.idm));
         }
       SetFactor(F_INDUCEMENT,"Inducement",zone.idm,s_idm,n_idm);
 
@@ -4770,13 +4784,13 @@ public:
          if(sld<stops)
            {
             if(m_log!=NULL)
-               m_log.Warn(StringFormat("Order refused: the stop is %.5f from price but this broker requires %.5f. Widening it would break the position sizing, so the trade is skipped rather than over-risked.",sld,stops));
+               m_log.Warn(StringFormat("Order refused: the stop is %s from price but this broker requires %s. Widening it would break the position sizing, so the trade is skipped rather than over-risked.",SmcPx(sld),SmcPx(stops)));
             return(false);
            }
          if(tpd<stops)
            {
             if(m_log!=NULL)
-               m_log.Warn(StringFormat("Order refused: the target is %.5f from price but this broker requires %.5f.",tpd,stops));
+               m_log.Warn(StringFormat("Order refused: the target is %s from price but this broker requires %s.",SmcPx(tpd),SmcPx(stops)));
             return(false);
            }
         }
@@ -4804,19 +4818,19 @@ public:
       if(d<=0.0)
         {
          if(m_log!=NULL)
-            m_log.Debug(StringFormat("Stop move to %.5f skipped - price %.5f is already through it",nsl,mkt));
+            m_log.Debug(StringFormat("Stop move to %s skipped - price %s is already through it",SmcPx(nsl),SmcPx(mkt)));
          return(false);
         }
       if(stops>0.0 && d<stops)
         {
          if(m_log!=NULL)
-            m_log.Debug(StringFormat("Stop move to %.5f skipped - %.5f from price, broker needs %.5f. Will retry as price advances.",nsl,d,stops));
+            m_log.Debug(StringFormat("Stop move to %s skipped - %s from price, broker needs %s. Will retry as price advances.",SmcPx(nsl),SmcPx(d),SmcPx(stops)));
          return(false);
         }
       if(!m_trade.PositionModify(ticket,nsl,NormalizeDouble(tp,dg)))
         {
          if(m_log!=NULL)
-            m_log.Warn(StringFormat("Stop move to %.5f rejected: %d %s",nsl,
+            m_log.Warn(StringFormat("Stop move to %s rejected: %d %s",SmcPx(nsl),
                        m_trade.ResultRetcode(),m_trade.ResultRetcodeDescription()));
          return(false);
         }
@@ -5601,8 +5615,8 @@ public:
       if(sig.valid)
         {
          color c=(sig.dir==DIR_BULL?m_c_bull:m_c_bear);
-         KV("SIGNAL",StringFormat("%s  entry %.2f  sl %.2f  tp %.2f (%.2fR)",
-            SmcDirShort(sig.dir),sig.entry,sig.sl,sig.tp1,sig.rr1),c);
+         KV("SIGNAL",StringFormat("%s  entry %s  sl %s  tp %s (%.2fR)",
+            SmcDirShort(sig.dir),SmcPx(sig.entry),SmcPx(sig.sl),SmcPx(sig.tp1),sig.rr1),c);
         }
       else
         {
@@ -6590,9 +6604,9 @@ bool OnBarClose()
    g_conf.GetVector(x);
 
    //--- decision log ---------------------------------------------------
-   g_log.Rule(StringFormat("BAR CLOSE %s  %s  %s  price %.2f",
+   g_log.Rule(StringFormat("BAR CLOSE %s  %s  %s  price %s",
               TimeToString(g_ms.ETime(1),TIME_DATE|TIME_MINUTES),_Symbol,
-              EnumToString((ENUM_TIMEFRAMES)Period()),g_ms.EClose(1)));
+              EnumToString((ENUM_TIMEFRAMES)Period()),SmcPx(g_ms.EClose(1))));
    g_log.Think(StringFormat("READ   | %s %s | %s %s | entry swing %s internal %s | volatility %.2fx | %s",
                EnumToString(g_ms.TfHigh()),SmcDirStr(g_conf.BiasHtf()),
                EnumToString(g_ms.TfMid()),SmcDirStr(g_conf.BiasMid()),
@@ -6626,8 +6640,8 @@ bool OnBarClose()
          int before=g_vbook.Count();
          g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,0.0,g_sig.meta,g_sig.zone_from);
          if(g_vbook.Count()>before)
-            g_log.Think(StringFormat("OBSERVE| watching the rejected %s setup anyway - entry %.2f sl %.2f tp %.2f (%d in the book)",
-                        SmcDirShort(g_sig.dir),g_sig.entry,g_sig.sl,g_sig.tp1,g_vbook.Count()));
+            g_log.Think(StringFormat("OBSERVE| watching the rejected %s setup anyway - entry %s sl %s tp %s (%d in the book)",
+                        SmcDirShort(g_sig.dir),SmcPx(g_sig.entry),SmcPx(g_sig.sl),SmcPx(g_sig.tp1),g_vbook.Count()));
         }
       Redraw();
       return(true);
@@ -6730,14 +6744,14 @@ bool OnBarClose()
       g_risk.OnTradeOpened();
       g_last_signal=g_sig.bar_time;
       g_size_skips=0;
-      g_last_action=StringFormat("DRY RUN %s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry);
-      g_log.Think(StringFormat("DRY RUN| WOULD OPEN %s %.2f lots @ %.2f  sl %.2f  tp %.2f  risk %.2f  [structure: %s]  (nothing sent)",
-                  SmcDirShort(g_sig.dir),lots,g_sig.entry,g_sig.sl,g_sig.tp1,
+      g_last_action=StringFormat("DRY RUN %s %.2f lots @ %s",SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry));
+      g_log.Think(StringFormat("DRY RUN| WOULD OPEN %s %.2f lots @ %s  sl %s  tp %s  risk %.2f  [structure: %s]  (nothing sent)",
+                  SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry),SmcPx(g_sig.sl),SmcPx(g_sig.tp1),
                   MathAbs(g_sig.entry-g_sig.sl)*lots*g_risk.LossPerLot(1.0),SmcMetaStr(g_sig.meta)));
       if(InpNotifyEntries)
-         Notify(StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry),
-                StringFormat("SL %.2f  TP %.2f (%.2fR)  p %.0f%%  %s  - simulated, nothing sent",
-                g_sig.sl,g_sig.tp1,g_sig.rr1,g_sig.prob*100.0,g_sig.model));
+         Notify(StringFormat("%s %.2f lots @ %s",SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry)),
+                StringFormat("SL %s  TP %s (%.2fR)  p %.0f%%  %s  - simulated, nothing sent",
+                SmcPx(g_sig.sl),SmcPx(g_sig.tp1),g_sig.rr1,g_sig.prob*100.0,g_sig.model));
       g_vis.DrawSignal(g_sig,g_ms.ETime(1));
       Redraw();
       return(true);
@@ -6752,14 +6766,14 @@ bool OnBarClose()
       g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,lots,g_sig.meta,g_sig.zone_from);
       g_last_signal=g_sig.bar_time;
       g_size_skips=0;
-      g_last_action=StringFormat("OBSERVING %s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry);
-      g_log.Think(StringFormat("OBSERVE| WOULD OPEN %s %.2f lots @ %.2f  sl %.2f  tp %.2f  [structure: %s] - learning first, %d/%d resolved (InpLiveAfterWarmup)",
-                  SmcDirShort(g_sig.dir),lots,g_sig.entry,g_sig.sl,g_sig.tp1,SmcMetaStr(g_sig.meta),
+      g_last_action=StringFormat("OBSERVING %s %.2f lots @ %s",SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry));
+      g_log.Think(StringFormat("OBSERVE| WOULD OPEN %s %.2f lots @ %s  sl %s  tp %s  [structure: %s] - learning first, %d/%d resolved (InpLiveAfterWarmup)",
+                  SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry),SmcPx(g_sig.sl),SmcPx(g_sig.tp1),SmcMetaStr(g_sig.meta),
                   (int)g_model.Updates(),g_model.WarmupNeeded()));
       if(InpNotifyEntries)
-         Notify(StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry),
-                StringFormat("SL %.2f  TP %.2f (%.2fR)  p %.0f%%  %s  - OBSERVING, nothing sent (%d/%d)",
-                g_sig.sl,g_sig.tp1,g_sig.rr1,g_sig.prob*100.0,g_sig.model,
+         Notify(StringFormat("%s %.2f lots @ %s",SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry)),
+                StringFormat("SL %s  TP %s (%.2fR)  p %.0f%%  %s  - OBSERVING, nothing sent (%d/%d)",
+                SmcPx(g_sig.sl),SmcPx(g_sig.tp1),g_sig.rr1,g_sig.prob*100.0,g_sig.model,
                 (int)g_model.Updates(),g_model.WarmupNeeded()));
       g_vis.DrawSignal(g_sig,g_ms.ETime(1));
       Redraw();
@@ -6813,13 +6827,13 @@ bool OnBarClose()
                        fill,slip,g_sig.entry,slip/rr*100.0));
          g_risk.OnTradeOpened();
          g_last_signal=g_sig.bar_time;
-         g_last_action=StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry);
+         g_last_action=StringFormat("%s %.2f lots @ %s",SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry));
          g_log.Think(StringFormat("EXECUTE| #%s %s  [structure: %s]",IntegerToString((long)ticket),g_last_action,
                      SmcMetaStr(g_sig.meta)));
          if(InpNotifyEntries)
-            Notify(StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry),
-                   StringFormat("SL %.2f  TP %.2f (%.2fR)  p %.0f%%  %s",
-                   g_sig.sl,g_sig.tp1,g_sig.rr1,g_sig.prob*100.0,g_sig.model));
+            Notify(StringFormat("%s %.2f lots @ %s",SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry)),
+                   StringFormat("SL %s  TP %s (%.2fR)  p %.0f%%  %s",
+                   SmcPx(g_sig.sl),SmcPx(g_sig.tp1),g_sig.rr1,g_sig.prob*100.0,g_sig.model));
          g_vis.DrawSignal(g_sig,g_ms.ETime(1));
         }
       else g_log.Warn("Position opened but could not be matched to a ticket - it will be managed by its stop and target only");

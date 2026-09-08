@@ -903,7 +903,7 @@ public:
       else if(zone.idm_taken)
         {
          s_idm=1.00;
-         n_idm=StringFormat("inducement at %.2f has been run - the zone is armed",zone.idm);
+         n_idm=StringFormat("inducement at %s has been run - the zone is armed",SmcPx(zone.idm));
         }
       else
         {
@@ -911,7 +911,7 @@ public:
          //--- the classic premature tap; after a major raid it is milder
          bool continuation=(StringFind(m_playbook,"C -")==0);
          s_idm=(continuation?-0.90:-0.45);
-         n_idm=StringFormat("inducement at %.2f still resting - the trap has not been sprung",zone.idm);
+         n_idm=StringFormat("inducement at %s still resting - the trap has not been sprung",SmcPx(zone.idm));
         }
       SetFactor(F_INDUCEMENT,"Inducement",zone.idm,s_idm,n_idm);
 

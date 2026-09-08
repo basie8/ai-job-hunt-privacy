@@ -693,8 +693,8 @@ public:
       if(sig.valid)
         {
          color c=(sig.dir==DIR_BULL?m_c_bull:m_c_bear);
-         KV("SIGNAL",StringFormat("%s  entry %.2f  sl %.2f  tp %.2f (%.2fR)",
-            SmcDirShort(sig.dir),sig.entry,sig.sl,sig.tp1,sig.rr1),c);
+         KV("SIGNAL",StringFormat("%s  entry %s  sl %s  tp %s (%.2fR)",
+            SmcDirShort(sig.dir),SmcPx(sig.entry),SmcPx(sig.sl),SmcPx(sig.tp1),sig.rr1),c);
         }
       else
         {

@@ -388,6 +388,20 @@ string SmcLiqStr(const int kind)
 
 
 //+------------------------------------------------------------------+
+//| A price at the instrument's own precision                        |
+//|                                                                  |
+//| Gold quotes two decimals, EURUSD and GBPUSD five, USDJPY three.  |
+//| A fixed "%.2f" renders 1.08234 as "1.08" and 147.123 as "147.12" |
+//| in every log line, panel row and notification. On a five digit    |
+//| pair that is not merely untidy: the numbers being truncated are  |
+//| entries, stops and targets, so two setups four pips apart print  |
+//| as the same trade and a stop reads as though it sits on the       |
+//| entry. Order sending was always correct - it normalises to        |
+//| SYMBOL_DIGITS - but everything a human reads was not.             |
+//+------------------------------------------------------------------+
+string SmcPx(const double p) { return(DoubleToString(p,_Digits)); }
+
+//+------------------------------------------------------------------+
 //| Human readable structural context, for the log and the journal   |
 //+------------------------------------------------------------------+
 string SmcMetaStr(const int m)

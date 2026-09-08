@@ -1001,9 +1001,9 @@ bool OnBarClose()
    g_conf.GetVector(x);
 
    //--- decision log ---------------------------------------------------
-   g_log.Rule(StringFormat("BAR CLOSE %s  %s  %s  price %.2f",
+   g_log.Rule(StringFormat("BAR CLOSE %s  %s  %s  price %s",
               TimeToString(g_ms.ETime(1),TIME_DATE|TIME_MINUTES),_Symbol,
-              EnumToString((ENUM_TIMEFRAMES)Period()),g_ms.EClose(1)));
+              EnumToString((ENUM_TIMEFRAMES)Period()),SmcPx(g_ms.EClose(1))));
    g_log.Think(StringFormat("READ   | %s %s | %s %s | entry swing %s internal %s | volatility %.2fx | %s",
                EnumToString(g_ms.TfHigh()),SmcDirStr(g_conf.BiasHtf()),
                EnumToString(g_ms.TfMid()),SmcDirStr(g_conf.BiasMid()),
@@ -1037,8 +1037,8 @@ bool OnBarClose()
          int before=g_vbook.Count();
          g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,0.0,g_sig.meta,g_sig.zone_from);
          if(g_vbook.Count()>before)
-            g_log.Think(StringFormat("OBSERVE| watching the rejected %s setup anyway - entry %.2f sl %.2f tp %.2f (%d in the book)",
-                        SmcDirShort(g_sig.dir),g_sig.entry,g_sig.sl,g_sig.tp1,g_vbook.Count()));
+            g_log.Think(StringFormat("OBSERVE| watching the rejected %s setup anyway - entry %s sl %s tp %s (%d in the book)",
+                        SmcDirShort(g_sig.dir),SmcPx(g_sig.entry),SmcPx(g_sig.sl),SmcPx(g_sig.tp1),g_vbook.Count()));
         }
       Redraw();
       return(true);
@@ -1141,14 +1141,14 @@ bool OnBarClose()
       g_risk.OnTradeOpened();
       g_last_signal=g_sig.bar_time;
       g_size_skips=0;
-      g_last_action=StringFormat("DRY RUN %s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry);
-      g_log.Think(StringFormat("DRY RUN| WOULD OPEN %s %.2f lots @ %.2f  sl %.2f  tp %.2f  risk %.2f  [structure: %s]  (nothing sent)",
-                  SmcDirShort(g_sig.dir),lots,g_sig.entry,g_sig.sl,g_sig.tp1,
+      g_last_action=StringFormat("DRY RUN %s %.2f lots @ %s",SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry));
+      g_log.Think(StringFormat("DRY RUN| WOULD OPEN %s %.2f lots @ %s  sl %s  tp %s  risk %.2f  [structure: %s]  (nothing sent)",
+                  SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry),SmcPx(g_sig.sl),SmcPx(g_sig.tp1),
                   MathAbs(g_sig.entry-g_sig.sl)*lots*g_risk.LossPerLot(1.0),SmcMetaStr(g_sig.meta)));
       if(InpNotifyEntries)
-         Notify(StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry),
-                StringFormat("SL %.2f  TP %.2f (%.2fR)  p %.0f%%  %s  - simulated, nothing sent",
-                g_sig.sl,g_sig.tp1,g_sig.rr1,g_sig.prob*100.0,g_sig.model));
+         Notify(StringFormat("%s %.2f lots @ %s",SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry)),
+                StringFormat("SL %s  TP %s (%.2fR)  p %.0f%%  %s  - simulated, nothing sent",
+                SmcPx(g_sig.sl),SmcPx(g_sig.tp1),g_sig.rr1,g_sig.prob*100.0,g_sig.model));
       g_vis.DrawSignal(g_sig,g_ms.ETime(1));
       Redraw();
       return(true);
@@ -1163,14 +1163,14 @@ bool OnBarClose()
       g_vbook.Add(x,g_sig.entry,g_sig.sl,g_sig.tp1,g_sig.dir,lots,g_sig.meta,g_sig.zone_from);
       g_last_signal=g_sig.bar_time;
       g_size_skips=0;
-      g_last_action=StringFormat("OBSERVING %s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry);
-      g_log.Think(StringFormat("OBSERVE| WOULD OPEN %s %.2f lots @ %.2f  sl %.2f  tp %.2f  [structure: %s] - learning first, %d/%d resolved (InpLiveAfterWarmup)",
-                  SmcDirShort(g_sig.dir),lots,g_sig.entry,g_sig.sl,g_sig.tp1,SmcMetaStr(g_sig.meta),
+      g_last_action=StringFormat("OBSERVING %s %.2f lots @ %s",SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry));
+      g_log.Think(StringFormat("OBSERVE| WOULD OPEN %s %.2f lots @ %s  sl %s  tp %s  [structure: %s] - learning first, %d/%d resolved (InpLiveAfterWarmup)",
+                  SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry),SmcPx(g_sig.sl),SmcPx(g_sig.tp1),SmcMetaStr(g_sig.meta),
                   (int)g_model.Updates(),g_model.WarmupNeeded()));
       if(InpNotifyEntries)
-         Notify(StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry),
-                StringFormat("SL %.2f  TP %.2f (%.2fR)  p %.0f%%  %s  - OBSERVING, nothing sent (%d/%d)",
-                g_sig.sl,g_sig.tp1,g_sig.rr1,g_sig.prob*100.0,g_sig.model,
+         Notify(StringFormat("%s %.2f lots @ %s",SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry)),
+                StringFormat("SL %s  TP %s (%.2fR)  p %.0f%%  %s  - OBSERVING, nothing sent (%d/%d)",
+                SmcPx(g_sig.sl),SmcPx(g_sig.tp1),g_sig.rr1,g_sig.prob*100.0,g_sig.model,
                 (int)g_model.Updates(),g_model.WarmupNeeded()));
       g_vis.DrawSignal(g_sig,g_ms.ETime(1));
       Redraw();
@@ -1224,13 +1224,13 @@ bool OnBarClose()
                        fill,slip,g_sig.entry,slip/rr*100.0));
          g_risk.OnTradeOpened();
          g_last_signal=g_sig.bar_time;
-         g_last_action=StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry);
+         g_last_action=StringFormat("%s %.2f lots @ %s",SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry));
          g_log.Think(StringFormat("EXECUTE| #%s %s  [structure: %s]",IntegerToString((long)ticket),g_last_action,
                      SmcMetaStr(g_sig.meta)));
          if(InpNotifyEntries)
-            Notify(StringFormat("%s %.2f lots @ %.2f",SmcDirShort(g_sig.dir),lots,g_sig.entry),
-                   StringFormat("SL %.2f  TP %.2f (%.2fR)  p %.0f%%  %s",
-                   g_sig.sl,g_sig.tp1,g_sig.rr1,g_sig.prob*100.0,g_sig.model));
+            Notify(StringFormat("%s %.2f lots @ %s",SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry)),
+                   StringFormat("SL %s  TP %s (%.2fR)  p %.0f%%  %s",
+                   SmcPx(g_sig.sl),SmcPx(g_sig.tp1),g_sig.rr1,g_sig.prob*100.0,g_sig.model));
          g_vis.DrawSignal(g_sig,g_ms.ETime(1));
         }
       else g_log.Warn("Position opened but could not be matched to a ticket - it will be managed by its stop and target only");

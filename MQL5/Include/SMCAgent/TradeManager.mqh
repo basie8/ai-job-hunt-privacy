@@ -377,13 +377,13 @@ public:
          if(sld<stops)
            {
             if(m_log!=NULL)
-               m_log.Warn(StringFormat("Order refused: the stop is %.5f from price but this broker requires %.5f. Widening it would break the position sizing, so the trade is skipped rather than over-risked.",sld,stops));
+               m_log.Warn(StringFormat("Order refused: the stop is %s from price but this broker requires %s. Widening it would break the position sizing, so the trade is skipped rather than over-risked.",SmcPx(sld),SmcPx(stops)));
             return(false);
            }
          if(tpd<stops)
            {
             if(m_log!=NULL)
-               m_log.Warn(StringFormat("Order refused: the target is %.5f from price but this broker requires %.5f.",tpd,stops));
+               m_log.Warn(StringFormat("Order refused: the target is %s from price but this broker requires %s.",SmcPx(tpd),SmcPx(stops)));
             return(false);
            }
         }
@@ -411,19 +411,19 @@ public:
       if(d<=0.0)
         {
          if(m_log!=NULL)
-            m_log.Debug(StringFormat("Stop move to %.5f skipped - price %.5f is already through it",nsl,mkt));
+            m_log.Debug(StringFormat("Stop move to %s skipped - price %s is already through it",SmcPx(nsl),SmcPx(mkt)));
          return(false);
         }
       if(stops>0.0 && d<stops)
         {
          if(m_log!=NULL)
-            m_log.Debug(StringFormat("Stop move to %.5f skipped - %.5f from price, broker needs %.5f. Will retry as price advances.",nsl,d,stops));
+            m_log.Debug(StringFormat("Stop move to %s skipped - %s from price, broker needs %s. Will retry as price advances.",SmcPx(nsl),SmcPx(d),SmcPx(stops)));
          return(false);
         }
       if(!m_trade.PositionModify(ticket,nsl,NormalizeDouble(tp,dg)))
         {
          if(m_log!=NULL)
-            m_log.Warn(StringFormat("Stop move to %.5f rejected: %d %s",nsl,
+            m_log.Warn(StringFormat("Stop move to %s rejected: %d %s",SmcPx(nsl),
                        m_trade.ResultRetcode(),m_trade.ResultRetcodeDescription()));
          return(false);
         }
