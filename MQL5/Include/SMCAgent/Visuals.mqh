@@ -629,9 +629,24 @@ public:
                    StringFormat("%+0.2f",f.weight),f.note,c);
         }
 
+      //--- The weighted total above is built from the LEARNED weights, but
+      //--- during warm-up the probability the agent acts on is a blend of the
+      //--- learned model and the research priors. Printing them side by side
+      //--- invited the reading that one produces the other, and on a model
+      //--- whose weights have drifted hard the two can be more than fifty
+      //--- points apart - a score implying 12% next to a probability of 65%.
+      //--- Say which is which, and how far through the blend it is.
       color sc=(total>0?m_c_bull:m_c_bear);
-      KV("SCORE",StringFormat("%+0.3f weighted  ->  probability %s  (bias %+0.2f)",
-         total,(sig.prob>0.0?StringFormat("%.1f%%",sig.prob*100.0):"n/a"),model.Bias()),sc);
+      if(model.IsWarm())
+         KV("SCORE",StringFormat("%+0.3f weighted  ->  probability %s  (bias %+0.2f)",
+            total,(sig.prob>0.0?StringFormat("%.1f%%",sig.prob*100.0):"n/a"),model.Bias()),sc);
+      else
+        {
+         double k=SmcClamp((double)model.Updates()/(double)MathMax(model.WarmupNeeded(),1),0.0,1.0);
+         KV("SCORE",StringFormat("%+0.3f learned -> %.0f%%  |  in use %s (%.0f%% learned)  (bias %+0.2f)",
+            total,SmcSigmoid(model.Bias()+total)*100.0,
+            (sig.prob>0.0?StringFormat("%.0f%%",sig.prob*100.0):"n/a"),k*100.0,model.Bias()),sc);
+        }
 
       //--- risk -------------------------------------------------------
       Row(Rule("RISK",W),m_c_dim);
