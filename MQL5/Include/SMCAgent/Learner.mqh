@@ -194,8 +194,9 @@ public:
       for(int i=0;i<m_n;i++)
         {
          double sd=FeatureSd(i);
-         if(sd<0.02)      { dead+=(nd++?", ":"")+IntegerToString(i)+StringFormat("(sd %.3f)",sd); }
-         else if(sd<0.15) { thin+=(nt++?", ":"")+IntegerToString(i)+StringFormat("(sd %.2f)",sd); }
+         //--- explicit comparison: MQL5 will not take a bare int as a condition
+         if(sd<0.02)      { dead+=(nd++>0?", ":"")+IntegerToString(i)+StringFormat("(sd %.3f)",sd); }
+         else if(sd<0.15) { thin+=(nt++>0?", ":"")+IntegerToString(i)+StringFormat("(sd %.2f)",sd); }
         }
       m_log.Info(StringFormat("Model | warm-up complete at %d resolved setups. Feature variability: %d of %d carried no usable variation, %d carried little.",
                  (int)m_updates,nd,m_n,nt));
