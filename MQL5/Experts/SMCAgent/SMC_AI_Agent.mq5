@@ -895,12 +895,34 @@ void RiskGuards()
              g_risk.LockReason(),g_risk.DayPnLPct()));
    was_locked=g_risk.DayLocked();
 
+   //--- Announce a flatten exactly once, the way the lock above is.
+   //---
+   //--- RiskGuards runs from OnTick, and MustFlatten is a STATE test, not an
+   //--- event: while equity sits below the floor it is true on every call.
+   //--- Notifying unconditionally meant one message per tick for the rest of
+   //--- the day - thousands of them - which buries the one that mattered and
+   //--- trains the user to ignore the channel that exists to warn them.
+   //---
+   //--- Cleared whenever the day is not locked, so a genuinely new breach on
+   //--- a later day is announced again. NewDayCheck above unlocks the day, so
+   //--- this resets with it.
+   static bool announced_flat=false;
+   if(!g_risk.DayLocked()) announced_flat=false;
+
    string reason="";
    if(g_risk.MustFlatten(reason))
      {
       if(g_exec.OpenCount()>0) g_exec.CloseAll(reason);
       g_risk.Lock(reason);
-      if(InpNotifyRisk) Notify("FLATTENED",reason);
+      if(!announced_flat)
+        {
+         g_log.Warn("FLATTENED: "+reason+" - no further trades until the daily reset");
+         if(InpNotifyRisk) Notify("FLATTENED",reason);
+         //--- the lock was caused by this flatten, so do not also announce it
+         //--- as a separate RISK LOCK on the next tick
+         was_locked=true;
+         announced_flat=true;
+        }
       g_last_action="flattened: "+reason;
       return;
      }
