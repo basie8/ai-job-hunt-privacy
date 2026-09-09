@@ -1043,9 +1043,9 @@ public:
          if(m_f[i].contrib<wv) { wv=m_f[i].contrib; wi=i; }
       if(wi>=0 && wv<0.0) worst=StringFormat(" Main objection: %s (%.2f) - %s.",m_f[wi].name,wv,m_f[wi].note);
 
-      return(StringFormat("%s %s. %s. Trading from the %s %s at %.2f-%.2f towards %s for %.2fR. Model confidence %.0f%%. Top evidence: %s.%s",
+      return(StringFormat("%s %s. %s. Trading from the %s %s at %.2f-%.2f towards %s for %s. Model confidence %.0f%%. Top evidence: %s.%s",
                           SmcDirShort(dir),m_playbook,why,SmcDirStr(zone.dir),SmcZoneStr(zone.kind),
-                          zone.bottom,zone.top,target_name,rr1,prob*100.0,top,worst));
+                          zone.bottom,zone.top,target_name,SmcRrStr(rr1,ManagedReward(rr1)),prob*100.0,top,worst));
      }
   };
 

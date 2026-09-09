@@ -446,6 +446,18 @@ string SmcLiqStr(const int kind)
 //+------------------------------------------------------------------+
 string SmcPx(const double p) { return(DoubleToString(p,_Digits)); }
 
+//--- The R a signal advertises and the R it can actually realise.
+//--- The partial takes part of the position off long before the objective,
+//--- so the gross figure is not what the trade earns. Anywhere a human
+//--- reads an R, both belong - a display that shows only the gross number
+//--- corrupts the reader's judgement rather than the agent's.
+string SmcRrStr(const double rr,const double rr_net)
+  {
+   if(rr_net>0.0 && rr_net<rr-0.005)
+      return(StringFormat("%.2fR, net %.2fR",rr,rr_net));
+   return(StringFormat("%.2fR",rr));
+  }
+
 //+------------------------------------------------------------------+
 //| Human readable structural context, for the log and the journal   |
 //+------------------------------------------------------------------+
@@ -4488,9 +4500,9 @@ public:
          if(m_f[i].contrib<wv) { wv=m_f[i].contrib; wi=i; }
       if(wi>=0 && wv<0.0) worst=StringFormat(" Main objection: %s (%.2f) - %s.",m_f[wi].name,wv,m_f[wi].note);
 
-      return(StringFormat("%s %s. %s. Trading from the %s %s at %.2f-%.2f towards %s for %.2fR. Model confidence %.0f%%. Top evidence: %s.%s",
+      return(StringFormat("%s %s. %s. Trading from the %s %s at %.2f-%.2f towards %s for %s. Model confidence %.0f%%. Top evidence: %s.%s",
                           SmcDirShort(dir),m_playbook,why,SmcDirStr(zone.dir),SmcZoneStr(zone.kind),
-                          zone.bottom,zone.top,target_name,rr1,prob*100.0,top,worst));
+                          zone.bottom,zone.top,target_name,SmcRrStr(rr1,ManagedReward(rr1)),prob*100.0,top,worst));
      }
   };
 
@@ -5593,9 +5605,7 @@ public:
       //--- both figures, because the partial means the line is not what the
       //--- position earns: half comes off at the partial level long before
       //--- price gets here
-      Text("G_t1_t",to,sig.tp1,(sig.rr1_net>0.0 && sig.rr1_net<sig.rr1
-           ?StringFormat(" TP1 %.2fR (%.2fR net)",sig.rr1,sig.rr1_net)
-           :StringFormat(" TP1 %.2fR",sig.rr1)),m_c_bull,7);
+      Text("G_t1_t",to,sig.tp1,StringFormat(" TP1 %s",SmcRrStr(sig.rr1,sig.rr1_net)),m_c_bull,7);
       Text("G_t2_t",to,sig.tp2,StringFormat(" TP2 %.2fR",sig.rr2),m_c_bull,7);
       if(sig.idm>0.0)
         {
@@ -5799,8 +5809,9 @@ public:
       if(sig.valid)
         {
          color c=(sig.dir==DIR_BULL?m_c_bull:m_c_bear);
-         KV("SIGNAL",StringFormat("%s  entry %s  sl %s  tp %s (%.2fR)",
-            SmcDirShort(sig.dir),SmcPx(sig.entry),SmcPx(sig.sl),SmcPx(sig.tp1),sig.rr1),c);
+         KV("SIGNAL",StringFormat("%s  entry %s  sl %s  tp %s (%s)",
+            SmcDirShort(sig.dir),SmcPx(sig.entry),SmcPx(sig.sl),SmcPx(sig.tp1),
+            SmcRrStr(sig.rr1,sig.rr1_net)),c);
         }
       else
         {
@@ -6945,8 +6956,8 @@ bool OnBarClose()
                   MathAbs(g_sig.entry-g_sig.sl)*lots*g_risk.LossPerLot(1.0),SmcMetaStr(g_sig.meta)));
       if(InpNotifyEntries)
          Notify(StringFormat("%s %.2f lots @ %s",SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry)),
-                StringFormat("SL %s  TP %s (%.2fR)  p %.0f%%  %s  - simulated, nothing sent",
-                SmcPx(g_sig.sl),SmcPx(g_sig.tp1),g_sig.rr1,g_sig.prob*100.0,g_sig.model));
+                StringFormat("SL %s  TP %s (%s)  p %.0f%%  %s  - simulated, nothing sent",
+                SmcPx(g_sig.sl),SmcPx(g_sig.tp1),SmcRrStr(g_sig.rr1,g_sig.rr1_net),g_sig.prob*100.0,g_sig.model));
       g_vis.DrawSignal(g_sig,g_ms.ETime(1));
       Redraw();
       return(true);
@@ -6967,8 +6978,8 @@ bool OnBarClose()
                   (int)g_model.Updates(),g_model.WarmupNeeded()));
       if(InpNotifyEntries)
          Notify(StringFormat("%s %.2f lots @ %s",SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry)),
-                StringFormat("SL %s  TP %s (%.2fR)  p %.0f%%  %s  - OBSERVING, nothing sent (%d/%d)",
-                SmcPx(g_sig.sl),SmcPx(g_sig.tp1),g_sig.rr1,g_sig.prob*100.0,g_sig.model,
+                StringFormat("SL %s  TP %s (%s)  p %.0f%%  %s  - OBSERVING, nothing sent (%d/%d)",
+                SmcPx(g_sig.sl),SmcPx(g_sig.tp1),SmcRrStr(g_sig.rr1,g_sig.rr1_net),g_sig.prob*100.0,g_sig.model,
                 (int)g_model.Updates(),g_model.WarmupNeeded()));
       g_vis.DrawSignal(g_sig,g_ms.ETime(1));
       Redraw();
@@ -7027,8 +7038,8 @@ bool OnBarClose()
                      SmcMetaStr(g_sig.meta)));
          if(InpNotifyEntries)
             Notify(StringFormat("%s %.2f lots @ %s",SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry)),
-                   StringFormat("SL %s  TP %s (%.2fR)  p %.0f%%  %s",
-                   SmcPx(g_sig.sl),SmcPx(g_sig.tp1),g_sig.rr1,g_sig.prob*100.0,g_sig.model));
+                   StringFormat("SL %s  TP %s (%s)  p %.0f%%  %s",
+                   SmcPx(g_sig.sl),SmcPx(g_sig.tp1),SmcRrStr(g_sig.rr1,g_sig.rr1_net),g_sig.prob*100.0,g_sig.model));
          g_vis.DrawSignal(g_sig,g_ms.ETime(1));
         }
       else g_log.Warn("Position opened but could not be matched to a ticket - it will be managed by its stop and target only");

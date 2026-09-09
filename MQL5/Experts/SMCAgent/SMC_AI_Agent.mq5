@@ -1158,8 +1158,8 @@ bool OnBarClose()
                   MathAbs(g_sig.entry-g_sig.sl)*lots*g_risk.LossPerLot(1.0),SmcMetaStr(g_sig.meta)));
       if(InpNotifyEntries)
          Notify(StringFormat("%s %.2f lots @ %s",SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry)),
-                StringFormat("SL %s  TP %s (%.2fR)  p %.0f%%  %s  - simulated, nothing sent",
-                SmcPx(g_sig.sl),SmcPx(g_sig.tp1),g_sig.rr1,g_sig.prob*100.0,g_sig.model));
+                StringFormat("SL %s  TP %s (%s)  p %.0f%%  %s  - simulated, nothing sent",
+                SmcPx(g_sig.sl),SmcPx(g_sig.tp1),SmcRrStr(g_sig.rr1,g_sig.rr1_net),g_sig.prob*100.0,g_sig.model));
       g_vis.DrawSignal(g_sig,g_ms.ETime(1));
       Redraw();
       return(true);
@@ -1180,8 +1180,8 @@ bool OnBarClose()
                   (int)g_model.Updates(),g_model.WarmupNeeded()));
       if(InpNotifyEntries)
          Notify(StringFormat("%s %.2f lots @ %s",SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry)),
-                StringFormat("SL %s  TP %s (%.2fR)  p %.0f%%  %s  - OBSERVING, nothing sent (%d/%d)",
-                SmcPx(g_sig.sl),SmcPx(g_sig.tp1),g_sig.rr1,g_sig.prob*100.0,g_sig.model,
+                StringFormat("SL %s  TP %s (%s)  p %.0f%%  %s  - OBSERVING, nothing sent (%d/%d)",
+                SmcPx(g_sig.sl),SmcPx(g_sig.tp1),SmcRrStr(g_sig.rr1,g_sig.rr1_net),g_sig.prob*100.0,g_sig.model,
                 (int)g_model.Updates(),g_model.WarmupNeeded()));
       g_vis.DrawSignal(g_sig,g_ms.ETime(1));
       Redraw();
@@ -1240,8 +1240,8 @@ bool OnBarClose()
                      SmcMetaStr(g_sig.meta)));
          if(InpNotifyEntries)
             Notify(StringFormat("%s %.2f lots @ %s",SmcDirShort(g_sig.dir),lots,SmcPx(g_sig.entry)),
-                   StringFormat("SL %s  TP %s (%.2fR)  p %.0f%%  %s",
-                   SmcPx(g_sig.sl),SmcPx(g_sig.tp1),g_sig.rr1,g_sig.prob*100.0,g_sig.model));
+                   StringFormat("SL %s  TP %s (%s)  p %.0f%%  %s",
+                   SmcPx(g_sig.sl),SmcPx(g_sig.tp1),SmcRrStr(g_sig.rr1,g_sig.rr1_net),g_sig.prob*100.0,g_sig.model));
          g_vis.DrawSignal(g_sig,g_ms.ETime(1));
         }
       else g_log.Warn("Position opened but could not be matched to a ticket - it will be managed by its stop and target only");

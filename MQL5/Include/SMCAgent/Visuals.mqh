@@ -492,9 +492,7 @@ public:
       //--- both figures, because the partial means the line is not what the
       //--- position earns: half comes off at the partial level long before
       //--- price gets here
-      Text("G_t1_t",to,sig.tp1,(sig.rr1_net>0.0 && sig.rr1_net<sig.rr1
-           ?StringFormat(" TP1 %.2fR (%.2fR net)",sig.rr1,sig.rr1_net)
-           :StringFormat(" TP1 %.2fR",sig.rr1)),m_c_bull,7);
+      Text("G_t1_t",to,sig.tp1,StringFormat(" TP1 %s",SmcRrStr(sig.rr1,sig.rr1_net)),m_c_bull,7);
       Text("G_t2_t",to,sig.tp2,StringFormat(" TP2 %.2fR",sig.rr2),m_c_bull,7);
       if(sig.idm>0.0)
         {
@@ -698,8 +696,9 @@ public:
       if(sig.valid)
         {
          color c=(sig.dir==DIR_BULL?m_c_bull:m_c_bear);
-         KV("SIGNAL",StringFormat("%s  entry %s  sl %s  tp %s (%.2fR)",
-            SmcDirShort(sig.dir),SmcPx(sig.entry),SmcPx(sig.sl),SmcPx(sig.tp1),sig.rr1),c);
+         KV("SIGNAL",StringFormat("%s  entry %s  sl %s  tp %s (%s)",
+            SmcDirShort(sig.dir),SmcPx(sig.entry),SmcPx(sig.sl),SmcPx(sig.tp1),
+            SmcRrStr(sig.rr1,sig.rr1_net)),c);
         }
       else
         {

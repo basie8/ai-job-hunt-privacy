@@ -402,6 +402,18 @@ string SmcLiqStr(const int kind)
 //+------------------------------------------------------------------+
 string SmcPx(const double p) { return(DoubleToString(p,_Digits)); }
 
+//--- The R a signal advertises and the R it can actually realise.
+//--- The partial takes part of the position off long before the objective,
+//--- so the gross figure is not what the trade earns. Anywhere a human
+//--- reads an R, both belong - a display that shows only the gross number
+//--- corrupts the reader's judgement rather than the agent's.
+string SmcRrStr(const double rr,const double rr_net)
+  {
+   if(rr_net>0.0 && rr_net<rr-0.005)
+      return(StringFormat("%.2fR, net %.2fR",rr,rr_net));
+   return(StringFormat("%.2fR",rr));
+  }
+
 //+------------------------------------------------------------------+
 //| Human readable structural context, for the log and the journal   |
 //+------------------------------------------------------------------+
