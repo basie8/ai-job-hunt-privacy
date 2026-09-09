@@ -3522,6 +3522,7 @@ private:
    double            m_min_target_r;   // reject an objective NEARER than this
    double            m_partial_r;      // R at which the live manager banks part of the position
    double            m_partial_pct;    // how much it banks there
+   bool              m_stop_at_swing;  // put the invalidation beyond the structural swing
    double            m_stop_buf_units; // stop clearance beyond structure, in median candles
    double            m_tp_pull_units;  // pull the objective this far short of the pool
 
@@ -3722,13 +3723,36 @@ private:
       return(t);
      }
 
+   //--- The swing whose break ends the idea.
+   //---
+   //--- A zone edge says where price last turned; the swing says where the
+   //--- STRUCTURE fails, and SMC puts the invalidation at the second. The two
+   //--- are rarely the same level - an order block usually forms well inside
+   //--- the leg it belongs to, so a stop hung off the zone alone sits in front
+   //--- of the low that actually matters, in the middle of everyone else's.
+   double            ProtectiveSwing(const int dir,const double entry,bool &found)
+     {
+      found=false;
+      if(m_e==NULL) return(0.0);
+      SSwing sw;
+      //--- newest first: the nearest structural level beyond the entry is the
+      //--- one being defended, not the oldest one on the chart
+      for(int k=m_e.SwingCount()-1;k>=0;k--)
+        {
+         if(!m_e.GetSwing(k,sw)) break;
+         if(dir==DIR_BULL && sw.dir==DIR_BEAR && sw.price<entry) { found=true; return(sw.price); }
+         if(dir==DIR_BEAR && sw.dir==DIR_BULL && sw.price>entry) { found=true; return(sw.price); }
+        }
+      return(0.0);
+     }
+
 public:
                      CConfluence(void): m_ms(NULL), m_e(NULL), m_m(NULL), m_h(NULL), m_news(NULL),
                                         m_model(NULL), m_log(NULL), m_gmt(0), m_news_block_before(15),
                                         m_news_block_after(10), m_news_importance(3), m_veto(""), m_context(""),
                                         m_bias_htf(DIR_NONE), m_bias_mid(DIR_NONE), m_playbook(""),
                                         m_max_target_r(6.0), m_min_target_r(2.0),
-                                        m_partial_r(1.0), m_partial_pct(50.0),
+                                        m_partial_r(1.0), m_partial_pct(50.0), m_stop_at_swing(true),
                                         m_stop_buf_units(0.35), m_tp_pull_units(0.10),
                                         m_pdh(0), m_pdl(0), m_pwh(0), m_pwl(0), m_ah(0), m_al(0),
                                         m_has_day(false), m_has_week(false), m_has_asia(false)
@@ -3744,8 +3768,10 @@ public:
                           const double max_target_r=6.0,
                           const double stop_buf_units=0.35,const double tp_pull_units=0.10,
                           const double min_target_r=2.0,
-                          const double partial_r=1.0,const double partial_pct=50.0)
+                          const double partial_r=1.0,const double partial_pct=50.0,
+                          const bool stop_at_swing=true)
      {
+      m_stop_at_swing=stop_at_swing;
       m_max_target_r=max_target_r;
       m_min_target_r=MathMax(min_target_r,0.0);
       m_partial_r   =MathMax(partial_r,0.0);
@@ -3918,6 +3944,8 @@ public:
       //--- what keeps this one out of the obvious pile. Expressed in median
       //--- candles so it scales with the tape, plus the spread it must cross.
       double buffer=unit*m_stop_buf_units+m_ms.SpreadPrice()*2.0;
+      bool   sw_found=false;
+      double sw_px=(m_stop_at_swing?ProtectiveSwing(dir,entry,sw_found):0.0);
       double sl;
       if(dir==DIR_BULL)
         {
@@ -3926,12 +3954,15 @@ public:
          //--- inducement that has not been run yet is resting liquidity:
          //--- the invalidation has to sit beyond it, never in front of it
          if(zone.idm>0.0 && !zone.idm_taken) sl=MathMin(sl,zone.idm-buffer);
+         //--- and beyond the structural low, which is what actually ends it
+         if(sw_found) sl=MathMin(sl,sw_px-buffer);
         }
       else
         {
          sl=MathMax(zone.top,(m_e.SweepValid() && m_e.SweepDir()==DIR_BEAR?m_e.SweepExtreme():zone.top))+buffer;
          sl=MathMax(sl,m_ms.EHigh(1)+buffer);
          if(zone.idm>0.0 && !zone.idm_taken) sl=MathMax(sl,zone.idm+buffer);
+         if(sw_found) sl=MathMax(sl,sw_px+buffer);
         }
       double risk=MathAbs(entry-sl);
       if(risk<=0.0)
@@ -3946,7 +3977,8 @@ public:
       double max_risk=unit*4.5;
       if(risk>max_risk)
         {
-         m_veto=StringFormat("invalidation %.1f units away - too deep for this volatility",risk/unit);
+         m_veto=StringFormat("invalidation %.1f units away%s - too deep for this volatility",
+                             risk/unit,(sw_found && m_stop_at_swing?" (structural swing)":""));
          m_context=StringFormat("%s %s - %s, but %s",SmcDirShort(dir),m_playbook,why,m_veto);
          BuildContextFactors(dir);
          return(false);
@@ -5840,7 +5872,8 @@ input bool   InpResetModel       = false;  // Discard the stored model on start
 input group "=== Trade management ==="
 input double InpMinTargetR       = 2.00;   // Reject a target nearer than this R (0 = off)
 input double InpMaxTargetR       = 6.00;   // Reject a target beyond this R (0 = no cap)
-input double InpStopBufferUnits  = 0.35;   // Stop clearance past structure, in candles
+input bool   InpStopAtSwing      = true;   // Put the stop beyond the structural swing
+input double InpStopBufferUnits  = 0.55;   // Extra clearance beyond it, in median candles
 input double InpTargetPullUnits  = 0.10;   // Stop this far short of the pool, in candles
 input double InpPartialAtR       = 1.00;   // Take partial profit at this R multiple
 input double InpPartialPercent   = 50.0;   // Percent of the position closed at that point
@@ -6306,7 +6339,7 @@ int OnInit()
                news_ptr,GetPointer(g_model),GetPointer(g_log),
                g_gmt,InpNewsMinutesBefore,InpNewsMinutesAfter,InpNewsImportance,InpMaxTargetR,
                InpStopBufferUnits,InpTargetPullUnits,InpMinTargetR,
-               InpPartialAtR,InpPartialPercent);
+               InpPartialAtR,InpPartialPercent,InpStopAtSwing);
 
    //--- The objective is now the nearest unswept pool, so the only thing
    //--- keeping a setup off a target it has already half-banked is this

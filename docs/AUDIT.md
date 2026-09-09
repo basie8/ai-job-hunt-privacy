@@ -262,6 +262,16 @@ understood, not the MQL5 as written.
 - A setup refused for a too-near or too-far objective produces no observation,
   matching how the existing far-target veto already behaved. The model
   therefore never sees the near-target population it does not trade.
+- The protective-swing stop anchor and the `InpMinTargetR` floor oppose each
+  other: a wider stop lowers R against a fixed objective, so more setups fall
+  under the floor. On past observations a stop 25% wider leaves 87% of M15
+  setups clearing 2.0R, and 50% wider leaves 81%; on M1/M5 the same widening
+  takes the survivors from 20%/33% down to 9%/25% and 4%/14%. Figures beyond a
+  50% widening cannot be read from that data at all, because the pre-18-factor
+  files saturate the R feature at exactly 3.0R and collapse together.
+- The depth of the protective swing is not recorded in any gathered data, so
+  how much the anchor actually widens a stop is unmeasured. Only the buffer
+  change (0.35 -> 0.55 units, about +11% on a typical stop) is quantified.
 - 35 unused one-line accessors remain. Unused API surface, not placeholders.
 - Broker GMT offset auto-detection rounds to whole hours.
 - `TimeGMT()` depends on the terminal machine's clock; a jump larger than one

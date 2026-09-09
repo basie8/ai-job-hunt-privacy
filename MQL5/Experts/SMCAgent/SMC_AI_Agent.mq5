@@ -85,7 +85,8 @@ input bool   InpResetModel       = false;  // Discard the stored model on start
 input group "=== Trade management ==="
 input double InpMinTargetR       = 2.00;   // Reject a target nearer than this R (0 = off)
 input double InpMaxTargetR       = 6.00;   // Reject a target beyond this R (0 = no cap)
-input double InpStopBufferUnits  = 0.35;   // Stop clearance past structure, in candles
+input bool   InpStopAtSwing      = true;   // Put the stop beyond the structural swing
+input double InpStopBufferUnits  = 0.55;   // Extra clearance beyond it, in median candles
 input double InpTargetPullUnits  = 0.10;   // Stop this far short of the pool, in candles
 input double InpPartialAtR       = 1.00;   // Take partial profit at this R multiple
 input double InpPartialPercent   = 50.0;   // Percent of the position closed at that point
@@ -551,7 +552,7 @@ int OnInit()
                news_ptr,GetPointer(g_model),GetPointer(g_log),
                g_gmt,InpNewsMinutesBefore,InpNewsMinutesAfter,InpNewsImportance,InpMaxTargetR,
                InpStopBufferUnits,InpTargetPullUnits,InpMinTargetR,
-               InpPartialAtR,InpPartialPercent);
+               InpPartialAtR,InpPartialPercent,InpStopAtSwing);
 
    //--- The objective is now the nearest unswept pool, so the only thing
    //--- keeping a setup off a target it has already half-banked is this

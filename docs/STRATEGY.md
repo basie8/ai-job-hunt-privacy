@@ -235,6 +235,21 @@ the paper book and resolved bar by bar against real candles, at 0.6 sample weigh
 This is what lets the agent learn on a 2-trades-per-week diet without needing
 hundreds of live trades first.
 
+**The invalidation sits beyond the structure, not beyond the zone.** A zone edge
+says where price last turned; the swing says where the structure fails, and SMC
+puts the stop at the second. The two are rarely the same level — an order block
+usually forms well inside the leg it belongs to, so a stop hung off the zone alone
+sits in front of the low that actually matters, in the middle of everyone else's.
+The stop is therefore the furthest of: the zone's far edge, the sweep extreme, the
+last closed bar, any inducement not yet taken, and the nearest protective swing —
+then a clearance of `InpStopBufferUnits` median candles plus two spreads.
+
+Widening the stop costs reward, because the objective is a fixed price: the same
+target measured against a wider risk is a smaller R. The volatility ceiling
+(4.5 median candles) and the `InpMinTargetR` floor both refuse the setups this
+pushes too far, which is the safe direction — a refused setup risks nothing. It
+does mean the two settings pull against each other, and the trade count falls.
+
 **The objective is the nearest unswept pool, and nothing else.** SMC draws price
 toward resting liquidity; past the nearest pool the reason for the trade is spent.
 The search previously asked for a pool at least 1.2R away, which looked like

@@ -373,7 +373,8 @@ a dry run does not.
 
 | Input | Default | Notes |
 |---|---|---|
-| `InpStopBufferUnits` | 0.35 | Stop clearance beyond structure, in median candles. Raise it if stops are being swept before the move; expect fewer trades, because a wider stop shrinks R and more setups then fail the expectancy gate |
+| `InpStopAtSwing` | true | Anchor the stop beyond the swing whose break invalidates the structure, not merely beyond the zone edge. This is the SMC invalidation point and it is usually further out |
+| `InpStopBufferUnits` | 0.55 | Extra clearance past that level, in median candles, plus two spreads. Everyone's stop sits on the same swing, which is why it gets swept |
 | `InpTargetPullUnits` | 0.10 | Pull the objective this far short of the pool, in median candles. Price often turns just before resting liquidity |
 | `InpMinTargetR` | 2.00 | Reject a setup whose first objective is **nearer** than this. Keep it at or above twice `InpPartialAtR`, or the partial fires past the halfway point of the trade. On M1 and M5 the nearest pool is usually inside 2R, so this refuses most lower-timeframe setups by design |
 | `InpMaxTargetR` | 6.00 | Reject a setup whose first objective is further than this |
