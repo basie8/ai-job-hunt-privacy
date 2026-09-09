@@ -235,6 +235,34 @@ the paper book and resolved bar by bar against real candles, at 0.6 sample weigh
 This is what lets the agent learn on a 2-trades-per-week diet without needing
 hundreds of live trades first.
 
+**One definition of a win.** An observation is resolved under the same management
+a real position receives: the partial comes off at `InpPartialAtR`, the stop moves
+to entry at `InpBreakEvenAtR`, and the label is the sign of the *net* R after the
+round-trip cost — the same question a closed trade answers with `profit > 0`.
+Before this, a real trade was labelled on realised profit while an observation was
+labelled on whether raw price touched the objective before the stop, unmanaged.
+Those two answers differ on a large minority of identical price paths, always the
+same way: a move that banks the partial and then reverses is a win once half is
+off and the stop is at entry, and a full loss when nothing is managed. Both label
+streams were training one model.
+
+Only the bar's high and low are known, never the path between them, so the adverse
+extreme is always applied first. Two parts of live management are deliberately not
+simulated. The structural trail only ever moves a stop favourably after the partial
+is already banked, so it changes a winner's size but never a label's sign. The time
+stop was tried and removed: because it fires long before the observation budget
+expires it resolved *every* observation, pinning the win rate near 47% whatever the
+target and removing the discard of unresolved setups altogether — the protection
+whose absence collapsed the first live model. The price of leaving it out is that
+observations under-represent stalled trades relative to the live stream.
+
+**This changes what the agent learns from, not what it trades.** No order the
+broker sees is affected. It does move the base rate the model is fitted against:
+under the old rule a 4R objective was reached about 1 time in 80 on a driftless
+path, under the new one a 4R setup ends in net profit about half the time, because
+banking half at 1R with the stop at entry is a profit. Any model or sample gathered
+under the old definition is not comparable and has to be discarded.
+
 **Honest limits.** The model is linear in its features: it can learn that "sweeps
 matter more than sessions on this account", but it cannot discover an interaction
 that no factor expresses. That is a deliberate trade for stability and for the

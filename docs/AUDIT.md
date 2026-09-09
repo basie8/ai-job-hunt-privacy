@@ -231,9 +231,21 @@ understood, not the MQL5 as written.
 
 - Compiles clean; **not backtested or executed in this environment.**
 - The strategy itself remains unvalidated. No clean dataset has yet been
-  gathered — the observation de-duplication (`db27e44`) and the proportional
-  observation window (`ca56b7f`) were the prerequisites for one, and no data
-  has been collected since.
+  gathered — the observation de-duplication (`db27e44`), the proportional
+  observation window (`ca56b7f`) and the managed observation label were the
+  prerequisites for one, and no data has been collected since. Every sample
+  and every saved model from before the managed label must be discarded: the
+  label means a different thing, and the base rate it is fitted against moves
+  from roughly 1-in-25 to roughly 1-in-2.
+- The observation label simulates the live partial and break-even stop but
+  **not** the live time stop. That was implemented, measured and reverted: on
+  bar paths it resolved 100% of observations at a flat ~47% win rate whatever
+  the target, eliminating the unresolved-discard protection entirely. The
+  residual difference between the two label streams is therefore one of
+  coverage — observations under-represent stalled trades — not of sign.
+- The structural trail is not simulated in the observation book, so a dry run
+  equity curve marks a large winner at its objective rather than at a trailed
+  exit.
 - The model is linear in its 18 factors — interpretable and stable on small
   samples, but it cannot discover an interaction no factor expresses.
 - The `Reward:risk` prior is `+0.16`, yet the model predicts P(target reached)

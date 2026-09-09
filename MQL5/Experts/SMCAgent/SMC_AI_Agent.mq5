@@ -614,7 +614,7 @@ int OnInit()
 
    g_exec.Init(_Symbol,InpMagic,InpSlippagePoints,GetPointer(g_log));
    g_journal.Init(F_COUNT);
-   g_vbook.Init(F_COUNT,GetPointer(g_log),120);
+   g_vbook.Init(F_COUNT,GetPointer(g_log),120,InpPartialAtR,InpPartialPercent,InpBreakEvenAtR);
    g_vis.Init(ChartID(),InpShowChart,InpShowPanel,InpPanelX,InpPanelY,InpPanelFontSize,
               InpPanelCompact,InpPanelWidthChars);
 

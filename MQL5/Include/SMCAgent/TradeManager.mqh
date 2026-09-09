@@ -150,14 +150,30 @@ private:
    int               m_meta[];      // SMC_META_* structural context at the moment it was booked
    datetime          m_zone[];      // creating candle of the engaged zone: the setup's durable identity
    int               m_budget[];    // bars this observation is allowed, scaled to how far its target is
+   //--- the same management a real position gets, simulated
+   bool              m_part[];      // the partial has been taken
+   bool              m_be[];        // the stop has been moved to break even
+   double            m_cur_sl[];    // the stop as it stands now, not as it was placed
    int               m_max_bars;    // the budget a median setup gets; others are scaled from it
+   double            m_partial_r;   // R multiple at which half comes off
+   double            m_partial_pct; // how much comes off
+   double            m_be_r;        // R multiple at which the stop goes to entry
    CLogger          *m_log;
 
 public:
-                     CVirtualBook(void): m_n(0), m_max_bars(120), m_log(NULL) {}
+                     CVirtualBook(void): m_n(0), m_max_bars(120), m_partial_r(1.0),
+                                         m_partial_pct(50.0), m_be_r(1.0), m_log(NULL) {}
 
-   void              Init(const int features,CLogger *log,const int max_bars=120)
-     { m_n=features; m_log=log; m_max_bars=max_bars; }
+   //--- The management values must match the ones the live trade manager
+   //--- uses, or the two label streams go on describing different trades.
+   void              Init(const int features,CLogger *log,const int max_bars=120,
+                          const double partial_r=1.0,const double partial_pct=50.0,const double be_r=1.0)
+     {
+      m_n=features; m_log=log; m_max_bars=max_bars;
+      m_partial_r=MathMax(partial_r,0.0);
+      m_partial_pct=SmcClamp(partial_pct,0.0,100.0);
+      m_be_r=MathMax(be_r,0.0);
+     }
 
    int               Count(void) { return(ArraySize(m_dir)); }
 
@@ -210,7 +226,11 @@ public:
       ArrayResize(m_meta,k+1);
       ArrayResize(m_zone,k+1);
       ArrayResize(m_budget,k+1);
+      ArrayResize(m_part,k+1);
+      ArrayResize(m_be,k+1);
+      ArrayResize(m_cur_sl,k+1);
       ArrayResize(m_x,(k+1)*m_n);
+      m_part[k]=false; m_be[k]=false; m_cur_sl[k]=sl;
       //--- A far target needs longer to reach, so giving every observation
       //--- the same fixed window is not neutral: it quietly discards the
       //--- distant setups that were slowly WINNING while keeping the ones
@@ -248,6 +268,9 @@ public:
       ArrayRemove(m_meta,i,1);
       ArrayRemove(m_zone,i,1);
       ArrayRemove(m_budget,i,1);
+      ArrayRemove(m_part,i,1);
+      ArrayRemove(m_be,i,1);
+      ArrayRemove(m_cur_sl,i,1);
      }
 
    //--- resolve every paper setup against the last closed bar ---------
@@ -260,6 +283,16 @@ public:
    //--- that varies from broker to broker - and the model was trained on both.
    //--- Charging the observation the same cost makes the label mean the same
    //--- thing in either stream, and makes the learned model portable.
+   //--- NOT simulated, deliberately:
+   //---  - the structural trail, which only ever moves a stop favourably once
+   //---    the partial is banked, so it changes a winner's size, not a sign;
+   //---  - the live time stop. Simulating it was tried and rejected: because
+   //---    it fires long before the observation budget expires it resolved
+   //---    EVERY observation, pinning the win rate near 47% whatever the
+   //---    target and removing the discard of unresolved setups entirely -
+   //---    the same protection whose absence collapsed the first live model.
+   //---    The cost of leaving it out is that observations under-represent
+   //---    stalled trades relative to the live stream.
    int               Resolve(const double bar_high,const double bar_low,COnlineLearner *model,
                              const double value_per_price,double &money_out,
                              const double cost_price=0.0)
@@ -268,19 +301,72 @@ public:
       for(int i=ArraySize(m_dir)-1;i>=0;i--)
         {
          m_bars[i]++;
-         bool hit_tp=false,hit_sl=false;
-         //--- the objective has to clear the round trip to count as a win;
-         //--- the stop does not need adjusting, since a costed loss is still
-         //--- a loss and the label would not change
-         double c=MathMax(cost_price,0.0);
-         if(m_dir[i]==DIR_BULL) { hit_sl=(bar_low<=m_sl[i]);  hit_tp=(bar_high>=m_tp[i]+c); }
-         else                   { hit_sl=(bar_high>=m_sl[i]); hit_tp=(bar_low <=m_tp[i]-c); }
-         double y=-1.0;
-         bool   timed_out=false;
-         if(hit_sl && hit_tp) y=0.0;                       // ambiguous bar: assume the stop first
-         else if(hit_tp) y=1.0;
-         else if(hit_sl) y=0.0;
-         else if(m_bars[i]>=m_budget[i]) timed_out=true;   // neither side reached in its own window
+         double risk=MathAbs(m_entry[i]-m_sl[i]);
+         double tp_r=(m_tp[i]-m_entry[i])*m_dir[i]/(risk>0.0?risk:1.0);
+         if(risk<=0.0 || tp_r<=0.0) { Remove(i); continue; }
+
+         //--- Simulate the management a REAL position receives.
+         //---
+         //--- Without this the two label streams answer different questions.
+         //--- A real trade is labelled on realised profit, which includes the
+         //--- partial and the break-even stop. An observation was labelled on
+         //--- whether raw price touched TP before SL, unmanaged. On the same
+         //--- market path those disagree about one label in five, always the
+         //--- same way: a move that reaches the partial and then reverses is
+         //--- a WIN once half is banked and the stop sits at entry, and a full
+         //--- loss when nothing is managed. Both streams trained one model.
+         //---
+         //--- Only high and low are known, never the path between them, so the
+         //--- adverse extreme is always applied first. That is the same
+         //--- conservative rule the ambiguous-bar case already used.
+         //---
+         //--- Cost is charged once, in R, against the net result rather than
+         //--- as a hurdle beyond the objective: with two exit legs a single
+         //--- price hurdle no longer describes what the round trip costs.
+         double cost_r =SmcSafeDiv(MathMax(cost_price,0.0),risk,0.0);
+         double part_f =m_partial_pct/100.0;
+         double adverse=(m_dir[i]==DIR_BULL?bar_low :bar_high);
+         double favour =(m_dir[i]==DIR_BULL?bar_high:bar_low);
+         bool   hit_sl =(m_dir[i]==DIR_BULL?adverse<=m_cur_sl[i]:adverse>=m_cur_sl[i]);
+         double banked =(m_part[i]?part_f*m_partial_r:0.0);   // in R, already realised
+         double rest   =1.0-(m_part[i]?part_f:0.0);
+
+         double y=-1.0,net=0.0;
+         bool   decided=false,timed_out=false;
+         if(hit_sl)
+           {
+            //--- the remainder exits at the stop as it now stands, which is
+            //--- entry once break even has been applied
+            double sl_r=(m_cur_sl[i]-m_entry[i])*m_dir[i]/risk;
+            net=banked+rest*sl_r-cost_r;
+            decided=true;
+           }
+         else
+           {
+            //--- favourable extreme: bank the partial, then move the stop.
+            //--- The live manager sets break even at entry plus one spread;
+            //--- entry alone is used here, which is the conservative side.
+            double fav_r=(favour-m_entry[i])*m_dir[i]/risk;
+            if(!m_part[i] && part_f>0.0 && m_partial_r<tp_r && fav_r>=m_partial_r)
+              { m_part[i]=true; banked=part_f*m_partial_r; rest=1.0-part_f; }
+            if(!m_be[i] && fav_r>=m_be_r)
+              { m_be[i]=true; m_cur_sl[i]=m_entry[i]; }
+
+            if(fav_r>=tp_r)
+              { net=banked+rest*tp_r-cost_r; decided=true; }
+            else if(m_bars[i]>=m_budget[i])
+              {
+               //--- Out of time. Normally that is unresolved and discarded,
+               //--- but once the partial is banked and the stop has moved the
+               //--- worst remaining outcome may already be a profit. Discarding
+               //--- a position that cannot lose would bias the sample against
+               //--- wins, so it is labelled on that floor instead.
+               double floor_r=banked+rest*((m_cur_sl[i]-m_entry[i])*m_dir[i]/risk)-cost_r;
+               if(floor_r>0.0) { net=floor_r; decided=true; }
+               else timed_out=true;
+              }
+           }
+         if(decided) y=(net>0.0?1.0:0.0);
 
          //--- A setup that reached neither its objective nor its stop is
          //--- UNRESOLVED, not a failure. Training on it as a loss is what
@@ -307,12 +393,16 @@ public:
             if(model!=NULL) model.Learn(xb,y,weight,m_meta[i]);
             if(m_lots[i]>0.0 && value_per_price>0.0)
               {
-               double exit_px=(y>0.5?m_tp[i]:m_sl[i]);
-               money_out+=(exit_px-m_entry[i])*m_dir[i]*m_lots[i]*value_per_price;
-              }        // paper trades count less than real ones
+               //--- marked to the managed exit and net of cost, so a dry run
+               //--- equity curve moves the way a live one would. The
+               //--- structural trail is not simulated, so a large winner is
+               //--- marked at its objective rather than at a trailed exit.
+               money_out+=net*MathAbs(m_entry[i]-m_sl[i])*m_lots[i]*value_per_price;
+              }
             if(m_log!=NULL)
-               m_log.Debug(StringFormat("Observation resolved [%s]: %s -> %s after %d bars",SmcMetaStr(m_meta[i]),
-                           SmcDirShort(m_dir[i]),(y>0.5?"objective":"invalidated"),m_bars[i]));
+               m_log.Debug(StringFormat("Observation resolved [%s]: %s -> %s %+.2fR net after %d bars%s",SmcMetaStr(m_meta[i]),
+                           SmcDirShort(m_dir[i]),(y>0.5?"profit":"loss"),net,m_bars[i],
+                           (m_part[i]?(m_be[i]?" (partial banked, stop at entry)":" (partial banked)"):"")));
             Remove(i);
             resolved++;
            }
