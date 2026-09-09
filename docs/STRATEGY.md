@@ -235,6 +235,34 @@ the paper book and resolved bar by bar against real candles, at 0.6 sample weigh
 This is what lets the agent learn on a 2-trades-per-week diet without needing
 hundreds of live trades first.
 
+**The objective is the nearest unswept pool, and nothing else.** SMC draws price
+toward resting liquidity; past the nearest pool the reason for the trade is spent.
+The search previously asked for a pool at least 1.2R away, which looked like
+prudence and was not: whenever the nearest pool sat inside that distance it was
+skipped and a *further* pool substituted — an objective the structure does not
+point at. The floor is now a refusal instead. If the nearest pool is nearer than
+`InpMinTargetR` the setup is declined; the agent never reaches past it.
+
+The floor exists because the position banks `InpPartialPercent` of itself at
+`InpPartialAtR`. An objective barely beyond that level means the partial fires
+just before the target, so the trade carries full risk for a reward it has already
+mostly taken. Keeping the floor at twice the partial keeps the partial early.
+
+**A reward test has to use the reward the trade earns.** The expectancy gate
+compared the *gross* R to the objective against what the probability demanded, but
+half the position comes off at the partial, so the trade realises
+`pct × partial_R + (1 − pct) × R`. The gap grows with distance — 23% at 1.6R, 71%
+at 6R — which biased the gate toward objectives that were further away, the exact
+opposite of what the structure asks for. The gate now tests the net figure, and
+the chart prints both (`TP1 3.00R (2.00R net)`).
+
+Still open, deliberately: `rr_needed = (1 − p)/p × 1.80` is the break-even of a
+two-outcome bet, but a managed trade has three (−1R; the partial banked and then
+stopped at entry; the objective), and since the managed label `p` now means
+P(net profit) it already counts the middle case as a win. The formula and the
+quantity fed into it no longer describe the same bet. Correcting that is a
+strategy decision, not an engineering fix, and it is not made here.
+
 **One definition of a win.** An observation is resolved under the same management
 a real position receives: the partial comes off at `InpPartialAtR`, the stop moves
 to entry at `InpBreakEvenAtR`, and the label is the sign of the *net* R after the

@@ -253,6 +253,15 @@ understood, not the MQL5 as written.
   −0.393 correlation. The prior may carry the wrong sign, and prior anchoring
   will keep pulling toward it. Flagged, deliberately not changed — altering a
   research prior is a strategy decision, not an audit fix.
+- The `InpMinTargetR` floor is a large frequency change, not a tuning knob. On
+  past observations a 2.0R floor refuses 73-94% of M1 setups and 66-68% of M5,
+  against 7-12% on M15 — and that is a *lower* bound, because removing the 1.2R
+  substitution moves objectives nearer, not further. Fewer setups also means a
+  longer warm-up, since the 25-update blend is fed by the same stream. The
+  agent is, on this evidence, an M15 instrument.
+- A setup refused for a too-near or too-far objective produces no observation,
+  matching how the existing far-target veto already behaved. The model
+  therefore never sees the near-target population it does not trade.
 - 35 unused one-line accessors remain. Unused API surface, not placeholders.
 - Broker GMT offset auto-detection rounds to whole hours.
 - `TimeGMT()` depends on the terminal machine's clock; a jump larger than one

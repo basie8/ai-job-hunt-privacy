@@ -74,6 +74,9 @@ private:
    int               m_bias_mid;
    string            m_playbook;
    double            m_max_target_r;   // reject an objective further than this
+   double            m_min_target_r;   // reject an objective NEARER than this
+   double            m_partial_r;      // R at which the live manager banks part of the position
+   double            m_partial_pct;    // how much it banks there
    double            m_stop_buf_units; // stop clearance beyond structure, in median candles
    double            m_tp_pull_units;  // pull the objective this far short of the pool
 
@@ -279,7 +282,9 @@ public:
                                         m_model(NULL), m_log(NULL), m_gmt(0), m_news_block_before(15),
                                         m_news_block_after(10), m_news_importance(3), m_veto(""), m_context(""),
                                         m_bias_htf(DIR_NONE), m_bias_mid(DIR_NONE), m_playbook(""),
-                                        m_max_target_r(6.0), m_stop_buf_units(0.35), m_tp_pull_units(0.10),
+                                        m_max_target_r(6.0), m_min_target_r(2.0),
+                                        m_partial_r(1.0), m_partial_pct(50.0),
+                                        m_stop_buf_units(0.35), m_tp_pull_units(0.10),
                                         m_pdh(0), m_pdl(0), m_pwh(0), m_pwl(0), m_ah(0), m_al(0),
                                         m_has_day(false), m_has_week(false), m_has_asia(false)
      {
@@ -292,9 +297,14 @@ public:
                           CNewsFilter *news,COnlineLearner *model,CLogger *log,const int gmt_offset,
                           const int news_before,const int news_after,const int news_importance,
                           const double max_target_r=6.0,
-                          const double stop_buf_units=0.35,const double tp_pull_units=0.10)
+                          const double stop_buf_units=0.35,const double tp_pull_units=0.10,
+                          const double min_target_r=2.0,
+                          const double partial_r=1.0,const double partial_pct=50.0)
      {
       m_max_target_r=max_target_r;
+      m_min_target_r=MathMax(min_target_r,0.0);
+      m_partial_r   =MathMax(partial_r,0.0);
+      m_partial_pct =SmcClamp(partial_pct,0.0,100.0);
       m_stop_buf_units=MathMax(stop_buf_units,0.0);
       m_tp_pull_units =MathMax(tp_pull_units,0.0);
       m_ms=ms; m_e=entry; m_m=mid; m_h=high; m_news=news; m_model=model; m_log=log;
@@ -305,6 +315,20 @@ public:
      }
 
    void              SetMaxTargetR(const double r) { m_max_target_r=r; }
+   void              SetMinTargetR(const double r) { m_min_target_r=MathMax(r,0.0); }
+
+   //--- The reward the position actually realises if the objective is hit.
+   //--- The live manager banks m_partial_pct of the size at m_partial_r, so
+   //--- only the remainder ever travels the full distance. Judging a setup
+   //--- on the raw R credited it a reward it can no longer earn, and the
+   //--- error GREW with distance - 23% at 1.6R, 71% at 6R - which biased
+   //--- every reward test toward objectives that were further away.
+   double            ManagedReward(const double rr) const
+     {
+      if(m_partial_pct<=0.0 || m_partial_r<=0.0 || m_partial_r>=rr) return(rr);
+      double f=m_partial_pct/100.0;
+      return(f*m_partial_r+(1.0-f)*rr);
+     }
    void              SetGmtOffset(const int gmt_offset) { m_gmt=gmt_offset; }
    int               GmtOffset(void) const { return(m_gmt); }
 
@@ -339,7 +363,7 @@ public:
       sig.dir=DIR_NONE;
       sig.entry=0.0; sig.sl=0.0; sig.tp1=0.0; sig.tp2=0.0;
       sig.prob=0.0;  sig.raw_score=0.0;
-      sig.rr1=0.0;   sig.rr2=0.0;
+      sig.rr1=0.0;   sig.rr2=0.0;  sig.rr1_net=0.0;
       sig.zone_top=0.0; sig.zone_bottom=0.0;
       sig.idm=0.0;   sig.idm_taken=false;
       sig.bar_time=0;
@@ -486,10 +510,17 @@ public:
       double tp1=0.0,tp2=0.0;
       string t1name="",t2name="";
       double t1w=0.0;
-      //--- Ask for a pool far enough out that it still clears 1.2R AFTER the
-      //--- objective is pulled back toward entry.
+      //--- The objective is the NEAREST unswept pool, full stop. Asking for
+      //--- one at least 1.2R out looked like prudence but was not: whenever
+      //--- the nearest pool sat inside that distance it was skipped and a
+      //--- FURTHER pool substituted - a pool the structural thesis does not
+      //--- point at. SMC draws price to the nearest resting liquidity; past
+      //--- it the reason for the trade is spent. So the search asks for
+      //--- nothing but the pullback clearance, and a pool that turns out to
+      //--- be too near is a reason to REFUSE the setup (below), never a
+      //--- reason to aim at a different one.
       double pull=unit*m_tp_pull_units;
-      if(!m_e.NextTarget(dir,entry,risk*1.2+pull,tp1,t1name,t1w))
+      if(!m_e.NextTarget(dir,entry,pull,tp1,t1name,t1w))
         {
          if(!m_e.RangeTarget(dir,entry,tp1))
            {
@@ -529,7 +560,8 @@ public:
       //--- answer is no. Filling these in here is what lets a vetoed setup
       //--- reach the observation book instead of being thrown away.
       sig.dir=dir; sig.entry=entry; sig.sl=sl; sig.tp1=tp1; sig.tp2=tp2;
-      sig.rr1=rr1; sig.rr2=rr2; sig.bar_time=bt; sig.model=m_playbook;
+      sig.rr1=rr1; sig.rr2=rr2; sig.rr1_net=ManagedReward(rr1);
+      sig.bar_time=bt; sig.model=m_playbook;
       sig.zone_top=zone.top; sig.zone_bottom=zone.bottom;
       sig.zone_from=zone.t_from;
       sig.idm=zone.idm; sig.idm_taken=zone.idm_taken;
@@ -573,6 +605,20 @@ public:
          return(false);
         }
 
+      //--- Too NEAR is a refusal, not a reason to aim further out. The
+      //--- position banks part of itself at m_partial_r; if the objective
+      //--- sits barely beyond that, the partial fires just before the target
+      //--- and the trade carries full risk for a reward it has already
+      //--- mostly taken. The structure is real, the geometry does not pay.
+      if(m_min_target_r>0.0 && rr1<m_min_target_r)
+        {
+         m_veto=StringFormat("nearest unswept liquidity is only %.2fR away - inside the %.2fR this framework will trade toward",
+                             rr1,m_min_target_r);
+         m_context=StringFormat("%s %s - %s. Rejected: %s",SmcDirShort(dir),m_playbook,why,m_veto);
+         BuildContextFactors(dir);
+         return(false);
+        }
+
       sig.observable=true;
 
       //--- factor measurement ----------------------------------------
@@ -606,9 +652,11 @@ public:
       //--- Capped, so the requirement stays a number a real objective
       //--- could plausibly reach.
       double rr_needed=MathMax(1.30,MathMin(5.00,SmcSafeDiv(1.0-prob,prob,2.0)*1.80));
-      if(rr1<rr_needed)
+      double rr_real  =ManagedReward(rr1);
+      if(rr_real<rr_needed)
         {
-         m_veto=StringFormat("reward %.2fR below the %.2fR that a %.0f%% setup must earn",rr1,rr_needed,prob*100.0);
+         m_veto=StringFormat("reward %.2fR after the partial (%.2fR gross) below the %.2fR that a %.0f%% setup must earn",
+                             rr_real,rr1,rr_needed,prob*100.0);
          m_context=StringFormat("%s %s - %s. Rejected: %s",SmcDirShort(dir),m_playbook,why,m_veto);
          sig.valid=false;
          sig.prob=prob;
@@ -855,11 +903,19 @@ public:
                 StringFormat("%s, %.0f%% of this stop",exec_note,sp_ratio*100.0));
 
       //--- 11 reward to risk
-      //--- Saturated at 3.0R, so a 3R and a 6R objective were indistinguishable
-      //--- to the model - exactly the distinction the data keeps raising. The
-      //--- scale now runs to 6.0R, matching the InpMaxTargetR ceiling, so the
-      //--- whole tradeable range is visible. Centre unchanged at 1.5R.
-      double s_rr=SmcClamp((rr1-1.5)/4.5,-1.0,1.0);
+      //--- Scaled across the band the framework will actually trade, not a
+      //--- fixed one. With a 2R floor and a 6R ceiling a scale centred on
+      //--- 1.5R spent its whole negative half on objectives that can no
+      //--- longer occur, so every real setup crowded into the top of the
+      //--- range and the factor stopped discriminating. Centring on the
+      //--- midpoint of the two vetoes keeps it spread whatever they are set
+      //--- to, and moves with them if the user changes either.
+      double rr_lo =(m_min_target_r>0.0?m_min_target_r:1.0);
+      double rr_hi =(m_max_target_r>0.0?m_max_target_r:6.0);
+      if(rr_hi<=rr_lo) rr_hi=rr_lo+1.0;
+      double rr_mid=(rr_lo+rr_hi)*0.5;
+      double rr_hlf=MathMax((rr_hi-rr_lo)*0.5,0.5);
+      double s_rr=SmcClamp((rr1-rr_mid)/rr_hlf,-1.0,1.0);
       SetFactor(F_RR,"Reward:risk",rr1,s_rr,StringFormat("%.2fR to the first liquidity objective",rr1));
 
       //--- 12 key level confluence

@@ -83,6 +83,7 @@ input double InpDryRunCapital    = 100000; // Assumed phase capital while dry ru
 input bool   InpResetModel       = false;  // Discard the stored model on start
 
 input group "=== Trade management ==="
+input double InpMinTargetR       = 2.00;   // Reject a target nearer than this R (0 = off)
 input double InpMaxTargetR       = 6.00;   // Reject a target beyond this R (0 = no cap)
 input double InpStopBufferUnits  = 0.35;   // Stop clearance past structure, in candles
 input double InpTargetPullUnits  = 0.10;   // Stop this far short of the pool, in candles
@@ -549,7 +550,16 @@ int OnInit()
    g_conf.Init(GetPointer(g_ms),GetPointer(g_eng_e),GetPointer(g_eng_m),GetPointer(g_eng_h),
                news_ptr,GetPointer(g_model),GetPointer(g_log),
                g_gmt,InpNewsMinutesBefore,InpNewsMinutesAfter,InpNewsImportance,InpMaxTargetR,
-               InpStopBufferUnits,InpTargetPullUnits);
+               InpStopBufferUnits,InpTargetPullUnits,InpMinTargetR,
+               InpPartialAtR,InpPartialPercent);
+
+   //--- The objective is now the nearest unswept pool, so the only thing
+   //--- keeping a setup off a target it has already half-banked is this
+   //--- floor. Set below twice the partial and the partial fires in the
+   //--- second half of the trade, which is what it was meant to avoid.
+   if(InpMinTargetR>0.0 && InpPartialPercent>0.0 && InpMinTargetR<InpPartialAtR*2.0)
+      g_log.Warn(StringFormat("Targets | the %.2fR floor is less than twice the %.2fR partial, so on the nearest objectives half the position comes off past the halfway point. %.2fR or more keeps the partial early.",
+                 InpMinTargetR,InpPartialAtR,InpPartialAtR*2.0));
 
    //--- per account and per symbol, so two challenges running side by side
    //--- can never inherit each other's capital, trading days or streaks

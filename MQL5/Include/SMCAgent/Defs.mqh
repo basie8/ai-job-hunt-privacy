@@ -166,6 +166,7 @@ struct SSignal
    double            prob;        // model probability of success 0..1
    double            raw_score;   // weighted confluence score
    double            rr1;
+   double            rr1_net;      // rr1 after the partial - what the trade realises
    double            rr2;
    string            model;       // playbook name
    string            rationale;   // natural language explanation
