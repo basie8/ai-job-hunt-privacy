@@ -88,12 +88,27 @@ Two branches on purpose: a bridge push and a journal push can never conflict.
 the journal, that signal never happened as far as the learning loop is concerned.
 The push is the commit, in both senses.
 
-## 4. Your phone and inbox — the output
+## 4. Your phone — the output
 
-Push notification plus email, fired by the Routines on completion. Both are
-configured to stay quiet unless there is something to act on: an actionable
-signal, a resolved trade, a stale claim in the audit, or a blocker that needs a
+Both Routines carry `notifications: {push: true, email: true}` and stay quiet
+unless there is something to act on: an actionable paper signal, a resolved paper
+position, a failed check, a missed run, a stale claim, or a blocker that needs a
 decision.
+
+**Verified 2026-09-17:** push reaches the Claude app on Android. Email did not
+arrive, in any folder, for three runs that fired and succeeded. Push is therefore
+the channel this system relies on; email is redundancy that is not currently
+working. Since push and email are configured together and only one of them
+arrives, the cause is email-specific rather than account-wide — most likely an
+email notification preference on the claude.ai account, or an address that
+differs from the one being watched. Not a defect in this repository, and not
+something a run can detect or fix.
+
+**What this means operationally:** an alert that matters reaches the phone. The
+dashboard remains the pull channel and states its own age, turning red past 26
+hours. If push ever stops too, the run record (`gold_trader runs`) still shows
+whether the runs themselves happened, which separates "nothing to report" from
+"nothing is running" without depending on any notification at all.
 
 ## What does *not* run anywhere
 
