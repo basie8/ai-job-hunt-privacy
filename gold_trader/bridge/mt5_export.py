@@ -22,6 +22,7 @@ Three things this handles that a naive exporter does not:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -31,6 +32,9 @@ from typing import Dict, List, Optional, Sequence
 DEFAULT_TIMEFRAMES = ("m15", "h1", "h4")
 DEFAULT_BARS = {"m15": 500, "h1": 500, "h4": 400}
 DATA_BRANCH = "market-data"
+#: Brokers suffix FX pairs the same way they suffix metals.
+FX_SUFFIXES = ("", ".m", "m", "#", ".raw", "_", ".pro", ".ecn")
+
 CANDIDATE_SYMBOLS = (
     "XAUUSD", "GOLD", "XAUUSD.m", "XAUUSDm", "XAUUSD#", "XAUUSD.raw",
     "XAUUSD_", "XAUUSD.pro", "GOLD.spot", "XAU/USD",
@@ -68,6 +72,27 @@ def resolve_symbol(mt5, requested: Optional[str] = None) -> str:
             + "\nRe-run with --symbol <name>."
         )
     sys.exit("This broker exposes no XAU/GOLD symbol. Check the Market Watch list in MT5.")
+
+
+def resolve_fx_symbol(mt5, pair: str) -> Optional[str]:
+    """Find what this broker calls the account-currency pair, if it offers it."""
+    available = {s.name for s in (mt5.symbols_get() or [])}
+    for suffix in FX_SUFFIXES:
+        candidate = pair + suffix
+        if candidate in available and mt5.symbol_select(candidate, True):
+            return candidate
+    return None
+
+
+def read_fx_rate(mt5, symbol: str) -> Optional[float]:
+    """Mid price from the current tick. None rather than a guess."""
+    tick = mt5.symbol_info_tick(symbol)
+    if tick is None:
+        return None
+    bid, ask = getattr(tick, "bid", 0.0) or 0.0, getattr(tick, "ask", 0.0) or 0.0
+    if bid > 0 and ask > 0:
+        return (bid + ask) / 2.0
+    return bid or ask or None
 
 
 def detect_server_offset_hours(mt5, symbol: str) -> float:
@@ -132,6 +157,55 @@ def write_csv(rows: Sequence[Dict[str, object]], path: str) -> bool:
     return True
 
 
+#: The rate ticks constantly. Rewriting it on every run would push a commit every
+#: 15 minutes even when no candle changed, which is exactly the noise the
+#: content-hash check was added to avoid. So write it only when it has actually
+#: moved, or when the stored one is old enough that the reader would start
+#: calling it stale.
+FX_MIN_MOVE_PCT = 0.05
+FX_REFRESH_HOURS = 6
+
+
+def fx_needs_writing(directory: str, pair: str, rate: float, now_iso: str) -> str:
+    """Return why the rate should be written, or "" to leave the file alone."""
+    path = os.path.join(directory, "fx.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            entry = json.load(fh)[pair]
+        previous = float(entry["rate"])
+        stamped = datetime.fromisoformat(str(entry["as_of"]))
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return "first reading"
+    if stamped.tzinfo is None:
+        stamped = stamped.replace(tzinfo=timezone.utc)
+    age_hours = (datetime.fromisoformat(now_iso) - stamped).total_seconds() / 3600.0
+    if previous <= 0 or abs(rate - previous) / previous * 100.0 >= FX_MIN_MOVE_PCT:
+        return f"moved from {previous:.5f}"
+    if age_hours >= FX_REFRESH_HOURS:
+        return f"refreshed after {age_hours:.1f}h"
+    return ""
+
+
+def write_fx(directory: str, pair: str, rate: float, as_of: str, source: str) -> str:
+    """Write the rate next to the candles. Mirrors gold_trader/fx.py's reader."""
+    path = os.path.join(directory, "fx.json")
+    blob = {}
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                loaded = json.load(fh)
+            if isinstance(loaded, dict):
+                blob = loaded
+        except (json.JSONDecodeError, OSError):
+            blob = {}
+    blob[pair] = {"rate": float(rate), "as_of": as_of, "source": source}
+    os.makedirs(directory, exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(blob, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    return path
+
+
 def git(repo: str, *args: str, stdin: Optional[str] = None, check: bool = True) -> subprocess.CompletedProcess:
     """Run git. stdin is sent as raw bytes, deliberately.
 
@@ -175,9 +249,12 @@ def push_data_branch(
     if rel.startswith(".."):
         raise RuntimeError(f"{data_dir} is outside the repository at {repo}")
 
-    names = sorted(f for f in os.listdir(data_dir) if f.lower().endswith(".csv"))
+    names = sorted(
+        f for f in os.listdir(data_dir)
+        if f.lower().endswith(".csv") or f.lower() == "fx.json"
+    )
     if not names:
-        print(f"No CSVs in {data_dir}; nothing to push.")
+        print(f"No candle files in {data_dir}; nothing to push.")
         return False
 
     entries = []
@@ -216,6 +293,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--server-offset-hours", type=float, default=None,
         help="Broker server time minus UTC. Auto-detected when omitted.",
+    )
+    parser.add_argument(
+        "--fx-pair", default="GBPUSD",
+        help="Account-currency pair to read alongside the candles. Empty string to skip.",
     )
     parser.add_argument("--push", action="store_true", help="Commit and push to the data branch.")
     parser.add_argument(
@@ -258,6 +339,27 @@ def main(argv: Optional[List[str]] = None) -> int:
                     f"({age.total_seconds() / 60:.0f}min old, close {rows[-1]['close']}) "
                     f"{'updated' if wrote else 'unchanged'}"
                 )
+            # The account is denominated in GBP and gold in USD, so the rate
+            # belongs with the candles rather than hardcoded downstream.
+            if args.fx_pair:
+                fx_symbol = resolve_fx_symbol(mt5, args.fx_pair)
+                if fx_symbol is None:
+                    print(
+                        f"  fx   {args.fx_pair} not offered by this broker; "
+                        "the configured fallback rate stays in use"
+                    )
+                else:
+                    rate = read_fx_rate(mt5, fx_symbol)
+                    if rate is None:
+                        print(f"  fx   {fx_symbol} gave no tick; leaving the previous rate")
+                    else:
+                        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                        reason = fx_needs_writing(data_dir, args.fx_pair, rate, stamp)
+                        if reason:
+                            write_fx(data_dir, args.fx_pair, rate, stamp, f"MT5 {fx_symbol}")
+                            changed = True
+                        print(f"  fx   {args.fx_pair} {rate:.5f} from {fx_symbol} "
+                              f"{reason or 'unchanged'}")
         finally:
             mt5.shutdown()
         if not changed and not args.push:

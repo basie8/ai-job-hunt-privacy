@@ -331,12 +331,17 @@ def collect_config(repo: str) -> Section:
     from .pipeline import GoldConfig
     from .risk import TradingLimits
 
-    limits = TradingLimits()
+    from .fx import with_live_rate
+
+    limits, fx_note = with_live_rate(TradingLimits(), os.path.join(repo, "data"))
     config = GoldConfig()
     return Section(
         OK,
         data={
             "coherence_problems": coherence_problems(limits),
+            "fx_note": fx_note,
+            "fx_live": not fx_note.startswith("FX WARNING"),
+            "min_equity_pct_of_start": limits.min_equity_pct_of_start,
             "mode": limits.mode,
             "account_value": limits.account_value,
             "account_currency": limits.account_currency,

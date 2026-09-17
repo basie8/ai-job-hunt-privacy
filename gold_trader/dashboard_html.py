@@ -509,10 +509,16 @@ def render(payload: Dict[str, Any]) -> str:
             <div>Paper account <strong class="mono">{_esc(c.get('account_currency', 'USD'))}
               {c.get('account_value', c['account_usd']):,.0f}</strong>
               <span style="color:var(--ink-3)">(${c['account_usd']:,.0f})</span></div>
-            <div>Risk/trade <strong class="mono">{c['risk_per_trade_pct']:.2f}%</strong>
-              <span style="color:var(--ink-3)">(${c['base_risk_usd']:,.0f})</span></div>
+            <div>Risk/trade <strong class="mono">{c['risk_per_trade_pct']:.2f}% of equity</strong>
+              <span style="color:var(--ink-3)">(opening ${c['base_risk_usd']:,.0f})</span></div>
             <div>Min R:R <strong class="mono">{c['min_reward_risk']:.1f}</strong></div>
             <div>Daily stop <strong class="mono">&minus;{c['max_daily_loss_r']:.1f}R</strong></div>
+            <div>Equity floor <strong class="mono">{c.get('min_equity_pct_of_start', 0):.0f}% of start</strong></div>
+          </div>
+          <div class="panel-note" style="margin-top:12px">
+            <span class="pill {'done' if c.get('fx_live') else 'block'}">
+              {'FX live' if c.get('fx_live') else 'FX fallback'}</span>
+            {_esc(c.get('fx_note', 'no FX provenance recorded'))}
           </div>"""
     else:
         config_block = _state_block(config, "configuration")

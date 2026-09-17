@@ -80,6 +80,12 @@ def coherence_problems(limits: Optional[TradingLimits] = None) -> List[str]:
             "two full losses"
         )
 
+    if not 0 < limits.min_equity_pct_of_start < 100:
+        problems.append(
+            f"min_equity_pct_of_start ({limits.min_equity_pct_of_start}) must be between "
+            "0 and 100; at 100 the book stops before its first trade"
+        )
+
     problems.extend(_blackout_problems(limits.blackout))
     return problems
 

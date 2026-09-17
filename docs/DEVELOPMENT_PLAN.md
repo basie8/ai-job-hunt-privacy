@@ -73,6 +73,14 @@ data collection, and it should feel uneventful.
   mis-calibrated percent fallback that would have refused every H1 stop.
 - ⚠️ Swing `lookback=2` gives 24–27 swings per 100 bars, producing a structural
   break every 2.7 bars. Too frequent to be meaningful — roadmap SMC-04.
+- ✅ Book set to GBP 10,000 risking 1% of **current equity** per trade, with a
+  hard halt at 60% of starting equity. R is unaffected by either.
+- ✅ GBPUSD now read from MT5 by the bridge (DAT-07). The last hand-maintained
+  number in the config is gone; a missing or implausible rate falls back to the
+  documented static one and says so on every run.
+- ✅ Found and fixed a `TypeError` that made **every CLI command** unrunnable
+  while 290 tests stayed green. Guards added at both the test and self-check
+  level. See `LEARNING_LOG.md`.
 
 **Yours:** the weekly review, every week, from the first one. Especially the
 loss post-mortems — thesis / level / variance.

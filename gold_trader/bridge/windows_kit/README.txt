@@ -4,11 +4,12 @@
 
  WHAT THIS IS
  ------------
- A small script that reads XAUUSD candles from your MetaTrader 5 terminal and
- pushes them to GitHub, where the analysis pipeline picks them up.
+ A small script that reads XAUUSD candles (and the GBPUSD rate) from your
+ MetaTrader 5 terminal and pushes them to GitHub, where the analysis pipeline
+ picks them up.
 
- It is READ-ONLY with respect to MetaTrader. It calls two functions: one to read
- candles, one to read the clock. There is no order function in this kit or in
+ It is READ-ONLY with respect to MetaTrader. It calls three functions: one to
+ read candles, one to read a price tick, one to read the clock. There is no order function in this kit or in
  the wider project, and your account balance is never read or used. A GBP 0.00
  balance or a demo account works exactly the same - the terminal only has to be
  running and logged in.
@@ -25,7 +26,7 @@
     Accept the defaults.
  3. MetaTrader 5, running and logged in to your broker.
     In MT5: Tools > Options > Expert Advisors > tick "Allow algorithmic trading"
-    In MT5: make sure XAUUSD appears in Market Watch
+    In MT5: make sure XAUUSD and GBPUSD appear in Market Watch
             (if not: right-click Market Watch > Show All)
 
 
@@ -96,7 +97,7 @@
    TEST-BRIDGE.bat        Read candles and print them. Pushes nothing. Safe.
    RUN-BRIDGE.bat         The real thing. This is what Task Scheduler runs.
    UPDATE.bat             Fetch a newer version of the bridge script.
-   mt5_export.py          The bridge itself. ~250 lines, readable.
+   mt5_export.py          The bridge itself. ~300 lines, readable.
    calendar.example.json  Template for the economic calendar (see below).
    INSTALL.md             The fuller guide, including what runs in the cloud.
 
@@ -112,6 +113,13 @@
 
    "MT5 returned no h4 data"
        The symbol is not in Market Watch. Right-click Market Watch > Show All.
+
+   "no GBPUSD tick" / the cloud run prints FX WARNING
+       The bridge also reads GBPUSD, to convert the GBP paper notional into the
+       USD that gold is priced in. If your broker does not list GBPUSD, or lists
+       it under another name, pass  --fx-pair <thatname>  or leave it: the system
+       falls back to a documented static rate and says so on every run. Only the
+       displayed cash is affected - R is not.
 
    Bar ages are negative
        The offset over-corrected. Pass --server-offset-hours with the right

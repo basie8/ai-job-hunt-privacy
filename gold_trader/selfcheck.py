@@ -309,6 +309,89 @@ def check_degradation(report: Report) -> None:
     run(_broken)
 
 
+def check_money(report: Report) -> None:
+    """Sizing and the rate behind it. Both scale real cash, and both have a
+    fallback path that only runs when something upstream is already missing."""
+    import argparse
+
+    from .fx import with_live_rate, write_fx
+    from .journal import Journal
+    from .learning import learn
+    from .macro import MacroCalendar
+    from .risk import TradingLimits, equity_usd, evaluate
+
+    now = datetime.now(timezone.utc)
+
+    def assess(journal, limits):
+        return evaluate(
+            direction="long", entry=2400.0, stop=2390.0, target=2420.0, conviction=0.7,
+            setup_type="bos_continuation", atr=8.0, spot=2400.0, data_source="csv",
+            staleness_min=1.0, now=now, limits=limits,
+            calendar=MacroCalendar(events=[], confidence="current"),
+            journal=journal, learning=learn(journal),
+        )
+
+    run = _guard(report, "risk", "sizing compounds off realised equity")
+    def _compounds():
+        limits = TradingLimits(account_currency="USD", account_value=10_000.0,
+                               fx_to_usd=1.0, risk_per_trade_pct=1.0)
+        journal = Journal()
+        first = assess(journal, limits).risk_usd
+        record = journal.new_signal(direction="long", setup_type="bos_continuation",
+                                    conviction=0.7, entry=2400.0, stop=2390.0,
+                                    target=2420.0, risk_usd=first)
+        journal.update_outcome(record, status="lost", r_multiple=-1.0,
+                               exit_ts=now.isoformat())
+        after = assess(journal, limits).risk_usd
+        assert after < first, "risk did not shrink after a loss"
+        assert abs(equity_usd(journal, limits) - (10_000.0 - first)) < 1e-6
+        return f"${first:,.2f} then ${after:,.2f}"
+    run(_compounds)
+
+    run = _guard(report, "risk", "a ruined book stops trading")
+    def _floor():
+        limits = TradingLimits(account_currency="USD", account_value=10_000.0,
+                               fx_to_usd=1.0, risk_per_trade_pct=1.0)
+        journal = Journal()
+        record = journal.new_signal(direction="long", setup_type="bos_continuation",
+                                    conviction=0.7, entry=2400.0, stop=2390.0,
+                                    target=2420.0, risk_usd=5_000.0)
+        journal.update_outcome(record, status="lost", r_multiple=-1.0,
+                               exit_ts=now.isoformat())
+        decision = assess(journal, limits)
+        assert not decision.approved, "trading continued below the equity floor"
+        assert "EQUITY_FLOOR" in {b.code for b in decision.breaches}
+        return f"floor at {limits.min_equity_pct_of_start:.0f}% of start"
+    run(_floor)
+
+    run = _guard(report, "fx", "a missing rate is reported, never assumed")
+    def _fx_fallback():
+        limits = TradingLimits(account_currency="GBP", fx_to_usd=1.3377)
+        with tempfile.TemporaryDirectory() as tmp:
+            kept, note = with_live_rate(limits, tmp, now=now)
+            assert kept.fx_to_usd == limits.fx_to_usd, "a rate was invented"
+            assert note.startswith("FX WARNING"), "a fallback rate was reported as live"
+            write_fx(tmp, "GBPUSD", 4362.0, now.isoformat(), "MT5 wrong symbol")
+            kept, note = with_live_rate(limits, tmp, now=now)
+            assert kept.fx_to_usd == limits.fx_to_usd, "an absurd rate was applied"
+            assert "misread symbol" in note
+            write_fx(tmp, "GBPUSD", 1.3400, now.isoformat(), "MT5 GBPUSD")
+            live, note = with_live_rate(limits, tmp, now=now)
+            assert live.fx_to_usd == 1.34, "a live rate was ignored"
+            assert not note.startswith("FX WARNING")
+        return "fallback, misread and live paths all distinguishable"
+    run(_fx_fallback)
+
+    run = _guard(report, "cli", "the CLI can build its config")
+    def _cli_config():
+        from .cli import _config
+        config = _config(argparse.Namespace())
+        assert config.limits.min_equity_pct_of_start > 0, "defaults were dropped"
+        assert config.fx_note, "the run recorded no FX provenance"
+        return f"{config.limits.account_currency} {config.limits.account_value:,.0f} loaded"
+    run(_cli_config)
+
+
 def check_learning_guarantees(report: Report) -> None:
     """The three anti-overfitting guards, verified as properties not examples."""
     from .journal import Journal
@@ -432,6 +515,7 @@ def run_all(repo: str = ".") -> Report:
     check_cli_commands(report, repo)
     check_feeds(report)
     check_degradation(report)
+    check_money(report)
     check_learning_guarantees(report)
     check_smc_and_sessions(report)
     check_pipeline(report)

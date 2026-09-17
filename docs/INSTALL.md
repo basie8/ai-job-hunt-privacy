@@ -148,18 +148,27 @@ Task Scheduler → **Create Task** (not "Create Basic Task"):
 Identical candles produce no commit, so a 15-minute cadence does not fill the
 branch with noise.
 
-### 1.8 Tell me two numbers
+### 1.8 The paper book, as configured
 
-Reply with:
+Both numbers are now set, so there is nothing to reply with:
 
-- **Paper account notional** — what to size the paper book against. It scales the
-  dollar figures only; performance is measured in R, which doesn't care. $10,000
-  is as valid as $100,000.
-- **Risk per trade** — default is 0.5%.
+- **Notional** — GBP 10,000. It scales the displayed cash only; performance is
+  measured in R, which doesn't care.
+- **Risk per trade** — 1.00% of *current equity*, not of the starting notional.
+  The book opens risking GBP 100 (about $134); after a losing trade the next one
+  risks slightly less, after a winner slightly more. Every trade still risks
+  exactly 1R by definition, so the track record is unaffected.
+- **Ruin floor** — trading halts entirely if equity falls to 60% of the starting
+  notional. Fixed-fractional sizing never mathematically reaches zero, so without
+  a floor a ruined book would trade forever in meaningless size.
+- **GBPUSD** — read from your MT5 terminal by the bridge, alongside the candles,
+  and written to `data\fx.json`. Nothing to maintain. If your terminal has no
+  GBPUSD symbol the bridge says so and the system falls back to a documented
+  static rate with a visible `FX WARNING` on every run.
 
-And, when you have them, the CPI / PCE / PPI release dates for the next few weeks
-(BLS and BEA publish them). Those go in `state/calendar.json` and make the event
-blackouts accurate instead of `derived_only`.
+What is still worth sending: the CPI / PCE / PPI release dates for the next few
+weeks (BLS and BEA publish them). Those go in `state/calendar.json` and make the
+event blackouts accurate instead of `derived_only`.
 
 ---
 

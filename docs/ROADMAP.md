@@ -33,6 +33,7 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 | DAT-02 | MT5 bridge | done | `file:gold_trader/bridge/mt5_export.py` | Plumbing-only push, never touches your tree |
 | DAT-06 | Windows install kit | done | `files:gold_trader/bridge/windows_kit/SETUP.bat,gold_trader/bridge/windows_kit/README.txt` | Zip with one-click setup; needs no clone of the project |
 | DAT-03 | market-data branch sync | done | `file:gold_trader/sync.py` | Round-trip tested over real git repos |
+| DAT-07 | GBPUSD sourced from MT5 | done | `file:gold_trader/fx.py` | Bridge writes `data/fx.json`; a missing or absurd rate falls back loudly |
 | DAT-04 | Bridge running on Pieter's machine | done | `data:180` | Confirmed 2026-09-17: market-data branch live, newest bar minutes old |
 | DAT-05 | Live vendor feed (egress + key) | outstanding | `manual` | Optional. Only if you want runs independent of your PC being on. |
 
@@ -65,13 +66,13 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 | OPS-01 | Signal Routine (2-hourly, weekdays) | done | `routine` | trig_01D5MB5sgfneCfBgVGrjACfb |
 | OPS-02 | Progress Routine (12-hourly) | done | `routine` | Reports this audit |
 | OPS-03 | Weekly review cadence running | outstanding | `manual` | **Needs you.** Template: docs/WEEKLY_REVIEW.md |
-| OPS-04 | Risk limits tuned to the account | done | `file:gold_trader/risk.py` | GBP 10,000 @ 2.5%, FX 1.3377 dated 2026-09-17 |
+| OPS-04 | Risk limits tuned to the account | done | `file:gold_trader/risk.py` | GBP 10,000 @ 1% of **current equity**, 60% ruin floor |
 
 ## Quality
 
 | ID | Task | Status | Verify | Notes |
 |----|------|--------|--------|-------|
-| TST-01 | Gold test suite | done | `tests:tests_gold:245` | Offline, no network |
+| TST-01 | Gold test suite | done | `tests:tests_gold:285` | Offline, no network |
 | TST-02 | Pipeline test suite | done | `tests:tests:44` | Offline, no network |
 | TST-03 | Component self-check | done | `file:gold_trader/selfcheck.py` | Placeholders, config coherence, cross-artifact drift |
 | TST-04 | Config coherence checks | done | `file:gold_trader/config_checks.py` | Limits that contradict each other |

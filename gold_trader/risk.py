@@ -36,8 +36,17 @@ class TradingLimits:
     #: Where and when the rate came from. Refreshed in the weekly review; the
     #: rate only scales displayed cash, so drift does not affect R.
     fx_as_of: str = "2026-09-17, GBPUSD mid ~1.3377 (day range 1.3350-1.3407)"
-    #: Risked on one trade, before any learned reduction.
-    risk_per_trade_pct: float = 2.5
+    #: Risked on one trade as a percent of CURRENT EQUITY (starting notional
+    #: plus realised P&L), before any learned reduction. Fixed-fractional: the
+    #: cash at risk shrinks after losses and grows after wins, while every trade
+    #: still risks exactly 1R by definition, so the journal's R maths is
+    #: unaffected.
+    risk_per_trade_pct: float = 1.0
+    #: Stop the book entirely once equity falls to this fraction of the starting
+    #: notional. Fixed-fractional sizing never mathematically reaches zero, so
+    #: without a floor a ruined book keeps trading in ever-smaller size and the
+    #: record becomes meaningless.
+    min_equity_pct_of_start: float = 60.0
     #: Stop trading for the day once cumulative realised loss hits this many R.
     max_daily_loss_r: float = 2.0
     max_open_positions: int = 2
@@ -71,11 +80,12 @@ class TradingLimits:
 
     @property
     def base_risk(self) -> float:
-        """Risk per trade in the account's own currency."""
+        """Risk on the first trade, in the account's currency (no P&L yet)."""
         return self.account_value * self.risk_per_trade_pct / 100.0
 
     @property
     def base_risk_usd(self) -> float:
+        """Risk on the first trade, in USD. Later trades size off equity."""
         return self.account_usd * self.risk_per_trade_pct / 100.0
 
     def as_prompt_block(self) -> str:
@@ -84,8 +94,9 @@ class TradingLimits:
             "no orders are placed\n"
             f"- Paper account: {self.account_currency} {self.account_value:,.0f} "
             f"(${self.account_usd:,.0f} at {self.fx_to_usd:.4f}); base risk per trade "
-            f"{self.risk_per_trade_pct:.2f}% = {self.account_currency} {self.base_risk:,.0f} "
-            f"(${self.base_risk_usd:,.0f})\n"
+            f"{self.risk_per_trade_pct:.2f}% of equity "
+            f"(opening at {self.account_currency} {self.base_risk:,.0f} / "
+            f"${self.base_risk_usd:,.0f})\n"
             f"- Minimum reward:risk {self.min_reward_risk:.2f}\n"
             f"- Stop distance must be between {self.min_stop_atr_mult:.1f}x and "
             f"{self.max_stop_atr_mult:.1f}x ATR, or between "
@@ -151,6 +162,20 @@ def realised_r_today(journal: Journal, now: datetime) -> float:
         if (record.exit_ts or "")[:10] == today:
             total += record.r_multiple or 0.0
     return total
+
+
+def realised_pnl_usd(journal: Journal) -> float:
+    """Closed P&L in USD: each trade's R multiple against the cash it risked.
+
+    Risk is recorded per signal, so a trade taken when equity was larger
+    contributes proportionally more -- which is what fixed-fractional sizing
+    means and what a naive sum of R multiples would get wrong.
+    """
+    return sum((r.r_multiple or 0.0) * (r.risk_usd or 0.0) for r in journal.closed())
+
+
+def equity_usd(journal: Journal, limits: "TradingLimits") -> float:
+    return limits.account_usd + realised_pnl_usd(journal)
 
 
 def signals_today(journal: Journal, now: datetime) -> int:
@@ -380,7 +405,20 @@ def evaluate(
     conviction_mult = learning.conviction_multiplier()
     size_mult = learning.size_multiplier(setup_type)
     adjusted_conviction = max(0.0, min(1.0, conviction * conviction_mult))
-    risk_usd = limits.base_risk_usd * size_mult
+
+    equity = equity_usd(journal, limits)
+    floor = limits.account_usd * limits.min_equity_pct_of_start / 100.0
+    if equity <= floor:
+        breaches.append(
+            Breach(
+                "EQUITY_FLOOR",
+                "hard",
+                f"Equity ${equity:,.0f} is at or below the "
+                f"{limits.min_equity_pct_of_start:.0f}% floor (${floor:,.0f}). "
+                "The paper book is done; review before restarting it.",
+            )
+        )
+    risk_usd = max(0.0, equity) * limits.risk_per_trade_pct / 100.0 * size_mult
     size_units = risk_usd / stop_distance
 
     decision.conviction = adjusted_conviction

@@ -255,14 +255,16 @@ class AccountCurrency(unittest.TestCase):
         self.assertTrue(coherence_problems(TradingLimits(fx_to_usd=-1.0)))
 
     def test_the_prompt_states_both_currencies(self):
-        block = TradingLimits().as_prompt_block()
+        block = TradingLimits(account_value=10_000, fx_to_usd=1.3377).as_prompt_block()
         self.assertIn("GBP 10,000", block)
         self.assertIn("$13,377", block)
 
     def test_sizing_uses_the_converted_risk(self):
+        # Pinned limits: this checks the conversion, not the shipped percent.
         # GBP 250 at 1.3377 = $334.43; a $20 stop gives 16.7 oz.
         decision = assess(atr=20.0, entry=4362.0, stop=4342.0, target=4402.0,
-                          limits=TradingLimits())
+                          limits=TradingLimits(account_value=10_000, fx_to_usd=1.3377,
+                                               risk_per_trade_pct=2.5))
         self.assertTrue(decision.approved)
         self.assertAlmostEqual(decision.risk_usd, 334.425, places=2)
         self.assertAlmostEqual(decision.size_units, 334.425 / 20.0, places=3)

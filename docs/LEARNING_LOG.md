@@ -198,6 +198,56 @@ for the reason above.
 
 ---
 
+## 2026-09-17 — Fixed-fractional sizing, and a whole CLI that never ran
+
+**Evidence:** 0 closed trades. Two configuration changes and one defect found
+while making them.
+
+**Change 1 — sizing is now a percent of current equity.** Risk per trade moved to
+1.00% of *equity* (starting notional plus realised P&L), from a flat percent of
+the starting notional. After a loss the next trade risks slightly less; after a
+win, slightly more. R is untouched: every trade still risks exactly 1R by
+definition, so the journal's arithmetic and the whole track record are unaffected
+— only the cash figures compound.
+
+This needed a companion. Fixed-fractional sizing never mathematically reaches
+zero: a ruined book keeps trading forever in ever-smaller size, and the record
+fills with trades that mean nothing. Added a hard `EQUITY_FLOOR` breach at 60% of
+the starting notional. It is a *hard* breach, not a warning, because the failure
+it prevents is a slow one that nobody notices.
+
+**Change 2 — GBPUSD comes from MT5 now.** The rate was hardcoded with a dated
+provenance string and a line in the weekly review asking Pieter to refresh it.
+The terminal already had the number. The bridge now reads GBPUSD at the same time
+as the candles and writes `data/fx.json`; the pipeline prefers it.
+
+Three ways that can go wrong, all handled as *visible* fallbacks rather than
+silent ones: no file (bridge not running) → static rate plus `FX WARNING`; a rate
+more than 15% from the static one → refused as a misread symbol, because MT5
+symbol resolution landing on the wrong instrument would silently rescale the
+entire book; a rate older than 36h → used anyway, but warned about, since an old
+real rate still beats a hardcoded one.
+
+**Defect found: `_config()` in the CLI raised `TypeError` on every single
+command.** Last session's rename turned `account_usd` from a field into a
+property. The CLI still passed it as a constructor keyword. Every command —
+`signal`, `status`, `learn`, `doctor`, `calendar` — crashed on the first line.
+290 tests were green throughout.
+
+The tests exercised the pipeline and the risk engine directly, never through the
+entry point a human actually types. The whole system was unusable and the suite
+reported perfect health. Two guards added: a test that every `cmd_*` function can
+build its config, and a self-check on the same. The self-check matters more — it
+runs on the schedule, against the shipped code.
+
+The recurring lesson gets a second clause. Degraded input must increase scrutiny
+— and *a test that never crosses the boundary a human crosses is not testing the
+system they use*.
+
+**Hypotheses affected:** none. No trading evidence in this entry.
+
+---
+
 ## Template for future entries
 
 ```markdown

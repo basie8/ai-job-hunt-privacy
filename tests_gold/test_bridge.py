@@ -100,13 +100,17 @@ class StdinIsBytes(unittest.TestCase):
             rows = [{"time": (end - timedelta(hours=i)).isoformat(), "open": 1, "high": 2,
                      "low": 0.5, "close": 1.5, "volume": 10} for i in range(3)]
             mt5_export.write_csv(rows, _os.path.join(repo, "data", "XAUUSD_h1.csv"))
+            mt5_export.write_fx(_os.path.join(repo, "data"), "GBPUSD", 1.3377,
+                                end.isoformat(), "MT5 GBPUSD")
             mt5_export.push_data_branch(repo, _os.path.join(repo, "data"), "test")
 
             listing = subprocess.run(
                 ["git", "-C", repo, "ls-tree", "-r", "--name-only", "origin/market-data"],
                 capture_output=True, text=True, check=True,
             ).stdout.split()
-            self.assertEqual(listing, ["data/XAUUSD_h1.csv"])
+            # The rate travels with the candles; the pipeline reads both from
+            # the same branch.
+            self.assertEqual(listing, ["data/XAUUSD_h1.csv", "data/fx.json"])
 
 
 class SymbolResolution(unittest.TestCase):
@@ -223,6 +227,73 @@ class CsvWriting(unittest.TestCase):
             rows.append({"time": "2026-09-17T13:00:00+00:00", "open": 1.5, "high": 2.5,
                          "low": 1.0, "close": 2.0, "volume": 12})
             self.assertTrue(mt5_export.write_csv(rows, path))
+
+
+class BridgeFxWriting(unittest.TestCase):
+    """The rate ticks every second. Writing it every run would put a commit on
+    the data branch every 15 minutes, which is what the content-hash check on
+    candles exists to prevent."""
+
+    NOW = datetime(2026, 9, 17, 12, 0, tzinfo=timezone.utc)
+
+    def _at(self, hours):
+        return (self.NOW + timedelta(hours=hours)).isoformat()
+
+    def test_the_first_reading_is_always_written(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertTrue(mt5_export.fx_needs_writing(tmp, "GBPUSD", 1.3377, self._at(0)))
+
+    def test_an_unchanged_rate_is_not_rewritten(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mt5_export.write_fx(tmp, "GBPUSD", 1.3377, self._at(0), "MT5")
+            self.assertEqual(mt5_export.fx_needs_writing(tmp, "GBPUSD", 1.3377, self._at(1)), "")
+
+    def test_a_move_below_the_threshold_is_not_rewritten(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mt5_export.write_fx(tmp, "GBPUSD", 1.3377, self._at(0), "MT5")
+            self.assertEqual(
+                mt5_export.fx_needs_writing(tmp, "GBPUSD", 1.33775, self._at(1)), "")
+
+    def test_a_real_move_is_written(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mt5_export.write_fx(tmp, "GBPUSD", 1.3377, self._at(0), "MT5")
+            self.assertIn("moved", mt5_export.fx_needs_writing(tmp, "GBPUSD", 1.3450, self._at(1)))
+
+    def test_a_flat_rate_is_refreshed_before_the_reader_calls_it_stale(self):
+        # Otherwise a quiet market looks identical to a stopped bridge.
+        from gold_trader.fx import STALE_AFTER_HOURS
+
+        self.assertLess(mt5_export.FX_REFRESH_HOURS, STALE_AFTER_HOURS)
+        with tempfile.TemporaryDirectory() as tmp:
+            mt5_export.write_fx(tmp, "GBPUSD", 1.3377, self._at(0), "MT5")
+            self.assertIn("refreshed", mt5_export.fx_needs_writing(
+                tmp, "GBPUSD", 1.3377, self._at(mt5_export.FX_REFRESH_HOURS + 1)))
+
+    def test_a_corrupt_file_is_treated_as_no_reading(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "fx.json"), "w") as fh:
+                fh.write("{broken")
+            self.assertEqual(
+                mt5_export.fx_needs_writing(tmp, "GBPUSD", 1.3377, self._at(0)), "first reading")
+
+    def test_what_the_bridge_writes_the_pipeline_reads(self):
+        # Two separate implementations of the same file format -- the bridge
+        # ships standalone on Windows and cannot import the package.
+        from gold_trader.fx import load_fx
+
+        with tempfile.TemporaryDirectory() as tmp:
+            mt5_export.write_fx(tmp, "GBPUSD", 1.3377, self._at(0), "MT5 GBPUSD.m")
+            reading = load_fx(tmp, "GBPUSD")
+            self.assertEqual(reading.rate, 1.3377)
+            self.assertEqual(reading.source, "MT5 GBPUSD.m")
+            self.assertFalse(reading.is_stale(self.NOW))
+
+    def test_the_fx_file_is_written_with_unix_line_endings(self):
+        # A "\r" inside a git tree entry is what corrupted the data branch once.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = mt5_export.write_fx(tmp, "GBPUSD", 1.3377, self._at(0), "MT5")
+            with open(path, "rb") as fh:
+                self.assertNotIn(b"\r", fh.read())
 
 
 if __name__ == "__main__":

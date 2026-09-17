@@ -49,6 +49,10 @@ class GoldConfig:
     min_samples: int = 20
     #: Timeframe whose candles resolve open trades.
     resolution_timeframe: str = "m15"
+    #: Provenance of the FX rate in ``limits``, set by the caller that resolved
+    #: it. Carried so the run can report where the rate came from instead of
+    #: presenting a fallback as if it were live.
+    fx_note: str = ""
 
 
 @dataclass

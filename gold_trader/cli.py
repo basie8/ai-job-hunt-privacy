@@ -22,7 +22,10 @@ from .journal import Journal, resolve_all
 from .learning import learn
 from .macro import MacroCalendar
 from .pipeline import GoldConfig, run_signal
-from .risk import TradingLimits, realised_r_today, signals_today
+from .fx import with_live_rate
+from .risk import (
+    TradingLimits, equity_usd, realised_pnl_usd, realised_r_today, signals_today,
+)
 from .sync import DATA_BRANCH, pull_data_branch, describe_data_dir
 from .progress import audit
 from .selfcheck import run_all
@@ -30,12 +33,25 @@ from .dashboard import build as build_dashboard
 from .dashboard_html import render as render_dashboard
 
 
+def _data_dir(args: argparse.Namespace) -> str:
+    """Where the bridge drops candles and fx.json."""
+    return getattr(args, "csv_dir", None) or getattr(args, "data_dir", None) or "data"
+
+
 def _config(args: argparse.Namespace) -> GoldConfig:
-    limits = TradingLimits(
-        account_usd=getattr(args, "account", None) or 100_000.0,
-        risk_per_trade_pct=getattr(args, "risk_pct", None) or 0.5,
-    )
+    """Build the run config. Overrides are applied on top of the shipped
+    defaults, so adding a limit never silently drops it from the CLI path."""
+    overrides = {}
+    if getattr(args, "account", None):
+        overrides["account_value"] = args.account
+    if getattr(args, "risk_pct", None):
+        overrides["risk_per_trade_pct"] = args.risk_pct
+    limits = TradingLimits(**overrides)
+    limits, note = with_live_rate(limits, _data_dir(args))
+    if note.startswith("FX WARNING"):
+        print(note, file=sys.stderr)
     config = GoldConfig(limits=limits)
+    config.fx_note = note
     if getattr(args, "journal", None):
         config.journal_path = args.journal
     if getattr(args, "state_dir", None):
@@ -167,8 +183,17 @@ def cmd_status(args: argparse.Namespace) -> int:
     config = _config(args)
     journal = Journal(config.journal_path)
     now = datetime.now(timezone.utc)
+    limits = config.limits
     print(json.dumps(journal.summary(), indent=2))
-    print(f"\nRealised today: {realised_r_today(journal, now):+.2f}R "
+    equity = equity_usd(journal, limits)
+    floor = limits.account_usd * limits.min_equity_pct_of_start / 100.0
+    print(f"\n{config.fx_note}")
+    print(f"Equity: ${equity:,.2f} "
+          f"(start ${limits.account_usd:,.2f} {realised_pnl_usd(journal):+,.2f} realised; "
+          f"floor ${floor:,.2f})")
+    print(f"Next trade risks {limits.risk_per_trade_pct:.2f}% of equity = "
+          f"${max(0.0, equity) * limits.risk_per_trade_pct / 100.0:,.2f} before any learned reduction")
+    print(f"Realised today: {realised_r_today(journal, now):+.2f}R "
           f"(daily stop -{config.limits.max_daily_loss_r:.1f}R)")
     print(f"Signals today: {signals_today(journal, now)} / {config.limits.max_signals_per_day}")
     for record in journal.open_signals():

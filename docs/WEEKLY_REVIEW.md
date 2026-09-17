@@ -62,11 +62,17 @@ For each loser, pick ONE. Be blunt.
 - VIX / risk tone: risk-on or risk-off
 - Anything geopolitical actually moving gold
 
-### 4. GBPUSD rate (only if it has moved much)
-- Current GBPUSD: ___
-The paper notional is GBP 10,000 and gold is priced in USD, so a rate converts
-one to the other. It scales the displayed cash only — R is unaffected — so this
-needs refreshing when it has moved a percent or two, not every week.
+### 4. GBPUSD rate — nothing for you to do any more
+The bridge now reads GBPUSD from MT5 at the same time as the candles and writes
+it to `data/fx.json`, so the rate arrives with the prices. Nothing to fill in.
+
+What to check instead: if `python -m gold_trader status` prints a line starting
+`FX WARNING`, say so in the review. It means one of three things — the bridge is
+not running, your MT5 has no GBPUSD symbol, or the rate it returned was so far
+from the static fallback that it was refused as a misread symbol. In all three
+cases the system keeps the last documented static rate (which only scales
+displayed cash — R is unaffected), but a warning that persists for a week
+usually means the bridge stopped.
 
 ### 5. Broker reality (for cost-adjusting the paper results)
 - Typical XAUUSD spread this week: ___
@@ -94,7 +100,7 @@ we find out what the edge would survive.)
 | Would you have taken it | A signal you'd have skipped is flagged; a pattern of skips is a rule the system is missing |
 | Loss post-mortems | `thesis` losses drive prompt/rule changes; `variance` changes nothing, deliberately |
 | Macro readings | Written into `state/calendar.json` as readings the analyst sees |
-| GBPUSD rate | `fx_to_usd` and its provenance updated in `risk.py` |
+| A persistent `FX WARNING` | I chase the bridge or the MT5 symbol name; the static rate is only a floor, not a plan |
 | Broker reality | Cost-adjusted expectancy reported alongside raw paper R |
 | Calendar | Blackout windows become accurate instead of `derived_only` |
 | Your call | Disagreements are logged; three of the same disagreement is a rule change |
