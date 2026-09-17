@@ -34,8 +34,7 @@ class Detection(unittest.TestCase):
         # The behaviour the guard exists for. If a future SDK starts raising at
         # construction instead, this fails and the guard can move.
         anthropic = _sdk_or_skip()
-        env = {k: v for k, v in os.environ.items()
-               if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}
+        env = _env_without_credentials()
         code = ("import anthropic;c=anthropic.Anthropic();"
                 "print('constructed', bool(getattr(c,'api_key',None)))")
         result = subprocess.run([sys.executable, "-c", code], env=env,
@@ -107,8 +106,7 @@ class TheRemedy(unittest.TestCase):
 class EndToEnd(unittest.TestCase):
     def test_signal_exits_three_and_names_the_remedy(self):
         _sdk_or_skip()
-        env = {k: v for k, v in os.environ.items()
-               if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}
+        env = _env_without_credentials()
         repo = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         result = subprocess.run(
             [sys.executable, "-m", "gold_trader", "signal", "--csv-dir", "data/"],
@@ -118,6 +116,20 @@ class EndToEnd(unittest.TestCase):
         self.assertIn("No Anthropic API credentials", result.stderr)
         # It must fail fast, before a stack trace from library internals.
         self.assertNotIn("_validate_headers", result.stderr)
+
+
+def _env_without_credentials():
+    """A child environment with EVERY credential name removed.
+
+    Stripping only the reserved two was a real bug: once
+    AURUM_ANTHROPIC_API_KEY existed and was set, this test stopped exercising
+    the no-credentials path and started making live API calls, which hung the
+    suite for minutes. The list has to come from the code under test, not be
+    restated here, or the next variable added reopens the same hole.
+    """
+    from investment_pipeline.llm import CREDENTIAL_ENV_VARS
+
+    return {k: v for k, v in os.environ.items() if k not in CREDENTIAL_ENV_VARS}
 
 
 class _Fake:

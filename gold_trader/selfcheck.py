@@ -669,6 +669,32 @@ def check_freshness_is_per_timeframe(report: Report) -> None:
     run(_per_tf)
 
 
+def check_tests_never_call_the_api(report: Report, repo: str) -> None:
+    """A test that shells out to `signal` must strip every credential name.
+
+    Stripping only some was a live bug: once AURUM_ANTHROPIC_API_KEY existed
+    and was set in the environment, the no-credentials test stopped testing
+    that path and began making real API calls, hanging the suite for minutes
+    and spending money. The strip list has to come from the code under test.
+    """
+    run = _guard(report, "tests", "credential tests strip every key name")
+    def _strips():
+        from investment_pipeline.llm import CREDENTIAL_ENV_VARS
+
+        path = os.path.join(repo, "tests_gold", "test_credentials.py")
+        with open(path, encoding="utf-8") as fh:
+            source = fh.read()
+        assert "CREDENTIAL_ENV_VARS" in source, (
+            "the credential test restates the variable names instead of "
+            "importing them, so a new name will not be stripped")
+        assert "_env_without_credentials()" in source, (
+            "subprocess tests do not go through the shared strip helper")
+        # And the list itself must not have shrunk to nothing.
+        assert len(CREDENTIAL_ENV_VARS) >= 3, "the credential name list looks truncated"
+        return f"{len(CREDENTIAL_ENV_VARS)} names stripped from child environments"
+    run(_strips)
+
+
 def check_learning_guarantees(report: Report) -> None:
     """The three anti-overfitting guards, verified as properties not examples."""
     from .journal import Journal
@@ -799,6 +825,7 @@ def run_all(repo: str = ".") -> Report:
     check_market_hours(report)
     check_bridge_link(report)
     check_freshness_is_per_timeframe(report)
+    check_tests_never_call_the_api(report, repo)
     check_learning_guarantees(report)
     check_smc_and_sessions(report)
     check_pipeline(report)
