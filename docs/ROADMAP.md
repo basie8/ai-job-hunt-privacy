@@ -31,6 +31,7 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 |----|------|--------|--------|-------|
 | DAT-01 | Feed adapters (CSV / inline / manual / http) | done | `file:gold_trader/feed.py` | HttpFeed refuses rather than guessing |
 | DAT-02 | MT5 bridge | done | `file:gold_trader/bridge/mt5_export.py` | Plumbing-only push, never touches your tree |
+| DAT-06 | Windows install kit | done | `files:gold_trader/bridge/windows_kit/SETUP.bat,gold_trader/bridge/windows_kit/README.txt` | Zip with one-click setup; needs no clone of the project |
 | DAT-03 | market-data branch sync | done | `file:gold_trader/sync.py` | Round-trip tested over real git repos |
 | DAT-04 | Bridge running on Pieter's machine | blocked | `journal:1` | **Needs you.** Nothing downstream can start until candles arrive. |
 | DAT-05 | Live vendor feed (egress + key) | outstanding | `manual` | Optional. Only if you want runs independent of your PC being on. |

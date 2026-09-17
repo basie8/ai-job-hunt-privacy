@@ -19,6 +19,21 @@ Your MT5 account balance is irrelevant. The bridge only reads market data, so a
 This is the only machine you have to touch, and the only Python installation the
 project needs from you.
 
+### The short version: use the zip
+
+Download `AURUM-bridge.zip`, unzip it to `C:\AURUM`, and double-click
+**SETUP.bat**. It checks Python and Git, installs the one package, prepares the
+local repository and does a dry run. Then read the bar ages it prints (§1.5 —
+that is the step that matters), and run **RUN-BRIDGE.bat** to push for real.
+
+The kit deliberately does **not** contain the project. The bridge pushes using
+git plumbing, so a folder holding just the script, a `data/` directory and a
+`.git` is enough — `SETUP.bat` does `git init` and `git remote add` and nothing
+more. There is a test asserting this stays true.
+
+The sections below are the same steps done by hand, and the reference for when
+something goes wrong.
+
 ### 1.1 Python
 
 If `python --version` in Command Prompt doesn't print 3.9 or newer, install it

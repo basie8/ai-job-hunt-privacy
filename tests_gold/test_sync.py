@@ -169,6 +169,36 @@ class BridgeRoundTrip(unittest.TestCase):
         self.assertAlmostEqual(snapshot.staleness_min(self.now), 0.0, places=3)
         self.assertEqual(len(snapshot.series["h1"]), 40)
 
+    def test_the_bridge_works_from_a_repo_holding_no_project_files(self):
+        """The Windows kit ships only the script -- no clone of the project.
+
+        SETUP.bat does `git init` plus `git remote add` and nothing else, so the
+        bridge must push from a folder that contains the script, a data
+        directory and a .git, and nothing more. If this ever stops being true
+        the zip stops working.
+        """
+        root = os.path.join(self.tmp.name, "minimal")
+        run("git", "init", "-q", root)
+        run("git", "-C", root, "remote", "add", "origin", self.origin)
+        run("git", "-C", root, "config", "user.email", "test@example.com")
+        run("git", "-C", root, "config", "user.name", "Test")
+
+        data_dir = os.path.join(root, "data")
+        for tf, step in (("h1", 60), ("m15", 15)):
+            mt5_export.write_csv(
+                bars(30, self.now, step_min=step),
+                os.path.join(data_dir, f"XAUUSD_{tf}.csv"),
+            )
+        # The only things in the folder are .git and data/.
+        self.assertEqual(
+            sorted(n for n in os.listdir(root) if n != ".git"), ["data"]
+        )
+
+        self.assertTrue(mt5_export.push_data_branch(root, data_dir, "from a minimal repo"))
+        self.assertTrue(pull_data_branch(self.cloud, DATA_BRANCH, "data"))
+        rows = describe_data_dir(os.path.join(self.cloud, "data"), now=self.now)
+        self.assertEqual({r["timeframe"] for r in rows}, {"h1", "m15"})
+
     def test_a_missing_branch_reports_rather_than_crashing(self):
         with self.assertRaises(RuntimeError):
             pull_data_branch(self.cloud, "no-such-branch", "data")
