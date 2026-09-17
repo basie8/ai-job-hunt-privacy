@@ -21,8 +21,10 @@ def at(day, hour, minute=23):
 
 class ScheduleExpansion(unittest.TestCase):
     def test_the_signal_cadence_matches_the_routine(self):
-        # cron: 23 7-21/2 * * 1-5
-        self.assertEqual(list(SIGNAL_SCHEDULE.hours), [7, 9, 11, 13, 15, 17, 19, 21])
+        # cron: 23 7-19/2 * * 1-5. The 21:23 slot was removed on 2026-09-17:
+        # it fell inside gold's daily rollover break, so it could never produce
+        # a tradeable signal and would have reported a false gap every evening.
+        self.assertEqual(list(SIGNAL_SCHEDULE.hours), [7, 9, 11, 13, 15, 17, 19])
         self.assertEqual(SIGNAL_SCHEDULE.minute, 23)
         self.assertEqual(tuple(SIGNAL_SCHEDULE.weekdays), (0, 1, 2, 3, 4))
 
@@ -33,7 +35,7 @@ class ScheduleExpansion(unittest.TestCase):
 
     def test_a_full_weekday_expands_to_every_slot(self):
         moments = SIGNAL_SCHEDULE.expected_between(at(17, 0, 0), at(17, 23, 59))
-        self.assertEqual([m.hour for m in moments], [7, 9, 11, 13, 15, 17, 19, 21])
+        self.assertEqual([m.hour for m in moments], [7, 9, 11, 13, 15, 17, 19])
 
     def test_the_weekend_is_not_expected_to_run(self):
         # 19 Sep 2026 is a Saturday.
@@ -214,7 +216,7 @@ class CoherenceWithTheRoutines(unittest.TestCase):
     def test_the_schedules_are_documented_where_they_can_be_checked(self):
         with open(os.path.join(os.path.dirname(__file__), "..", "docs", "RUNTIME.md")) as fh:
             runtime = fh.read()
-        self.assertIn("23 7-21/2 * * 1-5", runtime)
+        self.assertIn("23 7-19/2 * * 1-5", runtime)
         self.assertIn("41 6,18 * * *", runtime)
 
     def test_a_schedule_describes_itself_readably(self):

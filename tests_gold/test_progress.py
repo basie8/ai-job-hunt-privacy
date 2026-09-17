@@ -121,8 +121,21 @@ class RealRoadmap(unittest.TestCase):
         self.assertTrue(result.accounted_for())
 
     def test_the_projects_own_roadmap_has_no_stale_claims(self):
-        # If this fails, the roadmap claims something that is not true.
-        self.assertEqual([t.id for t in self._audit().stale], [])
+        """If this fails, the roadmap claims something that is not true.
+
+        Rows verified by `data:` are excluded. Their freshness depends on a PC
+        in another country being awake, so asserting on them here makes the
+        suite fail whenever the bridge is off -- which it legitimately is every
+        night and all weekend. The suite is meant to be offline and
+        deterministic; a test that goes red because someone closed a laptop is
+        neither, and would train us to ignore a red suite.
+
+        The freshness of those rows is still checked, by `gold_trader progress`
+        against live data, where a stale bridge is a finding rather than a test
+        failure.
+        """
+        stale = [t.id for t in self._audit().stale if not t.verify.startswith("data:")]
+        self.assertEqual(stale, [])
 
     def test_the_critical_path_task_is_machine_verified(self):
         # DAT-04 (the bridge delivering candles) is what everything waited on.

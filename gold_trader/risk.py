@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 
 from .journal import Journal
 from .learning import LearningState
+from .sessions import market_closed
 from .macro import BlackoutPolicy, MacroCalendar
 
 
@@ -212,6 +213,24 @@ def evaluate(
     if direction == "flat":
         decision.breaches.append(Breach("NO_SIGNAL", "warning", "The analyst proposed no trade."))
         return decision
+
+    # -- is there a market at all ----------------------------------------
+    # Checked first, and in code rather than in a prompt. Until 2026-09-17 the
+    # weekend was only mentioned to the analyst and the daily rollover was not
+    # modelled at all, so nothing stopped a signal being issued into a shut
+    # market. An entry nobody can take is worse than no entry: it is journalled,
+    # resolved against candles that do not represent tradeable prices, and
+    # quietly poisons the track record the learning loop is built on.
+    closure = market_closed(now)
+    if closure:
+        detail = {
+            "weekend": ("Gold is closed for the weekend (Friday 17:00 to Sunday "
+                        "18:00 New York). No entry is possible."),
+            "daily_break": ("Gold is in its daily rollover break (17:00-18:00 New "
+                            "York). There is no tradeable market for the next hour, "
+                            "and quotes either side of it are unreliable."),
+        }[closure]
+        breaches.append(Breach("MARKET_CLOSED", "hard", detail))
 
     # -- data quality ----------------------------------------------------
     if staleness_min > limits.max_staleness_min:

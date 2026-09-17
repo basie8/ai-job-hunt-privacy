@@ -438,7 +438,7 @@ def check_run_health(report: Report, repo: str) -> None:
         # RUNTIME.md is the reference both sides are checked against.
         with open(os.path.join(repo, "docs/RUNTIME.md"), encoding="utf-8") as fh:
             runtime = fh.read()
-        expected = {"signal": "23 7-21/2 * * 1-5", "audit": "41 6,18 * * *"}
+        expected = {"signal": "23 7-19/2 * * 1-5", "audit": "41 6,18 * * *"}
         for name, cron in expected.items():
             assert cron in runtime, f"{name} cron {cron!r} is not documented in RUNTIME.md"
             minute, hours, _, _, _ = cron.split()
@@ -520,6 +520,73 @@ def check_credentials_path(report: Report) -> None:
             assert command in CREDENTIALS_REMEDY, f"remedy omits working command {command!r}"
         return f"{len(CREDENTIALS_REMEDY.splitlines())} lines, actionable"
     run(_remedy)
+
+
+def check_market_hours(report: Report) -> None:
+    """Gold is not open all the time, and a signal into a shut market is worse
+    than no signal: it is journalled, then resolved against candles that do not
+    represent tradeable prices."""
+    from .journal import Journal
+    from .learning import learn
+    from .macro import MacroCalendar
+    from .risk import TradingLimits, evaluate
+    from .sessions import market_closed
+
+    def assess(now):
+        return evaluate(
+            direction="long", entry=4350.0, stop=4330.0, target=4400.0, conviction=0.7,
+            setup_type="bos_continuation", atr=20.0, spot=4350.0, data_source="csv",
+            staleness_min=5.0, now=now, limits=TradingLimits(),
+            calendar=MacroCalendar(events=[], confidence="current"),
+            journal=Journal(), learning=learn(Journal()),
+        )
+
+    run = _guard(report, "market", "a closed market is a hard block")
+    def _closed():
+        open_dt = datetime(2026, 9, 17, 20, 30, tzinfo=timezone.utc)
+        break_dt = datetime(2026, 9, 17, 21, 30, tzinfo=timezone.utc)
+        weekend_dt = datetime(2026, 9, 19, 12, 0, tzinfo=timezone.utc)
+        assert assess(open_dt).approved, "a clean trade was refused while the market was open"
+        for moment, label in ((break_dt, "daily break"), (weekend_dt, "weekend")):
+            decision = assess(moment)
+            assert not decision.approved, f"a trade was approved during the {label}"
+            codes = {b.code for b in decision.breaches}
+            assert "MARKET_CLOSED" in codes, f"{label} did not raise MARKET_CLOSED"
+            assert decision.size_units == 0.0, f"a {label} trade was still sized"
+        return "weekend and rollover both enforced in code"
+    run(_closed)
+
+    run = _guard(report, "market", "the rollover follows New York, not UTC")
+    def _dst():
+        # 17:00 New York is 21:00 UTC in summer and 22:00 UTC in winter. A
+        # hardcoded UTC hour would be right for half the year.
+        summer = datetime(2026, 9, 17, 21, 30, tzinfo=timezone.utc)
+        winter = datetime(2026, 12, 15, 22, 30, tzinfo=timezone.utc)
+        winter_by_summer_clock = datetime(2026, 12, 15, 21, 30, tzinfo=timezone.utc)
+        assert market_closed(summer) == "daily_break", "summer rollover not detected"
+        assert market_closed(winter) == "daily_break", "winter rollover not detected"
+        assert market_closed(winter_by_summer_clock) is None, "rollover did not shift with DST"
+        return "21:00 UTC in summer, 22:00 UTC in winter"
+    run(_dst)
+
+    run = _guard(report, "market", "no scheduled run lands in the rollover")
+    def _schedule():
+        from .heartbeat import SIGNAL_SCHEDULE
+        # A run scheduled inside the break can never produce a tradeable signal,
+        # and the gap detector would report it missing every single evening.
+        # Checked in both halves of the year: the cron is fixed UTC but the
+        # closure it must avoid moves an hour when the US changes its clocks,
+        # so a schedule that clears the break in September could sit inside it
+        # in December.
+        for year, month, day, label in ((2026, 9, 17, "summer"), (2026, 12, 17, "winter")):
+            for hour in SIGNAL_SCHEDULE.hours:
+                moment = datetime(year, month, day, hour, SIGNAL_SCHEDULE.minute,
+                                  tzinfo=timezone.utc)
+                assert market_closed(moment) is None, (
+                    f"in {label} the {hour:02d}:{SIGNAL_SCHEDULE.minute} run falls "
+                    "inside a market closure")
+        return f"{len(SIGNAL_SCHEDULE.hours)} slots clear in both summer and winter"
+    run(_schedule)
 
 
 def check_learning_guarantees(report: Report) -> None:
@@ -649,6 +716,7 @@ def run_all(repo: str = ".") -> Report:
     check_run_health(report, repo)
     check_state_is_committable(report, repo)
     check_credentials_path(report)
+    check_market_hours(report)
     check_learning_guarantees(report)
     check_smc_and_sessions(report)
     check_pipeline(report)

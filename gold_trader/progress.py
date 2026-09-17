@@ -185,6 +185,27 @@ def verify(task: Task, repo: str = ".", run_tests: bool = True) -> Task:
         if not rows:
             return settle(False, "no candles in data/ — the bridge has not delivered")
         freshest = min(r["age_min"] for r in rows)
+        # Candle age cannot be judged while the market is shut. Gold closes for
+        # an hour each weekday evening and all weekend, and during those windows
+        # a perfectly healthy bridge delivers nothing -- there is nothing to
+        # deliver. Judging age against the wall clock anyway would mark this row
+        # a stale claim every weekend and every evening: a false alarm on a
+        # schedule, which is how a real alert gets learned into background noise.
+        #
+        # A bridge that dies while the market is closed is genuinely undetectable
+        # until it reopens, because no new candle is expected either way. The
+        # first run after the reopen catches it.
+        from datetime import datetime, timezone
+
+        from .sessions import market_closed
+
+        closure = market_closed(datetime.now(timezone.utc))
+        if closure:
+            return settle(
+                True,
+                f"{len(rows)} series, newest bar {freshest:.0f}min old; "
+                f"market closed ({closure.replace('_', ' ')}), so age is not judged",
+            )
         return settle(
             freshest <= max_age,
             f"{len(rows)} series, newest bar {freshest:.0f}min old (limit {max_age:.0f})",

@@ -372,6 +372,59 @@ reason why there is none.
 
 ---
 
+## 2026-09-17 — Gold is not open all the time
+
+**Evidence:** Pieter, unprompted: *"XAUUSD closed between 21:00 - 22:00 UTC."*
+
+Domain knowledge the system did not have, and it invalidated three things at
+once.
+
+**The last scheduled run of the day fired inside the close.** The signal Routine
+ran at 21:23 UTC, in the middle of the daily rollover. It could never have
+produced a tradeable signal. Worse, once the run detector shipped this
+afternoon, that slot would have been reported as a missed run *every single
+evening* — a false alarm on a schedule, which is precisely how a real alert gets
+learned into background noise. Schedule now ends at 19:23.
+
+**The weekend was advice, not a rule.** `is_weekend` existed and fed a line into
+the analyst's prompt. The risk engine — the part that actually enforces — had no
+concept of a closed market at all. Nothing but the analyst's judgement stopped a
+signal being issued into a shut market. That is backwards for this system, whose
+whole design is that models advise and code decides. `MARKET_CLOSED` is now a
+hard breach covering both closures.
+
+**And candle freshness was judged against the wall clock.** Over a weekend a
+perfectly healthy bridge delivers nothing for 48 hours, so DAT-04 and SMC-03
+would have reported as stale claims every Saturday. Freshness is not judged
+while the market is shut; a bridge that dies during a closure is undetectable
+until the reopen anyway, because no candle is expected either way.
+
+**The correction I made to the correction.** 21:00–22:00 UTC is right today and
+wrong from November: the close is anchored to 17:00–18:00 *New York*, so the UTC
+hour shifts with US daylight saving. Implemented in ET through `zoneinfo`, like
+the killzones already were, and the self-check verifies the schedule clears the
+break in both summer and winter. Taking the reported UTC hours literally would
+have produced a bug that surfaced once, in November, and looked like nothing.
+
+**The pattern, for the fourth time today:** *an absence that looks expected.* No
+signals in the evening looked like a quiet market. No candles at the weekend
+looked like a quiet market. Neither was — one was a run that could never work,
+the other a detector about to cry wolf. Every instance today has been something
+the system could not distinguish from normal, and every one was found by
+something outside the system: a user's domain knowledge, a failed run's error
+text, a dirty git tree.
+
+**Worth stating plainly:** this came from Pieter, not from the code, the tests or
+the audits. None of them could have found it — they all encode the same
+assumption. The weekly review exists for exactly this, and this is the first
+time it has paid.
+
+**Hypotheses affected:** none directly. H1 (stop band) gains a caveat: ATR
+computed across a rollover gap spans a discontinuity, so evening H1 readings may
+overstate volatility. Worth checking once there are closed trades.
+
+---
+
 ## Template for future entries
 
 ```markdown

@@ -49,7 +49,7 @@ staleness gate refuses to signal, and the 12-hourly audit notices and tells you
 
 | Routine | ID | Schedule (UTC) |
 |---|---|---|
-| XAUUSD signal run | `trig_01D5MB5sgfneCfBgVGrjACfb` | `23 7-21/2 * * 1-5` |
+| XAUUSD signal run | `trig_01D5MB5sgfneCfBgVGrjACfb` | `23 7-19/2 * * 1-5` |
 | AURUM progress audit | `trig_01E3UHbtVvSfi1DyFiUQdpZs` | `41 6,18 * * *` |
 
 Each firing spins up a **fresh, ephemeral container**, clones the repo, does its
@@ -71,6 +71,36 @@ constructs without complaint and raises `TypeError` on the first request, so the
 failure arrives late and unexplained — `gold_trader signal` now checks first and
 names the remedy. Set it under the cloud environment's **Environment variables**;
 see `docs/INSTALL.md` part 2.
+
+### When gold is actually open
+
+Gold trades nearly around the clock, but not quite, and the gaps matter:
+
+| Closure | New York | UTC (summer) | UTC (winter) |
+|---|---|---|---|
+| Daily rollover | 17:00–18:00, Mon–Thu | 21:00–22:00 | 22:00–23:00 |
+| Weekend | Fri 17:00 → Sun 18:00 | Fri 21:00 → Sun 22:00 | Fri 22:00 → Sun 23:00 |
+
+**The UTC hours move with US daylight saving**, so both are defined in New York
+time and converted through `zoneinfo`, exactly like the killzones. Hardcoding
+21:00–22:00 UTC would be correct for half the year and silently wrong for the
+other half — the kind of error that only shows up in November.
+
+Two consequences, both live in code rather than in a prompt:
+
+- **`MARKET_CLOSED` is a hard breach.** Until 2026-09-17 the weekend was
+  mentioned to the analyst and enforced nowhere, and the rollover was not
+  modelled at all. An entry nobody can take is worse than no entry: it gets
+  journalled, then resolved against candles that do not represent tradeable
+  prices, quietly poisoning the record the learning loop is built on.
+- **The signal Routine stops at 19:23 UTC.** It used to run at 21:23, inside the
+  rollover. `gold_trader selfcheck` now verifies that no scheduled slot falls in
+  a closure, in both summer and winter.
+
+Candle freshness is not judged while the market is shut. A healthy bridge
+delivers nothing over a weekend because there is nothing to deliver, and a
+bridge that dies during a closure is undetectable until the reopen either way —
+the first run after it catches the gap.
 
 ## 3. GitHub — the state
 

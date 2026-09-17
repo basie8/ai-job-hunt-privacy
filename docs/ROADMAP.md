@@ -43,6 +43,7 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 | ID | Task | Status | Verify | Notes |
 |----|------|--------|--------|-------|
 | SMC-01 | CHoCH / BOS / OB / FVG / sweeps | done | `file:gold_trader/smc.py` | One documented interpretation, computed identically each run |
+| SMC-05 | Market hours enforced, not advised | done | `file:gold_trader/sessions.py` | Weekend + daily rollover are a hard MARKET_CLOSED breach; DST-correct via New York |
 | SMC-02 | Sessions, killzones, session ranges | done | `file:gold_trader/sessions.py` | DST-correct via zoneinfo |
 | SMC-03 | Detectors validated against real gold data | done | `data:180` | Run against real XAUUSD 2026-09-17; findings in LEARNING_LOG |
 | SMC-04 | Significance filter for structure events | outstanding | `manual` | 183 BOS/CHoCH per 500 H1 bars is too frequent to mean much |
@@ -73,7 +74,7 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 
 | ID | Task | Status | Verify | Notes |
 |----|------|--------|--------|-------|
-| TST-01 | Gold test suite | done | `tests:tests_gold:330` | Offline, no network |
+| TST-01 | Gold test suite | done | `tests:tests_gold:345` | Offline, no network |
 | TST-02 | Pipeline test suite | done | `tests:tests:44` | Offline, no network |
 | TST-03 | Component self-check | done | `file:gold_trader/selfcheck.py` | Placeholders, config coherence, cross-artifact drift |
 | TST-04 | Config coherence checks | done | `file:gold_trader/config_checks.py` | Limits that contradict each other |

@@ -76,6 +76,40 @@ def active_killzone(moment: datetime) -> Optional[str]:
     return None
 
 
+#: Gold stops trading for an hour each weekday evening while the venue rolls
+#: over to the next session. Defined in New York time, like the weekend close,
+#: because that is what it is actually anchored to: 21:00-22:00 UTC during US
+#: daylight saving, 22:00-23:00 UTC once the clocks go back. Hardcoding the UTC
+#: hours would be correct for half the year and silently wrong for the other.
+DAILY_BREAK_START = time(17, 0)
+DAILY_BREAK_END = time(18, 0)
+
+
+def is_daily_break(moment: datetime) -> bool:
+    """True during the weekday rollover, when there is no tradeable market.
+
+    Friday's 17:00 and Sunday's reopen are the weekend's business; this covers
+    the Monday-to-Thursday break and Sunday evening is excluded because the
+    weekly reopen happens at exactly the hour this window would otherwise sit in.
+    """
+    et = _to_et(moment)
+    if et.weekday() in (4, 5, 6):  # Fri/Sat/Sun belong to is_weekend
+        return False
+    return DAILY_BREAK_START <= et.time() < DAILY_BREAK_END
+
+
+def market_closed(moment: datetime) -> Optional[str]:
+    """Why the market is shut, or None when it is open.
+
+    One function so no caller can check the weekend and forget the daily break.
+    """
+    if is_weekend(moment):
+        return "weekend"
+    if is_daily_break(moment):
+        return "daily_break"
+    return None
+
+
 def is_weekend(moment: datetime) -> bool:
     """Gold is closed from Friday's NY close to Sunday evening."""
     et = _to_et(moment)
@@ -156,6 +190,7 @@ class SessionRead:
     sessions: List[str] = field(default_factory=list)
     killzone: Optional[str] = None
     weekend: bool = False
+    daily_break: bool = False
     ranges: Dict[str, SessionRange] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, object]:
@@ -164,6 +199,7 @@ class SessionRead:
             "sessions": self.sessions,
             "killzone": self.killzone,
             "weekend": self.weekend,
+            "daily_break": self.daily_break,
             "ranges": {k: v.to_dict() for k, v in self.ranges.items()},
         }
 
@@ -175,6 +211,10 @@ class SessionRead:
         ]
         if self.weekend:
             lines.append("  MARKET CLOSED for the weekend. No entries.")
+            return "\n".join(lines)
+        if self.daily_break:
+            lines.append("  MARKET CLOSED for the daily rollover (17:00-18:00 New York). "
+                         "No entries; quotes either side of it are unreliable.")
             return "\n".join(lines)
         lines.append(f"  Active: {', '.join(self.sessions) or 'between sessions'}")
         for name in self.sessions:
@@ -211,5 +251,6 @@ def read_sessions(
         sessions=active_sessions(moment),
         killzone=active_killzone(moment),
         weekend=is_weekend(moment),
+        daily_break=is_daily_break(moment),
         ranges=ranges,
     )

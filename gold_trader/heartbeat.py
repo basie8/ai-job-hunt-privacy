@@ -80,8 +80,12 @@ class Schedule:
         return f"{hours} UTC, {days}"
 
 
-#: The signal Routine: every two hours, 07:23-21:23 UTC, Monday to Friday.
-SIGNAL_SCHEDULE = Schedule(minute=23, hours=tuple(range(7, 22, 2)))
+#: The signal Routine: every two hours, 07:23-19:23 UTC, Monday to Friday.
+#: It used to end at 21:23, which lands inside gold's daily rollover break
+#: (17:00-18:00 New York). A run there can produce nothing tradeable, and the
+#: detector would have reported a missed run every single evening -- a false
+#: alarm a day, which is how a real alert gets learned into background noise.
+SIGNAL_SCHEDULE = Schedule(minute=23, hours=tuple(range(7, 20, 2)))
 
 #: The audit Routine: 06:41 and 18:41 UTC, every day.
 AUDIT_SCHEDULE = Schedule(minute=41, hours=(6, 18), weekdays=(0, 1, 2, 3, 4, 5, 6))
