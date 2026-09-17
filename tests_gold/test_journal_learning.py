@@ -16,7 +16,7 @@ def bar(offset_h, low, high, close=None):
 
 def long_signal(**kw):
     base = dict(
-        id="s1", ts=START.isoformat(), direction="long", setup_type="trend_pullback",
+        id="s1", ts=START.isoformat(), direction="long", setup_type="bos_continuation",
         conviction=0.7, entry=2400.0, stop=2390.0, target=2420.0,
     )
     base.update(kw)
@@ -74,7 +74,7 @@ class JournalPersistence(unittest.TestCase):
             path = os.path.join(tmp, "journal.jsonl")
             journal = Journal(path)
             record = journal.new_signal(
-                direction="long", setup_type="breakout", conviction=0.8,
+                direction="long", setup_type="bos_continuation", conviction=0.8,
                 entry=2400.0, stop=2390.0, target=2420.0,
             )
             journal.update_outcome(record, status="won", r_multiple=2.0, exit_ts=START.isoformat())
@@ -87,14 +87,14 @@ class JournalPersistence(unittest.TestCase):
 
     def test_open_signals_exclude_flat_and_closed(self):
         journal = Journal()
-        journal.new_signal(direction="long", setup_type="breakout", conviction=0.6,
+        journal.new_signal(direction="long", setup_type="bos_continuation", conviction=0.6,
                            entry=2400.0, stop=2390.0, target=2420.0)
         journal.new_signal(direction="flat", setup_type="no_setup", conviction=0.0)
         self.assertEqual(len(journal.open_signals()), 1)
 
     def test_resolve_all_updates_every_touched_trade(self):
         journal = Journal()
-        journal.new_signal(direction="long", setup_type="breakout", conviction=0.6,
+        journal.new_signal(direction="long", setup_type="bos_continuation", conviction=0.6,
                            entry=2400.0, stop=2390.0, target=2420.0,
                            ts=START.isoformat())
         series = Series("m15", [bar(1, 2398, 2425)], source="test")
@@ -115,7 +115,7 @@ class Statistics(unittest.TestCase):
     def test_calibration_detects_overconfidence(self):
         records = [
             SignalRecord(id=str(i), ts=START.isoformat(), direction="long",
-                         setup_type="breakout", conviction=0.9,
+                         setup_type="bos_continuation", conviction=0.9,
                          r_multiple=(2.0 if i < 3 else -1.0))
             for i in range(10)
         ]
@@ -127,18 +127,18 @@ class Statistics(unittest.TestCase):
     def test_setup_stats_separate_the_buckets(self):
         records = [
             SignalRecord(id="a", ts=START.isoformat(), direction="long",
-                         setup_type="breakout", conviction=0.7, r_multiple=2.0),
+                         setup_type="bos_continuation", conviction=0.7, r_multiple=2.0),
             SignalRecord(id="b", ts=START.isoformat(), direction="long",
                          setup_type="range_fade", conviction=0.7, r_multiple=-1.0),
         ]
         stats = setup_stats(records)
-        self.assertAlmostEqual(stats["breakout"].expectancy_r, 2.0)
+        self.assertAlmostEqual(stats["bos_continuation"].expectancy_r, 2.0)
         self.assertAlmostEqual(stats["range_fade"].expectancy_r, -1.0)
 
     def test_walk_forward_holds_out_the_newest_trades(self):
         records = [
             SignalRecord(id=str(i), ts=(START + timedelta(days=i)).isoformat(),
-                         direction="long", setup_type="breakout", conviction=0.7, r_multiple=1.0)
+                         direction="long", setup_type="bos_continuation", conviction=0.7, r_multiple=1.0)
             for i in range(20)
         ]
         train, holdout = walk_forward_split(records, 0.7)
@@ -148,7 +148,7 @@ class Statistics(unittest.TestCase):
 
     def test_walk_forward_does_not_split_a_tiny_journal(self):
         records = [SignalRecord(id="a", ts=START.isoformat(), direction="long",
-                                setup_type="breakout", conviction=0.7, r_multiple=1.0)]
+                                setup_type="bos_continuation", conviction=0.7, r_multiple=1.0)]
         train, holdout = walk_forward_split(records)
         self.assertEqual(holdout, [])
 
@@ -173,25 +173,25 @@ class LearningGuarantees(unittest.TestCase):
         state = learn(Journal())
         self.assertEqual(state.status(), "cold_start")
         self.assertEqual(state.conviction_multiplier(), 1.0)
-        self.assertEqual(state.size_multiplier("breakout"), 1.0)
+        self.assertEqual(state.size_multiplier("bos_continuation"), 1.0)
         self.assertIn("none yet", state.lessons_block())
 
     def test_a_small_sample_does_not_move_anything(self):
-        state = learn(journal_with("breakout", 5, -1.0), min_samples=20)
+        state = learn(journal_with("bos_continuation", 5, -1.0), min_samples=20)
         self.assertEqual(state.status(), "warming_up")
         self.assertEqual(state.conviction_multiplier(), 1.0)
-        self.assertEqual(state.size_multiplier("breakout"), 1.0)
+        self.assertEqual(state.size_multiplier("bos_continuation"), 1.0)
 
     def test_overconfidence_shrinks_conviction_once_the_sample_is_large(self):
-        journal = journal_with("breakout", 40, -1.0, conviction=0.9)
+        journal = journal_with("bos_continuation", 40, -1.0, conviction=0.9)
         state = learn(journal, min_samples=20)
         self.assertLess(state.conviction_multiplier(), 1.0)
         self.assertIn("OVERCONFIDENT", state.lessons_block())
 
     def test_learning_never_sizes_above_one(self):
         # A flawless record must not increase risk beyond the base setting.
-        state = learn(journal_with("breakout", 100, 3.0), min_samples=20)
-        self.assertEqual(state.size_multiplier("breakout"), 1.0)
+        state = learn(journal_with("bos_continuation", 100, 3.0), min_samples=20)
+        self.assertEqual(state.size_multiplier("bos_continuation"), 1.0)
         self.assertEqual(state.conviction_multiplier(), 1.0)
 
     def test_a_losing_setup_is_sized_down(self):
@@ -205,11 +205,11 @@ class LearningGuarantees(unittest.TestCase):
 
     def test_an_unknown_setup_is_never_blocked(self):
         state = learn(journal_with("range_fade", 80, -1.0), min_samples=20)
-        self.assertEqual(state.size_multiplier("trend_pullback"), 1.0)
-        self.assertNotIn("trend_pullback", state.blocked_setups())
+        self.assertEqual(state.size_multiplier("bos_continuation"), 1.0)
+        self.assertNotIn("bos_continuation", state.blocked_setups())
 
     def test_lessons_block_reports_the_holdout(self):
-        state = learn(journal_with("breakout", 40, 1.0), min_samples=20)
+        state = learn(journal_with("bos_continuation", 40, 1.0), min_samples=20)
         self.assertGreater(state.holdout_n, 0)
         self.assertIn("Out-of-sample", state.lessons_block())
 

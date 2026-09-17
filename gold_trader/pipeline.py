@@ -299,7 +299,7 @@ def run_signal(
     result.learning = learning
     log.record("learning", "state", learning.to_dict())
 
-    features = build_features(snapshot)
+    features = build_features(snapshot, now)
     result.features = features
     log.record("market", "features", features.to_dict())
 

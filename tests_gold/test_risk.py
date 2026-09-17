@@ -15,7 +15,7 @@ CLEAR_CALENDAR = MacroCalendar(events=[], confidence="current")
 def assess(**kw):
     base = dict(
         direction="long", entry=2400.0, stop=2390.0, target=2420.0, conviction=0.7,
-        setup_type="trend_pullback", atr=8.0, spot=2400.0, data_source="csv",
+        setup_type="bos_continuation", atr=8.0, spot=2400.0, data_source="csv",
         staleness_min=5.0, now=NOW, limits=TradingLimits(), calendar=CLEAR_CALENDAR,
         journal=Journal(), learning=learn(Journal()),
     )
@@ -110,7 +110,7 @@ class SessionBudgets(unittest.TestCase):
         journal = Journal()
         for i in range(3):
             record = journal.new_signal(
-                direction="long", setup_type="breakout", conviction=0.6,
+                direction="long", setup_type="bos_continuation", conviction=0.6,
                 entry=2400.0, stop=2390.0, target=2420.0,
             )
             journal.update_outcome(
@@ -121,7 +121,7 @@ class SessionBudgets(unittest.TestCase):
     def test_too_many_open_positions_blocks_a_new_one(self):
         journal = Journal()
         for _ in range(2):
-            journal.new_signal(direction="long", setup_type="breakout", conviction=0.6,
+            journal.new_signal(direction="long", setup_type="bos_continuation", conviction=0.6,
                                entry=2400.0, stop=2390.0, target=2420.0)
         self.assertIn("MAX_OPEN_POSITIONS", codes(assess(journal=journal)))
 
@@ -130,7 +130,7 @@ class SessionBudgets(unittest.TestCase):
         limits = TradingLimits(max_open_positions=99)
         for _ in range(4):
             journal.new_signal(
-                direction="long", setup_type="breakout", conviction=0.6,
+                direction="long", setup_type="bos_continuation", conviction=0.6,
                 entry=2400.0, stop=2390.0, target=2420.0,
                 ts=NOW.isoformat(),
             )
@@ -145,14 +145,14 @@ class LearnedGates(unittest.TestCase):
         self.assertFalse(decision.approved)
 
     def test_a_losing_setup_reduces_the_size(self):
-        learning = learn(journal_with("mean_reversion", 30, -1.0), min_samples=20)
-        decision = assess(setup_type="mean_reversion", learning=learning)
+        learning = learn(journal_with("fvg_fill", 30, -1.0), min_samples=20)
+        decision = assess(setup_type="fvg_fill", learning=learning)
         self.assertTrue(decision.approved)
         self.assertLess(decision.risk_usd, TradingLimits().base_risk_usd)
         self.assertLess(decision.multipliers["size_from_setup_record"], 1.0)
 
     def test_overconfidence_shrinks_the_recorded_conviction(self):
-        learning = learn(journal_with("trend_pullback", 40, -1.0, conviction=0.9), min_samples=20)
+        learning = learn(journal_with("bos_continuation", 40, -1.0, conviction=0.9), min_samples=20)
         decision = assess(conviction=0.9, learning=learning)
         self.assertLess(decision.conviction, 0.9)
 

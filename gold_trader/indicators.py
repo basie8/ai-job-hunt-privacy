@@ -10,7 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence
 
+from datetime import datetime
+
 from .feed import Candle, Series
+from .sessions import SessionRead, read_sessions
+from .smc import SmcRead, read_structure
 
 
 def sma(values: Sequence[float], period: int) -> Optional[float]:
@@ -205,6 +209,8 @@ class FeatureSet:
 
     spot: float
     per_timeframe: Dict[str, TimeframeFeatures] = field(default_factory=dict)
+    smc: Dict[str, SmcRead] = field(default_factory=dict)
+    session: Optional[SessionRead] = None
 
     def primary(self, preferred: str = "h1") -> Optional[TimeframeFeatures]:
         return self.per_timeframe.get(preferred) or next(iter(self.per_timeframe.values()), None)
@@ -222,15 +228,31 @@ class FeatureSet:
             return "neutral"
         return "conflicted"
 
+    def smc_alignment(self) -> str:
+        """Do the timeframes agree on structural bias?"""
+        biases = {r.bias for r in self.smc.values() if r.bias != "unknown"}
+        if not biases:
+            return "unknown"
+        if len(biases) == 1:
+            return f"aligned_{biases.pop()}"
+        return "conflicted"
+
     def to_dict(self) -> Dict[str, object]:
         return {
             "spot": round(self.spot, 2),
             "alignment": self.alignment(),
+            "smc_alignment": self.smc_alignment(),
             "timeframes": {tf: f.to_dict() for tf, f in self.per_timeframe.items()},
+            "smc": {tf: r.to_dict() for tf, r in self.smc.items()},
+            "session": self.session.to_dict() if self.session else None,
         }
 
     def as_prompt_block(self) -> str:
-        lines = [f"Spot: {self.spot:.2f}", f"Timeframe alignment: {self.alignment()}"]
+        lines = [
+            f"Spot: {self.spot:.2f}",
+            f"EMA trend alignment: {self.alignment()}",
+            f"SMC structural alignment: {self.smc_alignment()}",
+        ]
         for tf, f in self.per_timeframe.items():
             parts = [
                 f"close {f.close:.2f}",
@@ -251,11 +273,33 @@ class FeatureSet:
             if f.swing_low:
                 parts.append(f"last swing low {f.swing_low:.2f}")
             lines.append(f"  [{tf.upper()}, {f.bars} bars] " + ", ".join(parts))
+
+        if self.smc:
+            lines.append("")
+            lines.append("STRUCTURE (Smart Money Concepts, computed)")
+            for tf in self.per_timeframe:
+                if tf in self.smc:
+                    lines.extend(self.smc[tf].as_prompt_lines(self.spot))
+        if self.session:
+            lines.append("")
+            lines.append("SESSION")
+            lines.append(self.session.as_prompt_block(self.spot))
         return "\n".join(lines)
 
 
-def build_features(snapshot) -> FeatureSet:
+def build_features(snapshot, now: Optional[datetime] = None) -> FeatureSet:
+    """Indicators, structure and session context from one market snapshot."""
+    usable = {tf: s for tf, s in snapshot.series.items() if len(s) >= 2}
+    moment = now or snapshot.as_of
+    finest = min(usable.values(), key=lambda s: len(s.candles) and 1, default=None)
+    if usable:
+        # Session ranges come off the finest timeframe available.
+        from .feed import timeframe_minutes
+
+        finest = min(usable.values(), key=lambda s: timeframe_minutes(s.timeframe))
     return FeatureSet(
         spot=snapshot.spot,
-        per_timeframe={tf: features_for(s) for tf, s in snapshot.series.items() if len(s) >= 2},
+        per_timeframe={tf: features_for(s) for tf, s in usable.items()},
+        smc={tf: read_structure(s.candles, tf) for tf, s in usable.items()},
+        session=read_sessions(finest.candles, moment) if finest else None,
     )

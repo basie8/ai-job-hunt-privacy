@@ -7,13 +7,16 @@ from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
 Bias = Literal["long", "short", "flat"]
+#: The learning loop buckets performance by these, so they are the vocabulary
+#: the whole system reasons in. Changing them resets per-setup statistics.
 SetupType = Literal[
-    "trend_pullback",
-    "breakout",
-    "range_fade",
-    "event_fade",
-    "momentum_continuation",
-    "mean_reversion",
+    "bos_continuation",          # break of structure, entering the continuation
+    "choch_reversal",            # change of character, entering the reversal
+    "ob_retest",                 # retest of an unmitigated order block
+    "fvg_fill",                  # entry into an unmitigated fair value gap
+    "liquidity_sweep_reversal",  # stops taken beyond a swing, close back inside
+    "range_fade",                # fading a session or consolidation range
+    "event_fade",                # post-release reversion once the spike settles
     "no_setup",
 ]
 Regime = Literal["trending_up", "trending_down", "range_bound", "event_driven", "unclear"]

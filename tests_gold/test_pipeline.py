@@ -15,7 +15,7 @@ NOW = datetime(2026, 9, 17, 12, 0, tzinfo=timezone.utc)
 
 def chart_read(**kw):
     base = dict(
-        bias="long", regime="trending_up", setup_type="trend_pullback", conviction=0.75,
+        bias="long", regime="trending_up", setup_type="bos_continuation", conviction=0.75,
         entry=2400.0, stop=2390.0, target=2420.0,
         technical_read="Higher lows into the 20 EMA.", macro_read="No release inside the horizon.",
         invalidation="A close below 2388.", key_levels=[2390.0, 2420.0], data_concerns=[],
@@ -89,7 +89,7 @@ class HappyPath(unittest.TestCase):
         self.assertTrue(self.result.actionable)
         self.assertAlmostEqual(self.result.decision.size_units, 50.0)
         self.assertIsNotNone(self.result.record)
-        self.assertEqual(self.result.record.setup_type, "trend_pullback")
+        self.assertEqual(self.result.record.setup_type, "bos_continuation")
 
     def test_the_journalled_signal_carries_the_feature_snapshot(self):
         self.assertIn("timeframes", self.result.record.features)
@@ -182,7 +182,7 @@ class LearningRunsFirst(unittest.TestCase):
         first_ts = snapshot.series["m15"].candles[0].ts
         journal = Journal()
         journal.new_signal(
-            direction="long", setup_type="breakout", conviction=0.6,
+            direction="long", setup_type="bos_continuation", conviction=0.6,
             entry=2362.0, stop=2358.0, target=2370.0,
             ts=(first_ts).isoformat(),
         )

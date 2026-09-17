@@ -24,6 +24,7 @@ from .macro import MacroCalendar
 from .pipeline import GoldConfig, run_signal
 from .risk import TradingLimits, realised_r_today, signals_today
 from .sync import DATA_BRANCH, pull_data_branch, describe_data_dir
+from .progress import audit
 
 
 def _config(args: argparse.Namespace) -> GoldConfig:
@@ -209,6 +210,24 @@ def cmd_pull_data(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_progress(args: argparse.Namespace) -> int:
+    """Re-verify every roadmap claim against the repository."""
+    result = audit(args.roadmap, args.repo)
+    if not result.tasks:
+        print(f"No tasks parsed from {args.roadmap}.", file=sys.stderr)
+        return 2
+    if args.json_out:
+        json.dump(
+            {"summary": result.summary(), "tasks": [t.to_dict() for t in result.tasks]},
+            sys.stdout, indent=2,
+        )
+        sys.stdout.write("\n")
+    else:
+        print(result.render())
+    # Non-zero when the roadmap is lying about something.
+    return 1 if result.stale else 0
+
+
 def _common(parser: argparse.ArgumentParser, data: bool = False) -> None:
     parser.add_argument("--state-dir", default=None, help="Directory for journal/audit/calendar.")
     parser.add_argument("--journal", default=None)
@@ -251,6 +270,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--data-dir", default="data")
     p.add_argument("--max-age-min", type=int, default=90)
     p.set_defaults(func=cmd_pull_data)
+
+    p = sub.add_parser("progress", help="Audit the roadmap, verifying each claim.")
+    p.add_argument("--roadmap", default="docs/ROADMAP.md")
+    p.add_argument("--repo", default=".")
+    p.add_argument("--json-out", action="store_true")
+    p.set_defaults(func=cmd_progress)
 
     p = sub.add_parser("calendar", help="The event diary as currently loaded.")
     _common(p)

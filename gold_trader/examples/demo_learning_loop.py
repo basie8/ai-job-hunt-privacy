@@ -22,15 +22,15 @@ from gold_trader.learning import learn
 random.seed(11)
 START = datetime(2026, 6, 1, tzinfo=timezone.utc)
 
-# trend_pullback wins 58% at +2R / -1R; range_fade wins 25% at +2R / -1R.
-PROFILE = {"trend_pullback": 0.58, "range_fade": 0.25}
+# bos_continuation wins 58% at +2R / -1R; range_fade wins 25% at +2R / -1R.
+PROFILE = {"bos_continuation": 0.58, "range_fade": 0.25}
 CHECKPOINTS = (10, 30, 90)
 
 
 def main() -> None:
     journal = Journal()
     for i in range(max(CHECKPOINTS)):
-        setup = "trend_pullback" if i % 2 == 0 else "range_fade"
+        setup = "bos_continuation" if i % 2 == 0 else "range_fade"
         won = random.random() < PROFILE[setup]
         ts = START + timedelta(hours=8 * i)
         record = journal.new_signal(
