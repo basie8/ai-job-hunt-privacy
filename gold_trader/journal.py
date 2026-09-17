@@ -50,6 +50,8 @@ class SignalRecord:
     macro: Dict[str, object] = field(default_factory=dict)
     audit_run_id: Optional[str] = None
     data_source: str = "unknown"
+    #: Stamped so a simulated result can never be mistaken for a real fill.
+    mode: str = "paper"
 
     # Outcome, filled in later.
     status: str = OPEN

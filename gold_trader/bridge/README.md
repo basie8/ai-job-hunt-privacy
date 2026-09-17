@@ -112,4 +112,10 @@ of the pipeline quietly signalling on yesterday's prices.
 
 The bridge is read-only with respect to MT5. It calls `copy_rates_from_pos` and
 `symbol_info_tick` and nothing else — there is no order function anywhere in this
-repository, and the pipeline's output is an order *intent* that a human places.
+repository.
+
+**Your account balance is irrelevant.** The bridge only reads market data, so a
+£0 balance or a demo account works identically to a funded one. The terminal just
+has to be running and logged in to the broker's server. The system runs a **paper
+book**: signals are journalled and resolved against the candles that follow, and
+no order is ever placed anywhere.

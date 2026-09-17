@@ -10,17 +10,27 @@ say "weekly review". I update the journal, the learning log and the roadmap from
 
 ## Why this matters more than the automation
 
-The journal knows what the pipeline *proposed*. It does not know:
+This is a **paper** book: no orders are placed, and outcomes are resolved
+automatically against the candles that followed the signal. So there are no fills
+to reconcile — which removes the tedious half of a trading review and leaves the
+half that actually matters.
 
-- which signals you actually took, and at what fill
-- why you skipped one, or overrode one
-- whether a loss was a bad thesis, bad execution, or ordinary variance
-- what the spread and slippage actually cost you
+The journal knows what the pipeline *proposed* and what the candles then did. It
+does not know:
+
+- whether a loss was a bad read or ordinary variance
 - what you saw on the chart that the computed features missed
+- whether you would have taken the trade at all, and why not
+- what spread and slippage would have cost in reality
 
-That last category is the one that improves the system permanently. A losing
-trade tells the learning loop "this setup lost." **You** telling me *why* it lost
-is what changes a rule.
+That last one matters more than it looks. **Paper results are systematically
+optimistic**, because a simulated fill has no spread and no slippage. On a $10
+stop, a $0.30 spread is 3% of every R. Give me your real spread and I can report
+a cost-adjusted expectancy alongside the raw one.
+
+The post-mortems are what improve the system permanently. A losing trade tells
+the learning loop "this setup lost." **You** telling me *why* it lost is what
+changes a rule.
 
 ---
 
@@ -29,16 +39,17 @@ is what changes a rule.
 ```markdown
 ## Week ending YYYY-MM-DD
 
-### 1. Signals vs. reality
-| Signal ID | Took it? | Actual fill | Actual exit | Why deviated |
-|-----------|----------|-------------|-------------|--------------|
-| a1b2c3    | yes      | 4312.80     | 4296.00     | slipped 0.30 on entry |
-| d4e5f6    | no       | —           | —           | didn't like the H4 context |
+### 1. Would you have taken it?
+The paper book takes every approved signal. You would not have.
+| Signal ID | Would you take it? | Why not |
+|-----------|--------------------|---------|
+| a1b2c3    | yes                | — |
+| d4e5f6    | no                 | H4 still bearish, M15 CHoCH looked like noise |
 
 ### 2. Loss post-mortems
 For each loser, pick ONE. Be blunt.
 - **Thesis wrong** — the read was bad. What did I miss?
-- **Execution wrong** — the read was fine, the entry/stop/timing was not.
+- **Level wrong** — the direction was right, the entry or stop was not.
 - **Variance** — good process, bad outcome. No change needed.
 
 | Signal ID | Verdict | What the features missed |
@@ -51,11 +62,12 @@ For each loser, pick ONE. Be blunt.
 - VIX / risk tone: risk-on or risk-off
 - Anything geopolitical actually moving gold
 
-### 4. Broker reality
+### 4. Broker reality (for cost-adjusting the paper results)
 - Typical XAUUSD spread this week: ___
-- Worst slippage seen: ___
-- Commission per lot: ___
-(Only needs restating when it changes. It shifts real R.)
+- Typical spread around news: ___
+- Commission per lot, if any: ___
+(Only needs restating when it changes. Paper R ignores all of it, so this is how
+we find out what the edge would survive.)
 
 ### 5. Calendar
 - Confirmed CPI/PCE/PPI dates for the next 3 weeks
@@ -73,10 +85,10 @@ For each loser, pick ONE. Be blunt.
 
 | Your input | What changes |
 |---|---|
-| Signals vs. reality | Journal outcomes corrected to *your* fills, not theoretical ones |
+| Would you have taken it | A signal you'd have skipped is flagged; a pattern of skips is a rule the system is missing |
 | Loss post-mortems | `thesis` losses drive prompt/rule changes; `variance` changes nothing, deliberately |
 | Macro readings | Written into `state/calendar.json` as readings the analyst sees |
-| Broker reality | Risk limits and minimum reward:risk re-tuned to real costs |
+| Broker reality | Cost-adjusted expectancy reported alongside raw paper R |
 | Calendar | Blackout windows become accurate instead of `derived_only` |
 | Your call | Disagreements are logged; three of the same disagreement is a rule change |
 

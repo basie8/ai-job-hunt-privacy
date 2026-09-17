@@ -1,0 +1,224 @@
+# Going live — full installation
+
+Start to finish. Everything you need to do is in Part 1; the rest is already
+running or is reference.
+
+**What "live" means here:** a **paper** book. MT5 supplies candles, the pipeline
+produces signals, outcomes are resolved against the candles that follow, and the
+journal accumulates a track record. **No order is ever placed.** There is no
+execution code in this repository and no setting that adds any — `mode` is
+`paper` and the configuration check rejects anything else.
+
+Your MT5 account balance is irrelevant. The bridge only reads market data, so a
+£0 balance or a demo account works identically to a funded one.
+
+---
+
+## Part 1 — Your Windows PC (about 20 minutes, once)
+
+This is the only machine you have to touch, and the only Python installation the
+project needs from you.
+
+### 1.1 Python
+
+If `python --version` in Command Prompt doesn't print 3.9 or newer, install it
+from [python.org/downloads](https://www.python.org/downloads/). **Tick "Add
+python.exe to PATH"** on the first screen of the installer.
+
+### 1.2 The one package
+
+```
+pip install MetaTrader5
+```
+
+That is the complete dependency list for your side. The bridge script uses
+nothing else — no `anthropic`, no API key, no model calls. It reads candles and
+runs `git`.
+
+### 1.3 Git
+
+Install [Git for Windows](https://git-scm.com/download/win) if `git --version`
+fails. Then clone and confirm you can push without a prompt:
+
+```
+git clone https://github.com/basie8/ai-job-hunt-privacy.git C:\aurum
+cd C:\aurum
+git config user.name "Pieter"
+git config user.email "pietervas@gmail.com"
+```
+
+Test the push path now, not later — a scheduled task cannot answer a password
+prompt:
+
+```
+git commit --allow-empty -m "bridge connectivity test"
+git push origin claude/four-stage-llm-investment-uy6cw4
+```
+
+If it asks for credentials, let Git Credential Manager store them, or set up an
+SSH key. If it fails, stop here and fix it — everything downstream depends on it.
+
+### 1.4 MT5
+
+1. Open MetaTrader 5 and log in to your broker's server.
+2. **Tools → Options → Expert Advisors → tick "Allow algorithmic trading"**.
+3. Make sure XAUUSD (or whatever your broker calls gold) is in Market Watch. If
+   you can't see it: right-click Market Watch → Show All.
+4. Leave the terminal running. The bridge reads through the running terminal.
+
+### 1.5 First run — dry, no push
+
+```
+cd C:\aurum
+python gold_trader\bridge\mt5_export.py --repo C:\aurum
+```
+
+Expected:
+
+```
+Symbol: XAUUSD.m | server offset: UTC+3.0h
+  m15   500 bars, last 2026-09-17T14:45:00+00:00 (3min old, close 4312.55) updated
+  h1    500 bars, last 2026-09-17T14:00:00+00:00 (48min old, close 4311.20) updated
+  h4    400 bars, last 2026-09-17T12:00:00+00:00 (168min old, close 4309.80) updated
+```
+
+**Check the bar ages. This is the one step that silently corrupts everything if
+it's wrong.** MT5 stamps bars in broker *server* time, usually UTC+2 or UTC+3.
+The bridge detects the offset from your broker's tick clock, but if the m15 bar
+reads hours old during an active session, the detection was wrong:
+
+```
+python gold_trader\bridge\mt5_export.py --repo C:\aurum --server-offset-hours 3
+```
+
+Other things that can go wrong here:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `Could not connect to MT5` | Terminal closed, or algo trading disabled | Open it, tick the box |
+| `Could not auto-pick a gold symbol` | Broker uses an unusual name | It prints the candidates — pass `--symbol <name>` |
+| `MT5 returned no h4 data` | Symbol not in Market Watch | Right-click Market Watch → Show All |
+| Ages are negative | Offset over-corrected | Pass `--server-offset-hours` with the right value |
+
+### 1.6 First push
+
+```
+python gold_trader\bridge\mt5_export.py --repo C:\aurum --push
+```
+
+Expected: `Pushed data/ (3 files) to origin/market-data as a1b2c3d4e5`
+
+This creates the `market-data` branch. It holds nothing but `data/`, so it can
+never collide with anything else. The bridge builds its commit with git plumbing
+and **never checks out, stashes or switches branches** — running it on a schedule
+cannot disturb whatever you're working on.
+
+### 1.7 Schedule it
+
+Task Scheduler → **Create Task** (not "Create Basic Task"):
+
+- **General**: name it `AURUM bridge`. Select *Run whether user is logged on or
+  not*. Tick *Run with highest privileges* if the task won't start otherwise.
+- **Triggers** → New: *Daily*, *Repeat task every 15 minutes* for *1 day*, and
+  set *Indefinitely* where the duration dropdown offers it.
+- **Actions** → New: *Start a program*
+  - Program: `python.exe` (or the full path from `where python`)
+  - Arguments: `C:\aurum\gold_trader\bridge\mt5_export.py --repo C:\aurum --push`
+  - Start in: `C:\aurum`
+- **Conditions**: untick *Start the task only if the computer is on AC power* if
+  it's a laptop. Untick *Stop if the computer switches to battery power*.
+- **Settings**: tick *Run task as soon as possible after a scheduled start is
+  missed*.
+
+Identical candles produce no commit, so a 15-minute cadence does not fill the
+branch with noise.
+
+### 1.8 Tell me two numbers
+
+Reply with:
+
+- **Paper account notional** — what to size the paper book against. It scales the
+  dollar figures only; performance is measured in R, which doesn't care. $10,000
+  is as valid as $100,000.
+- **Risk per trade** — default is 0.5%.
+
+And, when you have them, the CPI / PCE / PPI release dates for the next few weeks
+(BLS and BEA publish them). Those go in `state/calendar.json` and make the event
+blackouts accurate instead of `derived_only`.
+
+---
+
+## Part 2 — Already running, nothing to install
+
+| Component | Where | Schedule |
+|---|---|---|
+| Signal pipeline | Anthropic cloud, fresh container per run | 2-hourly, weekdays 07:23–21:23 UTC |
+| Progress + component audit | Same | 06:41 and 18:41 UTC daily |
+| Dashboard | Published artifact, republished by both runs | — |
+| Alerts | Push to your phone + email | Only when there's something to act on |
+
+Python, the `anthropic` SDK and the repository are installed fresh in each cloud
+container. You never touch them.
+
+---
+
+## Part 3 — Confirming it worked
+
+Once the bridge has pushed once, the next scheduled run picks it up. To check
+immediately rather than waiting, ask me in a session and I'll run it, or watch
+for these:
+
+**Within 15 minutes of 1.6** — the `market-data` branch exists on GitHub with
+three CSVs in `data/`.
+
+**Within one scheduled cycle** — the dashboard's "Candle feed" panel changes from
+a dashed *No candles yet* block to a table of bar counts and ages, and the amber
+`bridge` warning disappears from the problems list.
+
+**Within a day** — the roadmap's `DAT-04` row flips from blocked to done on its
+own, because its check is `journal:1` and the audit verifies rather than trusts.
+Phase 1's gate verifies and the plan advances to Phase 2.
+
+**Then nothing much, for three to five weeks.** Phase 2 is deliberately
+uneventful: signals accumulate, the learning loop stays inert below 20 closed
+trades, and most runs will correctly produce no trade at all. A quiet system at
+this stage is a working system.
+
+---
+
+## Part 4 — When something breaks
+
+The design rule is that nothing fails silently, so the failure usually finds you.
+
+| What you'll see | What it means | What to do |
+|---|---|---|
+| Dashboard ribbon red, "data stale" | No fresh candles for 26h+ | Check the PC is on, MT5 is logged in, the task ran |
+| Amber `bridge` warning | Bridge hasn't pushed yet, or is behind | Run 1.5 by hand and read the output |
+| Push alert about a failing check | A component regressed | It's already being fixed by the audit run; read its report |
+| Push alert about a stale claim | The roadmap claims something untrue | Same — the audit fixes or corrects it |
+| No alerts at all for >24h | Either quiet markets or the Routines stopped | Ask me to run `progress` and `pull-data` |
+
+Diagnostics you can run yourself from a session with me:
+
+```bash
+python -m gold_trader doctor      # what data is reachable
+python -m gold_trader pull-data   # is the bridge delivering? exits non-zero if stale
+python -m gold_trader selfcheck   # 20 component checks
+python -m gold_trader progress    # roadmap audit, verified not asserted
+python -m gold_trader status      # open paper positions and budgets
+python -m gold_trader learn       # the measured track record
+```
+
+---
+
+## Part 5 — Stopping
+
+- **Pause the bridge:** disable the Task Scheduler entry. Runs will go quiet on
+  stale data rather than signalling on old prices.
+- **Pause the signals:** ask me to disable the Routines. They stay stored.
+- **Stop entirely:** ask me to delete the Routines. The journal and audit log
+  stay in the repository as a permanent record.
+
+Nothing here has any connection to your money. The account balance is never read,
+no order function exists in the codebase, and every result is a simulation
+resolved against candles.

@@ -399,6 +399,7 @@ def run_signal(
                 macro=calendar.to_dict(now),
                 audit_run_id=log.run_id,
                 data_source=snapshot.source,
+                mode=config.limits.mode,
             )
             log.record("journal", "signal_recorded", {"signal_id": result.record.id})
     else:

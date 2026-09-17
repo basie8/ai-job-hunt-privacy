@@ -1,0 +1,201 @@
+"""The dashboard's one contract: nothing fails silently.
+
+'No trades yet' and 'the journal is corrupt' both render as an absence of
+numbers. They must never render as the *same* absence, and a broken input must
+never take the page dark.
+"""
+
+import json
+import os
+import tempfile
+import unittest
+
+from gold_trader.dashboard import ERROR, EMPTY, OK, Section, _collect, build
+from gold_trader.dashboard_html import render
+
+REPO = os.path.join(os.path.dirname(__file__), "..")
+
+#: Building the payload runs the roadmap's `tests:` predicates, which spawn real
+#: suite runs. Build it once for the whole module rather than per test.
+_PAYLOAD = None
+
+
+def dashboard_payload():
+    global _PAYLOAD
+    if _PAYLOAD is None:
+        _PAYLOAD = build(REPO)
+    return json.loads(json.dumps(_PAYLOAD))
+
+
+class Collection(unittest.TestCase):
+    def test_a_raising_collector_becomes_a_visible_error(self):
+        def explode():
+            raise RuntimeError("disk on fire")
+
+        section = _collect("some/path", explode)
+        self.assertEqual(section.status, ERROR)
+        self.assertIn("disk on fire", section.reason)
+        self.assertIn("traceback", section.data)
+
+    def test_a_collector_that_works_keeps_its_source(self):
+        section = _collect("fallback", lambda: Section(OK, data={"x": 1}))
+        self.assertEqual(section.source, "fallback")
+
+    def test_one_broken_collector_does_not_take_down_the_export(self):
+        # The whole point: a dark dashboard is worse than a flagged panel.
+        payload = dashboard_payload()
+        self.assertIn("sections", payload)
+        self.assertGreaterEqual(len(payload["sections"]), 8)
+
+
+class EmptyIsNotError(unittest.TestCase):
+    def test_a_missing_journal_reports_empty_with_a_reason(self):
+        payload = dashboard_payload()
+        trading = payload["sections"]["trading"]
+        self.assertIn(trading["status"], (EMPTY, OK))
+        if trading["status"] == EMPTY:
+            self.assertTrue(trading["reason"], "an empty section must say why")
+
+    def test_the_two_states_render_differently(self):
+        base = dashboard_payload()
+        empty = json.loads(json.dumps(base))
+        empty["sections"]["trading"] = {
+            "status": EMPTY, "data": None, "reason": "no trades yet", "source": "j.jsonl",
+        }
+        broken = json.loads(json.dumps(base))
+        broken["sections"]["trading"] = {
+            "status": ERROR, "data": {"traceback": "x"}, "reason": "JSONDecodeError",
+            "source": "j.jsonl",
+        }
+        self.assertIn("state-empty", render(empty))
+        self.assertIn("state-error", render(broken))
+        # And the error styling must not appear merely because something is empty.
+        empty_html = render(empty)
+        self.assertNotIn("Failed to read</span>no trades yet", empty_html)
+
+
+class ProblemAggregation(unittest.TestCase):
+    def test_every_section_error_becomes_a_listed_problem(self):
+        payload = dashboard_payload()
+        errored = [n for n, s in payload["sections"].items() if s["status"] == ERROR]
+        for name in errored:
+            self.assertTrue(
+                any(p["source"] == name for p in payload["problems"]),
+                f"section {name} errored but raised no problem",
+            )
+
+    def test_health_is_critical_when_anything_critical_exists(self):
+        payload = dashboard_payload()
+        has_critical = any(p["severity"] == "critical" for p in payload["problems"])
+        self.assertEqual(payload["health"] == "critical", has_critical)
+
+    def test_the_missing_bridge_is_reported_not_hidden(self):
+        payload = dashboard_payload()
+        health = payload["sections"]["data_health"]
+        if health["status"] == EMPTY:
+            self.assertTrue(
+                any(p["source"] == "bridge" for p in payload["problems"]),
+                "a silent bridge must appear in problems",
+            )
+
+    def test_generated_at_is_always_present(self):
+        self.assertIn("generated_at", dashboard_payload())
+
+
+class Rendering(unittest.TestCase):
+    def test_the_page_renders_from_the_real_repo(self):
+        html = render(dashboard_payload())
+        self.assertIn("<title>AURUM Control</title>", html)
+        self.assertIn("dashboard-data", html)
+        self.assertGreater(len(html), 10_000)
+
+    def test_every_problem_appears_in_the_page(self):
+        payload = dashboard_payload()
+        html = render(payload)
+        for problem in payload["problems"]:
+            self.assertIn(problem["source"], html)
+
+    def test_the_page_carries_its_own_staleness_check(self):
+        html = render(dashboard_payload())
+        self.assertIn("data stale", html)
+        self.assertIn("STALE_MIN", html)
+
+    def test_a_json_parse_failure_in_the_page_is_handled(self):
+        # The embedded script must not leave a blank page if its own data is bad.
+        html = render(dashboard_payload())
+        self.assertIn("dashboard data unreadable", html)
+
+    def test_both_themes_define_every_token(self):
+        html = render(dashboard_payload())
+        for token in ("--ground", "--ink", "--crit", "--good", "--accent"):
+            self.assertGreaterEqual(
+                html.count(token + ":"), 3, f"{token} missing from a theme block"
+            )
+
+    def test_visible_html_is_escaped(self):
+        payload = dashboard_payload()
+        payload["problems"].append(
+            {"severity": "warning", "source": "test", "message": "<b>bold</b>"}
+        )
+        html = render(payload)
+        self.assertIn("&lt;b&gt;bold&lt;/b&gt;", html)
+
+    def test_the_embedded_json_cannot_break_out_of_its_script_tag(self):
+        # A "</script>" in any file path, task title or exception message would
+        # otherwise close the tag early and take the whole page down.
+        payload = dashboard_payload()
+        payload["problems"].append(
+            {"severity": "warning", "source": "test", "message": "</script><script>alert(1)</script>"}
+        )
+        html = render(payload)
+        self.assertNotIn("</script><script>alert(1)", html)
+        self.assertIn("\\u003c/script", html)
+
+    def test_the_escaped_json_still_parses_back_to_the_same_data(self):
+        import re
+        payload = dashboard_payload()
+        payload["problems"].append(
+            {"severity": "warning", "source": "test", "message": "a <b> & c </script>"}
+        )
+        html = render(payload)
+        blob = re.search(
+            r'<script id="dashboard-data" type="application/json">(.*?)</script>', html, re.S
+        ).group(1)
+        restored = json.loads(blob)
+        self.assertEqual(restored["problems"][-1]["message"], "a <b> & c </script>")
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class PaperMode(unittest.TestCase):
+    """A simulated result must never be able to read as a real fill."""
+
+    def test_the_limits_default_to_paper(self):
+        from gold_trader.risk import TradingLimits
+        self.assertEqual(TradingLimits().mode, "paper")
+
+    def test_any_other_mode_is_a_configuration_error(self):
+        from gold_trader.config_checks import coherence_problems
+        from gold_trader.risk import TradingLimits
+        problems = coherence_problems(TradingLimits(mode="live"))
+        self.assertTrue(any("only 'paper' is supported" in p for p in problems))
+
+    def test_the_mode_reaches_the_analyst_prompt(self):
+        from gold_trader.risk import TradingLimits
+        self.assertIn("PAPER", TradingLimits().as_prompt_block())
+
+    def test_journalled_signals_are_stamped_paper(self):
+        from gold_trader.journal import Journal
+        record = Journal().new_signal(
+            direction="long", setup_type="bos_continuation", conviction=0.6,
+            entry=4300.0, stop=4290.0, target=4320.0,
+        )
+        self.assertEqual(record.mode, "paper")
+
+    def test_the_dashboard_shows_the_paper_badge(self):
+        html = render(dashboard_payload())
+        self.assertIn('class="paper"', html)
+        self.assertIn("PAPER", html)
+        self.assertIn("simulated against the candles", html)

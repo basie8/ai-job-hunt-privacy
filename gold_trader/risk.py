@@ -19,6 +19,13 @@ from .macro import BlackoutPolicy, MacroCalendar
 
 @dataclass(frozen=True)
 class TradingLimits:
+    #: "paper" is the only supported mode. Nothing in this repository can place
+    #: an order, so every result is a simulated outcome against later candles.
+    #: The field exists so the mode is stamped on every signal, alert and
+    #: dashboard rather than being an unstated assumption.
+    mode: str = "paper"
+    #: Notional the paper book is sized against. It scales the dollar figures
+    #: only -- performance is measured in R, which is invariant to it.
     account_usd: float = 100_000.0
     #: Risked on one trade, before any learned reduction.
     risk_per_trade_pct: float = 0.5
@@ -48,7 +55,9 @@ class TradingLimits:
 
     def as_prompt_block(self) -> str:
         return (
-            f"- Account: ${self.account_usd:,.0f}; base risk per trade "
+            f"- Mode: {self.mode.upper()} — outcomes are simulated against later candles, "
+            "no orders are placed\n"
+            f"- Paper account: ${self.account_usd:,.0f}; base risk per trade "
             f"{self.risk_per_trade_pct:.2f}% (${self.base_risk_usd:,.0f})\n"
             f"- Minimum reward:risk {self.min_reward_risk:.2f}\n"
             f"- Stop distance must be between {self.min_stop_atr_mult:.1f}x and "

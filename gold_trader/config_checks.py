@@ -29,6 +29,11 @@ def coherence_problems(limits: Optional[TradingLimits] = None) -> List[str]:
             f"min_stop_pct_of_spot ({limits.min_stop_pct_of_spot}) is not below "
             f"max_stop_pct_of_spot ({limits.max_stop_pct_of_spot})"
         )
+    if limits.mode != "paper":
+        problems.append(
+            f"mode is {limits.mode!r}; only 'paper' is supported — there is no execution "
+            "path in this repository and no mode that creates one"
+        )
     if limits.account_usd <= 0:
         problems.append("account_usd must be positive")
     if not 0 < limits.risk_per_trade_pct <= 100:

@@ -35,6 +35,10 @@ component self-check.
 **Scope:** get real XAUUSD candles flowing from your MT5 terminal into the
 pipeline. Nothing else in this phase.
 
+**Note:** the MT5 account balance is irrelevant. The bridge only reads market
+data, so a £0 balance or a demo account works exactly the same. The terminal
+just has to be running and logged in to the broker's server.
+
 **Yours:**
 1. `pip install MetaTrader5` on the Windows box
 2. Enable *Allow algorithmic trading* in MT5
@@ -43,7 +47,9 @@ pipeline. Nothing else in this phase.
 4. Add the Task Scheduler entry, every 15 minutes
 5. Copy `examples/calendar.example.json` → `state/calendar.json`, fill the CPI
    and PCE dates
-6. Tell me your real account size and risk-per-trade percent
+6. Tell me the **paper** account notional and risk-per-trade percent to size against
+   (it scales the dollar figures only — performance is measured in R, which does not
+   care what the notional is)
 
 **Mine:** nothing. This phase is entirely on your side, which is why it is the
 critical path.
@@ -71,7 +77,7 @@ data collection, and it should feel uneventful.
   gold rather than at an edge.
 
 **Yours:** the weekly review, every week, from the first one. Especially the
-loss post-mortems — thesis / execution / variance.
+loss post-mortems — thesis / level / variance.
 
 **Exit gate:** `journal:20`. Roughly 3–5 weeks at 4 signals/day maximum and the
 observed refusal rate.
@@ -135,7 +141,7 @@ Runs from Phase 2 onward, every week, regardless of phase.
 |---|---|---|
 | 1 | Automatic | `selfcheck` + `progress` in the 12-hourly audit |
 | 2 | You | Fill `docs/WEEKLY_REVIEW.md` and paste it in |
-| 3 | Me | Correct journal outcomes to your actual fills |
+| 3 | Me | Flag signals you would have skipped; look for the pattern behind them |
 | 4 | Me | Apply improvements: bugs, rule changes with evidence, doc drift |
 | 5 | Me | Append to `LEARNING_LOG.md` **only if something was learned** |
 | 6 | Me | Update `ROADMAP.md`; never weaken a verify predicate to make a row green |

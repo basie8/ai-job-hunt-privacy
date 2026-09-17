@@ -26,6 +26,8 @@ from .risk import TradingLimits, realised_r_today, signals_today
 from .sync import DATA_BRANCH, pull_data_branch, describe_data_dir
 from .progress import audit
 from .selfcheck import run_all
+from .dashboard import build as build_dashboard
+from .dashboard_html import render as render_dashboard
 
 
 def _config(args: argparse.Namespace) -> GoldConfig:
@@ -241,6 +243,26 @@ def cmd_selfcheck(args: argparse.Namespace) -> int:
     return 1 if report.failures else 0
 
 
+def cmd_dashboard(args: argparse.Namespace) -> int:
+    """Export everything the operations dashboard shows, errors included."""
+    payload = build_dashboard(args.repo)
+    if args.html:
+        page = render_dashboard(payload)
+        with open(args.html, "w", encoding="utf-8") as fh:
+            fh.write(page)
+        print(f"wrote {args.html} ({len(page):,} bytes, health={payload['health']})")
+        return 1 if payload["health"] == "critical" else 0
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2, default=str)
+        print(f"wrote {args.out}")
+    else:
+        json.dump(payload, sys.stdout, indent=2, default=str)
+        sys.stdout.write("\n")
+    # Non-zero when the system is unhealthy, so a caller cannot miss it.
+    return 1 if payload["health"] == "critical" else 0
+
+
 def _common(parser: argparse.ArgumentParser, data: bool = False) -> None:
     parser.add_argument("--state-dir", default=None, help="Directory for journal/audit/calendar.")
     parser.add_argument("--journal", default=None)
@@ -295,6 +317,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--verbose", action="store_true", help="Show passing checks too.")
     p.add_argument("--json-out", action="store_true")
     p.set_defaults(func=cmd_selfcheck)
+
+    p = sub.add_parser("dashboard", help="Export dashboard data as JSON.")
+    p.add_argument("--repo", default=".")
+    p.add_argument("--out", default=None, help="Write JSON to a file instead of stdout.")
+    p.add_argument("--html", default=None, help="Render the dashboard page to this path.")
+    p.set_defaults(func=cmd_dashboard)
 
     p = sub.add_parser("calendar", help="The event diary as currently loaded.")
     _common(p)
