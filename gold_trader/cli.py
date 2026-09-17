@@ -1,0 +1,227 @@
+"""XAUUSD pipeline CLI.
+
+    python -m gold_trader doctor                      # what data is actually available
+    python -m gold_trader signal   --csv-dir data/    # run all four stages
+    python -m gold_trader resolve  --csv-dir data/    # score open trades, no model calls
+    python -m gold_trader learn                       # the measured track record
+    python -m gold_trader status                      # open positions and budgets
+    python -m gold_trader calendar                    # the event diary as loaded
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from typing import List, Optional
+
+from .feed import KNOWN_VENDORS, CsvFeed, Feed, FeedUnavailable, InlineFeed
+from .journal import Journal, resolve_all
+from .learning import learn
+from .macro import MacroCalendar
+from .pipeline import GoldConfig, run_signal
+from .risk import TradingLimits, realised_r_today, signals_today
+
+
+def _config(args: argparse.Namespace) -> GoldConfig:
+    limits = TradingLimits(
+        account_usd=getattr(args, "account", None) or 100_000.0,
+        risk_per_trade_pct=getattr(args, "risk_pct", None) or 0.5,
+    )
+    config = GoldConfig(limits=limits)
+    if getattr(args, "journal", None):
+        config.journal_path = args.journal
+    if getattr(args, "state_dir", None):
+        config.journal_path = os.path.join(args.state_dir, "journal.jsonl")
+        config.audit_path = os.path.join(args.state_dir, "audit.jsonl")
+        config.calendar_path = os.path.join(args.state_dir, "calendar.json")
+    return config
+
+
+def _feed(args: argparse.Namespace) -> Feed:
+    if getattr(args, "csv_dir", None):
+        return CsvFeed(args.csv_dir)
+    if getattr(args, "json", None):
+        return InlineFeed.from_json(args.json)
+    raise SystemExit(
+        "No data source. Pass --csv-dir <dir> with XAUUSD_<tf>.csv exports, or --json <file>.\n"
+        "Run `python -m gold_trader doctor` to see what this environment can reach."
+    )
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    print("XAUUSD pipeline - data availability\n")
+    print("Live vendor feeds:")
+    for vendor, (host, key_var) in sorted(KNOWN_VENDORS.items()):
+        has_key = "key set" if os.environ.get(key_var) else f"{key_var} unset"
+        print(f"  {vendor:<14} host {host:<26} {has_key}")
+    print(
+        "\n  All of the above require the session's egress policy to allow the host.\n"
+        "  As shipped, this environment returns 403 on CONNECT for every one of them,\n"
+        "  so HttpFeed refuses rather than returning stale or invented prices.\n"
+    )
+    print("Offline sources that work now:")
+    for directory in ("data", "gold_trader/examples"):
+        if os.path.isdir(directory):
+            files = sorted(f for f in os.listdir(directory) if f.endswith(".csv") or f.endswith(".json"))
+            print(f"  {directory}/: {', '.join(files) if files else '(empty)'}")
+        else:
+            print(f"  {directory}/: not present")
+    config = _config(args)
+    print(f"\nState:")
+    for label, path in (
+        ("journal", config.journal_path),
+        ("audit", config.audit_path),
+        ("calendar", config.calendar_path),
+    ):
+        exists = "present" if os.path.exists(path) else "absent"
+        print(f"  {label:<9} {path} ({exists})")
+    cal = MacroCalendar.build(datetime.now(timezone.utc), config.calendar_path)
+    print(f"  calendar confidence: {cal.confidence}")
+    return 0
+
+
+def cmd_signal(args: argparse.Namespace) -> int:
+    from investment_pipeline.llm import AnthropicStageClient
+
+    config = _config(args)
+    try:
+        result = run_signal(_feed(args), AnthropicStageClient(), config=config)
+    except FeedUnavailable as exc:
+        print(f"Feed unavailable: {exc}", file=sys.stderr)
+        return 2
+
+    if args.json_out:
+        json.dump(result.to_dict(), sys.stdout, indent=2, default=str)
+        sys.stdout.write("\n")
+        return 0
+
+    alert = result.alert
+    if alert:
+        print(alert.headline)
+        print("=" * min(len(alert.headline), 90))
+        print(alert.action_line)
+        print()
+        print(alert.body)
+        print()
+        print(alert.risk_line)
+        if alert.watch_items:
+            print("\nWatch:")
+            for item in alert.watch_items:
+                print(f"  - {item}")
+        if alert.learning_note:
+            print(f"\nLearning: {alert.learning_note}")
+    if result.decision and result.decision.breaches:
+        print("\nRisk engine:")
+        for b in result.decision.breaches:
+            print(f"  [{b.severity}] {b.code}: {b.detail}")
+    print(f"\nrun {result.run_id} | model spend ${result.audit.total_cost_usd():.4f}")
+    return 0
+
+
+def cmd_resolve(args: argparse.Namespace) -> int:
+    config = _config(args)
+    journal = Journal(config.journal_path)
+    feed = _feed(args)
+    snapshot = feed.snapshot(config.timeframes)
+    series = snapshot.series.get(config.resolution_timeframe)
+    if series is None:
+        print(f"No {config.resolution_timeframe} series to resolve against.", file=sys.stderr)
+        return 2
+    resolved = resolve_all(journal, series)
+    if not resolved:
+        print(f"Nothing to resolve. {len(journal.open_signals())} still open.")
+        return 0
+    for r in resolved:
+        print(f"{r.id} {r.setup_type:<22} {r.status:<10} {r.r_multiple:+.2f}R  ({r.resolution})")
+    print(f"\n{len(resolved)} resolved. Journal: {json.dumps(journal.summary())}")
+    return 0
+
+
+def cmd_learn(args: argparse.Namespace) -> int:
+    config = _config(args)
+    journal = Journal(config.journal_path)
+    state = learn(journal, min_samples=config.min_samples)
+    if args.json_out:
+        json.dump(state.to_dict(), sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 0
+    print(state.lessons_block())
+    print("\nClamps now in force:")
+    print(f"  conviction multiplier: {state.conviction_multiplier():.2f}")
+    for setup in sorted(state.setups):
+        print(f"  size multiplier [{setup}]: {state.size_multiplier(setup):.2f}")
+    if state.blocked_setups():
+        print(f"  blocked: {', '.join(state.blocked_setups())}")
+    return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    config = _config(args)
+    journal = Journal(config.journal_path)
+    now = datetime.now(timezone.utc)
+    print(json.dumps(journal.summary(), indent=2))
+    print(f"\nRealised today: {realised_r_today(journal, now):+.2f}R "
+          f"(daily stop -{config.limits.max_daily_loss_r:.1f}R)")
+    print(f"Signals today: {signals_today(journal, now)} / {config.limits.max_signals_per_day}")
+    for record in journal.open_signals():
+        print(f"  OPEN {record.id} {record.direction} {record.entry} "
+              f"stop {record.stop} target {record.target} ({record.setup_type})")
+    return 0
+
+
+def cmd_calendar(args: argparse.Namespace) -> int:
+    config = _config(args)
+    now = datetime.now(timezone.utc)
+    print(MacroCalendar.build(now, config.calendar_path).as_prompt_block(now))
+    return 0
+
+
+def _common(parser: argparse.ArgumentParser, data: bool = False) -> None:
+    parser.add_argument("--state-dir", default=None, help="Directory for journal/audit/calendar.")
+    parser.add_argument("--journal", default=None)
+    parser.add_argument("--account", type=float, default=None)
+    parser.add_argument("--risk-pct", type=float, default=None)
+    if data:
+        parser.add_argument("--csv-dir", default=None, help="Directory of XAUUSD_<tf>.csv exports.")
+        parser.add_argument("--json", dest="json", default=None, help="Inline candle JSON file.")
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(prog="gold_trader", description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("doctor", help="Report what data this environment can actually reach.")
+    _common(p)
+    p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("signal", help="Run all four stages and emit an alert.")
+    _common(p, data=True)
+    p.add_argument("--json-out", action="store_true")
+    p.set_defaults(func=cmd_signal)
+
+    p = sub.add_parser("resolve", help="Score open trades against new candles (no model calls).")
+    _common(p, data=True)
+    p.set_defaults(func=cmd_resolve)
+
+    p = sub.add_parser("learn", help="Show the measured track record and active clamps.")
+    _common(p)
+    p.add_argument("--json-out", action="store_true")
+    p.set_defaults(func=cmd_learn)
+
+    p = sub.add_parser("status", help="Open positions and session budgets.")
+    _common(p)
+    p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("calendar", help="The event diary as currently loaded.")
+    _common(p)
+    p.set_defaults(func=cmd_calendar)
+
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
