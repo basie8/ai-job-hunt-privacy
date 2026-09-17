@@ -24,11 +24,20 @@ class TradingLimits:
     #: The field exists so the mode is stamped on every signal, alert and
     #: dashboard rather than being an unstated assumption.
     mode: str = "paper"
-    #: Notional the paper book is sized against. It scales the dollar figures
-    #: only -- performance is measured in R, which is invariant to it.
-    account_usd: float = 100_000.0
+    #: Notional the paper book is sized against, in ``account_currency``. It
+    #: scales the dollar figures only -- performance is measured in R, which is
+    #: invariant to it.
+    account_value: float = 10_000.0
+    account_currency: str = "GBP"
+    #: Gold is quoted in USD, so a non-USD notional needs a rate to size in
+    #: ounces. Sizing mixes currencies without it, which is the kind of error
+    #: that looks fine until the numbers matter.
+    fx_to_usd: float = 1.3377
+    #: Where and when the rate came from. Refreshed in the weekly review; the
+    #: rate only scales displayed cash, so drift does not affect R.
+    fx_as_of: str = "2026-09-17, GBPUSD mid ~1.3377 (day range 1.3350-1.3407)"
     #: Risked on one trade, before any learned reduction.
-    risk_per_trade_pct: float = 0.5
+    risk_per_trade_pct: float = 2.5
     #: Stop trading for the day once cumulative realised loss hits this many R.
     max_daily_loss_r: float = 2.0
     max_open_positions: int = 2
@@ -56,6 +65,16 @@ class TradingLimits:
     blackout: BlackoutPolicy = field(default_factory=BlackoutPolicy)
 
     @property
+    def account_usd(self) -> float:
+        """The notional in USD, which is what gold is sized against."""
+        return self.account_value * self.fx_to_usd
+
+    @property
+    def base_risk(self) -> float:
+        """Risk per trade in the account's own currency."""
+        return self.account_value * self.risk_per_trade_pct / 100.0
+
+    @property
     def base_risk_usd(self) -> float:
         return self.account_usd * self.risk_per_trade_pct / 100.0
 
@@ -63,8 +82,10 @@ class TradingLimits:
         return (
             f"- Mode: {self.mode.upper()} — outcomes are simulated against later candles, "
             "no orders are placed\n"
-            f"- Paper account: ${self.account_usd:,.0f}; base risk per trade "
-            f"{self.risk_per_trade_pct:.2f}% (${self.base_risk_usd:,.0f})\n"
+            f"- Paper account: {self.account_currency} {self.account_value:,.0f} "
+            f"(${self.account_usd:,.0f} at {self.fx_to_usd:.4f}); base risk per trade "
+            f"{self.risk_per_trade_pct:.2f}% = {self.account_currency} {self.base_risk:,.0f} "
+            f"(${self.base_risk_usd:,.0f})\n"
             f"- Minimum reward:risk {self.min_reward_risk:.2f}\n"
             f"- Stop distance must be between {self.min_stop_atr_mult:.1f}x and "
             f"{self.max_stop_atr_mult:.1f}x ATR, or between "

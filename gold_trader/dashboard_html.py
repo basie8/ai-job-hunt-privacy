@@ -506,9 +506,11 @@ def render(payload: Dict[str, Any]) -> str:
             <tbody>{stage_rows}</tbody></table></div>
           <div class="legend" style="margin-top:14px">
             <div>Mode <strong class="mono">{_esc(c.get('mode', 'paper')).upper()}</strong></div>
-            <div>Paper account <strong class="mono">${c['account_usd']:,.0f}</strong></div>
+            <div>Paper account <strong class="mono">{_esc(c.get('account_currency', 'USD'))}
+              {c.get('account_value', c['account_usd']):,.0f}</strong>
+              <span style="color:var(--ink-3)">(${c['account_usd']:,.0f})</span></div>
             <div>Risk/trade <strong class="mono">{c['risk_per_trade_pct']:.2f}%</strong>
-              (${c['base_risk_usd']:,.0f})</div>
+              <span style="color:var(--ink-3)">(${c['base_risk_usd']:,.0f})</span></div>
             <div>Min R:R <strong class="mono">{c['min_reward_risk']:.1f}</strong></div>
             <div>Daily stop <strong class="mono">&minus;{c['max_daily_loss_r']:.1f}R</strong></div>
           </div>"""

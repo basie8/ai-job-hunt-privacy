@@ -62,18 +62,24 @@ For each loser, pick ONE. Be blunt.
 - VIX / risk tone: risk-on or risk-off
 - Anything geopolitical actually moving gold
 
-### 4. Broker reality (for cost-adjusting the paper results)
+### 4. GBPUSD rate (only if it has moved much)
+- Current GBPUSD: ___
+The paper notional is GBP 10,000 and gold is priced in USD, so a rate converts
+one to the other. It scales the displayed cash only — R is unaffected — so this
+needs refreshing when it has moved a percent or two, not every week.
+
+### 5. Broker reality (for cost-adjusting the paper results)
 - Typical XAUUSD spread this week: ___
 - Typical spread around news: ___
 - Commission per lot, if any: ___
 (Only needs restating when it changes. Paper R ignores all of it, so this is how
 we find out what the edge would survive.)
 
-### 5. Calendar
+### 6. Calendar
 - Confirmed CPI/PCE/PPI dates for the next 3 weeks
 - Anything unscheduled that moved gold
 
-### 6. Your call
+### 7. Your call
 - Setups that felt right but the engine refused — which, and why you disagreed
 - Setups the engine allowed that you'd have skipped
 - Anything about AURUM's reasoning that read as wrong or lazy
@@ -88,6 +94,7 @@ we find out what the edge would survive.)
 | Would you have taken it | A signal you'd have skipped is flagged; a pattern of skips is a rule the system is missing |
 | Loss post-mortems | `thesis` losses drive prompt/rule changes; `variance` changes nothing, deliberately |
 | Macro readings | Written into `state/calendar.json` as readings the analyst sees |
+| GBPUSD rate | `fx_to_usd` and its provenance updated in `risk.py` |
 | Broker reality | Cost-adjusted expectancy reported alongside raw paper R |
 | Calendar | Blackout windows become accurate instead of `derived_only` |
 | Your call | Disagreements are logged; three of the same disagreement is a rule change |

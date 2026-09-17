@@ -34,8 +34,20 @@ def coherence_problems(limits: Optional[TradingLimits] = None) -> List[str]:
             f"mode is {limits.mode!r}; only 'paper' is supported — there is no execution "
             "path in this repository and no mode that creates one"
         )
-    if limits.account_usd <= 0:
-        problems.append("account_usd must be positive")
+    if limits.account_value <= 0:
+        problems.append("account_value must be positive")
+    if limits.fx_to_usd <= 0:
+        problems.append("fx_to_usd must be positive")
+    if limits.account_currency != "USD":
+        if limits.fx_to_usd == 1.0:
+            problems.append(
+                f"account_currency is {limits.account_currency!r} but fx_to_usd is 1.0; "
+                "gold is priced in USD, so sizing would mix currencies"
+            )
+        if not limits.fx_as_of:
+            problems.append(
+                "a non-USD notional needs fx_as_of recording where the rate came from"
+            )
     if not 0 < limits.risk_per_trade_pct <= 100:
         problems.append(f"risk_per_trade_pct ({limits.risk_per_trade_pct}) is outside (0, 100]")
     if limits.max_daily_loss_r <= 0:
@@ -58,6 +70,14 @@ def coherence_problems(limits: Optional[TradingLimits] = None) -> List[str]:
         problems.append(
             f"max_daily_loss_r ({limits.max_daily_loss_r}R) cannot be reached: at most "
             f"{limits.max_signals_per_day} signals a day means at most {max_losable_r}R of loss"
+        )
+
+    # The daily stop must survive more than one loss, or a single stopped trade
+    # ends the session and the position cap never comes into play.
+    if limits.max_daily_loss_r < 2.0:
+        problems.append(
+            f"max_daily_loss_r ({limits.max_daily_loss_r}R) halts the day on fewer than "
+            "two full losses"
         )
 
     problems.extend(_blackout_problems(limits.blackout))

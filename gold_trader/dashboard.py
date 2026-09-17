@@ -338,7 +338,12 @@ def collect_config(repo: str) -> Section:
         data={
             "coherence_problems": coherence_problems(limits),
             "mode": limits.mode,
+            "account_value": limits.account_value,
+            "account_currency": limits.account_currency,
+            "fx_to_usd": limits.fx_to_usd,
+            "fx_as_of": limits.fx_as_of,
             "account_usd": limits.account_usd,
+            "base_risk": limits.base_risk,
             "risk_per_trade_pct": limits.risk_per_trade_pct,
             "base_risk_usd": limits.base_risk_usd,
             "min_reward_risk": limits.min_reward_risk,

@@ -57,7 +57,7 @@ def make_client(read=None, rm=None, execution=None):
 
 def run(client, *, feed=None, config=None, journal=None, now=NOW):
     snapshot = snapshot_from(ramp(2360.0, 120, 0.4), timeframes=("h1", "m15"), end=now)
-    config = config or GoldConfig(limits=TradingLimits())
+    config = config or GoldConfig(limits=TradingLimits(account_currency="USD", account_value=100_000, fx_to_usd=1.0, risk_per_trade_pct=0.5))
     log = AuditLog()
     return (
         run_signal(

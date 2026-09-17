@@ -50,7 +50,8 @@ class StopWidthWithoutAtr(unittest.TestCase):
         self.assertIn("STOP_TOO_WIDE", codes(decision))
 
     def test_a_sane_stop_still_passes_without_atr(self):
-        decision = assess(stop=4295.0, target=4335.0)  # $10 = 0.23% of spot
+        # $10 stop = 0.23% of spot, inside the fallback band.
+        decision = assess(stop=4295.0, target=4335.0, limits=TradingLimits(account_currency="USD", account_value=100_000, fx_to_usd=1.0, risk_per_trade_pct=0.5))
         self.assertTrue(decision.approved)
         self.assertAlmostEqual(decision.size_units, 50.0)
 
@@ -217,3 +218,65 @@ class ConfigCoherence(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AccountCurrency(unittest.TestCase):
+    """Gold is priced in USD. A non-USD notional must convert, never mix."""
+
+    def test_the_configured_account_converts_to_usd(self):
+        limits = TradingLimits()
+        self.assertEqual(limits.account_currency, "GBP")
+        self.assertAlmostEqual(limits.account_usd, limits.account_value * limits.fx_to_usd)
+
+    def test_risk_is_available_in_both_currencies(self):
+        limits = TradingLimits(account_value=10_000, fx_to_usd=1.3377, risk_per_trade_pct=2.5)
+        self.assertAlmostEqual(limits.base_risk, 250.0)
+        self.assertAlmostEqual(limits.base_risk_usd, 250.0 * 1.3377, places=4)
+
+    def test_a_non_usd_account_without_a_rate_is_a_configuration_error(self):
+        from gold_trader.config_checks import coherence_problems
+        problems = coherence_problems(TradingLimits(account_currency="GBP", fx_to_usd=1.0))
+        self.assertTrue(any("mix currencies" in p for p in problems))
+
+    def test_a_rate_without_provenance_is_flagged(self):
+        from gold_trader.config_checks import coherence_problems
+        problems = coherence_problems(TradingLimits(account_currency="GBP", fx_as_of=""))
+        self.assertTrue(any("fx_as_of" in p for p in problems))
+
+    def test_a_usd_account_needs_no_rate(self):
+        from gold_trader.config_checks import coherence_problems
+        problems = coherence_problems(
+            TradingLimits(account_currency="USD", fx_to_usd=1.0, fx_as_of="")
+        )
+        self.assertEqual([p for p in problems if "currenc" in p or "fx_as_of" in p], [])
+
+    def test_a_negative_rate_is_rejected(self):
+        from gold_trader.config_checks import coherence_problems
+        self.assertTrue(coherence_problems(TradingLimits(fx_to_usd=-1.0)))
+
+    def test_the_prompt_states_both_currencies(self):
+        block = TradingLimits().as_prompt_block()
+        self.assertIn("GBP 10,000", block)
+        self.assertIn("$13,377", block)
+
+    def test_sizing_uses_the_converted_risk(self):
+        # GBP 250 at 1.3377 = $334.43; a $20 stop gives 16.7 oz.
+        decision = assess(atr=20.0, entry=4362.0, stop=4342.0, target=4402.0,
+                          limits=TradingLimits())
+        self.assertTrue(decision.approved)
+        self.assertAlmostEqual(decision.risk_usd, 334.425, places=2)
+        self.assertAlmostEqual(decision.size_units, 334.425 / 20.0, places=3)
+
+
+class DailyStopSanity(unittest.TestCase):
+    def test_a_daily_stop_under_two_r_is_flagged(self):
+        # At 2.5% per trade a 1R daily stop ends the session on one loss.
+        from gold_trader.config_checks import coherence_problems
+        problems = coherence_problems(TradingLimits(max_daily_loss_r=1.0))
+        self.assertTrue(any("fewer than" in p for p in problems))
+
+    def test_the_configured_daily_stop_survives_two_losses(self):
+        from gold_trader.config_checks import coherence_problems
+        self.assertEqual(
+            [p for p in coherence_problems(TradingLimits()) if "fewer than" in p], []
+        )

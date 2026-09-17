@@ -29,7 +29,8 @@ def codes(decision):
 
 class HappyPath(unittest.TestCase):
     def test_a_clean_trade_is_approved_and_sized_from_the_stop(self):
-        decision = assess()
+        # Pinned limits: sizing arithmetic must not move when defaults change.
+        decision = assess(limits=TradingLimits(account_currency="USD", account_value=100_000, fx_to_usd=1.0, risk_per_trade_pct=0.5))
         self.assertTrue(decision.approved)
         # $100k account, 0.5% risk = $500, over a $10 stop = 50 oz.
         self.assertAlmostEqual(decision.risk_usd, 500.0)
