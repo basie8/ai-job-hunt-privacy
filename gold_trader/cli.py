@@ -23,6 +23,7 @@ from .learning import learn
 from .macro import MacroCalendar
 from .pipeline import GoldConfig, run_signal
 from .risk import TradingLimits, realised_r_today, signals_today
+from .sync import DATA_BRANCH, pull_data_branch, describe_data_dir
 
 
 def _config(args: argparse.Namespace) -> GoldConfig:
@@ -179,6 +180,35 @@ def cmd_calendar(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pull_data(args: argparse.Namespace) -> int:
+    """Fetch the candles the local MT5 bridge pushed to the data branch."""
+    try:
+        changed = pull_data_branch(args.repo, args.branch, args.data_dir)
+    except RuntimeError as exc:
+        print(f"Could not pull {args.branch}: {exc}", file=sys.stderr)
+        return 2
+    print(f"{'Updated' if changed else 'Already current'} from origin/{args.branch}")
+    rows = describe_data_dir(args.data_dir)
+    if not rows:
+        print(f"No XAUUSD_*.csv under {args.data_dir}. Is the bridge running?", file=sys.stderr)
+        return 2
+    for row in rows:
+        flag = "  STALE" if row["age_min"] > args.max_age_min else ""
+        print(
+            f"  {row['timeframe']:<4} {row['bars']:>4} bars, last {row['last_ts']} "
+            f"({row['age_min']:.0f}min old, close {row['last_close']}){flag}"
+        )
+    freshest = min(r["age_min"] for r in rows)
+    if freshest > args.max_age_min:
+        print(
+            f"\nEvery series is older than {args.max_age_min}min. The pipeline will refuse "
+            "to signal on this. Check the bridge on your machine.",
+            file=sys.stderr,
+        )
+        return 3
+    return 0
+
+
 def _common(parser: argparse.ArgumentParser, data: bool = False) -> None:
     parser.add_argument("--state-dir", default=None, help="Directory for journal/audit/calendar.")
     parser.add_argument("--journal", default=None)
@@ -214,6 +244,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     p = sub.add_parser("status", help="Open positions and session budgets.")
     _common(p)
     p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("pull-data", help="Fetch candles the local bridge pushed.")
+    p.add_argument("--repo", default=".")
+    p.add_argument("--branch", default=DATA_BRANCH)
+    p.add_argument("--data-dir", default="data")
+    p.add_argument("--max-age-min", type=int, default=90)
+    p.set_defaults(func=cmd_pull_data)
 
     p = sub.add_parser("calendar", help="The event diary as currently loaded.")
     _common(p)
