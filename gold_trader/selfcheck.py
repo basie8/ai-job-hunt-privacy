@@ -540,7 +540,17 @@ def check_credentials_path(report: Report) -> None:
             "the remedy does not warn against the reserved variable name")
         assert aurum < CREDENTIALS_REMEDY.index("console.anthropic.com"), (
             "the working variable name is not named before the console link")
-        return f"{len(CREDENTIALS_REMEDY.splitlines())} lines, names the unreserved variable"
+        # And the rejected-key case must not be confused with the missing-key
+        # case: the remedies do not overlap, and reporting the wrong one sends
+        # you looking for a variable that is already set.
+        from .cli import REJECTED_REMEDY
+
+        assert REJECTED_REMEDY != CREDENTIALS_REMEDY, "one message serves both states"
+        assert "not a missing-variable problem" in REJECTED_REMEDY, (
+            "the rejection message does not say the key is present")
+        assert "revoked or rotated" in REJECTED_REMEDY, (
+            "the rejection message does not name rotation, the usual cause")
+        return f"{len(CREDENTIALS_REMEDY.splitlines())} lines; absent and refused told apart"
     run(_remedy)
 
 

@@ -152,3 +152,91 @@ def _sdk_or_skip():
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KeyPresentButRefused(unittest.TestCase):
+    """A rejected key and a missing key are different problems with
+    non-overlapping remedies. On 2026-09-17 a rotation left a dead key in the
+    environment and the run reported "no Anthropic credentials" -- sending the
+    owner to look for a variable that was already set."""
+
+    def test_the_two_remedies_do_not_say_the_same_thing(self):
+        from gold_trader.cli import CREDENTIALS_REMEDY, REJECTED_REMEDY
+
+        self.assertNotEqual(CREDENTIALS_REMEDY, REJECTED_REMEDY)
+        self.assertIn("401", REJECTED_REMEDY)
+        self.assertIn("No Anthropic API credentials", CREDENTIALS_REMEDY)
+
+    def test_the_rejection_message_says_the_key_is_present(self):
+        # The single most important line: stop looking for a missing variable.
+        from gold_trader.cli import REJECTED_REMEDY
+
+        self.assertIn("not a missing-variable problem", REJECTED_REMEDY)
+
+    def test_it_names_rotation_first_among_the_causes(self):
+        # A container keeps the variables it started with, so a rotation leaves
+        # dead keys in every session that was already running.
+        from gold_trader.cli import REJECTED_REMEDY
+
+        self.assertIn("revoked or rotated", REJECTED_REMEDY)
+        self.assertLess(REJECTED_REMEDY.index("revoked or rotated"),
+                        REJECTED_REMEDY.index("character missing"))
+
+    def test_it_says_what_is_working(self):
+        # Otherwise a 401 reads as "everything is broken" at a glance.
+        from gold_trader.cli import REJECTED_REMEDY
+
+        self.assertIn("the key was found, the client was built", REJECTED_REMEDY)
+
+    def test_an_auth_stage_error_exits_five_not_three(self):
+        # Distinct exit codes so the Routine can tell them apart without
+        # parsing prose: 3 = no key, 5 = key refused.
+        import argparse
+        from unittest import mock
+
+        from gold_trader import cli
+        from investment_pipeline.llm import StageError
+
+        args = argparse.Namespace(csv_dir="data/", json=None, json_out=False,
+                                  state_dir=None, journal=None, account=None,
+                                  risk_pct=None)
+        with mock.patch.object(cli, "run_signal",
+                               side_effect=StageError("analyst: authentication failed: 401")), \
+             mock.patch.object(cli, "_has_credentials", return_value=True):
+            self.assertEqual(cli.cmd_signal(args), 5)
+
+    def test_a_non_auth_stage_error_exits_six(self):
+        import argparse
+        from unittest import mock
+
+        from gold_trader import cli
+        from investment_pipeline.llm import StageError
+
+        args = argparse.Namespace(csv_dir="data/", json=None, json_out=False,
+                                  state_dir=None, journal=None, account=None,
+                                  risk_pct=None)
+        with mock.patch.object(cli, "run_signal",
+                               side_effect=StageError("executor: schema mismatch")), \
+             mock.patch.object(cli, "_has_credentials", return_value=True):
+            self.assertEqual(cli.cmd_signal(args), 6)
+
+    def test_a_stage_error_never_surfaces_as_a_traceback(self):
+        import argparse
+        import io
+        from contextlib import redirect_stderr
+        from unittest import mock
+
+        from gold_trader import cli
+        from investment_pipeline.llm import StageError
+
+        args = argparse.Namespace(csv_dir="data/", json=None, json_out=False,
+                                  state_dir=None, journal=None, account=None,
+                                  risk_pct=None)
+        buffer = io.StringIO()
+        with mock.patch.object(cli, "run_signal",
+                               side_effect=StageError("analyst: authentication failed: 401")), \
+             mock.patch.object(cli, "_has_credentials", return_value=True), \
+             redirect_stderr(buffer):
+            cli.cmd_signal(args)
+        self.assertNotIn("Traceback", buffer.getvalue())
+        self.assertIn("401", buffer.getvalue())

@@ -135,6 +135,28 @@ Everything that does not call a model still works without a key:
 See docs/RUNTIME.md section 2."""
 
 
+#: A key that is present but refused is a completely different problem from no
+#: key at all, and the remedies do not overlap. Reporting the second when the
+#: first is true sends you looking for a variable that is already set. The
+#: pipeline hit exactly this on 2026-09-17 after a key rotation.
+REJECTED_REMEDY = """The Anthropic API rejected the key (HTTP 401).
+
+The key IS set and was sent -- this is not a missing-variable problem. The API
+refused the value itself. Usual causes, in order:
+
+  1. The key was revoked or rotated, and the environment still holds the old
+     one. A running session keeps the variables it started with, so a container
+     that began before the rotation carries the dead key until it is replaced.
+  2. It was pasted with a character missing, or with whitespace around it.
+  3. It belongs to a different organisation from the one being billed.
+
+Check it at console.anthropic.com -> API keys, then set the current value as
+AURUM_ANTHROPIC_API_KEY in the cloud environment the Routines use.
+
+Nothing else is wrong: the key was found, the client was built, and the request
+reached Anthropic. Only the value was refused."""
+
+
 def _has_credentials(client: object) -> bool:
     """True when the SDK client actually resolved a credential.
 
@@ -147,7 +169,7 @@ def _has_credentials(client: object) -> bool:
 
 
 def cmd_signal(args: argparse.Namespace) -> int:
-    from investment_pipeline.llm import AnthropicStageClient
+    from investment_pipeline.llm import AnthropicStageClient, StageError
 
     config = _config(args)
     try:
@@ -181,6 +203,16 @@ def cmd_signal(args: argparse.Namespace) -> int:
             raise
         print(CREDENTIALS_REMEDY, file=sys.stderr)
         return 3
+    except StageError as exc:
+        # A stage failed after the models were reachable. Reported by name
+        # rather than as a traceback: a stack trace from inside the SDK says
+        # nothing about which of several unrelated problems this is.
+        text = str(exc)
+        if "authentication failed" in text or "401" in text:
+            print(f"{REJECTED_REMEDY}\n\nUnderlying error: {text}", file=sys.stderr)
+            return 5
+        print(f"A pipeline stage failed: {text}", file=sys.stderr)
+        return 6
 
     if args.json_out:
         json.dump(result.to_dict(), sys.stdout, indent=2, default=str)
