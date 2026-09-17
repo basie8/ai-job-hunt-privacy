@@ -123,6 +123,14 @@ committed:
 
 Two branches on purpose: a bridge push and a journal push can never conflict.
 
+`data/` is gitignored on the code branch and **must stay untracked there**. Every
+run calls `pull-data`, which checks the directory out of `market-data` into the
+working tree; if those files are also tracked here, each run leaves a dirty tree
+and each commit duplicates market data onto the code branch, which is precisely
+the conflict the two-branch split exists to prevent. They were tracked until
+2026-09-17. Nothing needs them committed here: the freshness predicates, the
+dashboard and the pipeline all read the working tree that `pull-data` fills.
+
 **Implication worth internalising:** if a run produces a signal and fails to push
 the journal, that signal never happened as far as the learning loop is concerned.
 The push is the commit, in both senses.
