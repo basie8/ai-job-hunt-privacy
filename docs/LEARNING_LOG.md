@@ -425,6 +425,53 @@ overstate volatility. Worth checking once there are closed trades.
 
 ---
 
+## 2026-09-17 — Telling a dead feed from a quiet one
+
+**Evidence:** a four-hour gap in the `market-data` branch (18:39 to 22:43 UTC)
+with the Windows PC on throughout, and no way to say what caused it.
+
+The bridge only commits when candle content changes. So a terminal that has
+dropped its broker connection and a market that simply is not moving produce the
+identical artefact: a bridge that runs every fifteen minutes, finds nothing new,
+and pushes nothing. From GitHub the two are indistinguishable. I guessed at the
+cause in conversation, which was the wrong thing to do — the right thing was to
+make the system able to answer.
+
+**Change:** the bridge now writes `data/bridge.json` every run, carrying the
+terminal's connection state, server, ping and build.
+
+**The design decision worth recording: the bridge reports and the pipeline
+judges.** The obvious implementation puts the verdict in the bridge — it has the
+connection state right there. But whether a disconnection matters depends on
+gold's trading hours, and the bridge runs on Windows where `zoneinfo` falls back
+to a `tzdata` package that may not be installed. A verdict computed there would
+be wrong in exactly the timezone-sensitive way this project has already been bitten
+by twice today. Facts travel; judgement stays where the domain knowledge is.
+
+**And the judgement needed Pieter's correction to be right at all.** My first
+instinct was that a disconnected terminal is a fault. He said: *"terminal
+disconnects from broker when market is closed."* Under the obvious rule this
+system would have paged him every single evening and twice at weekends — a false
+alarm on a schedule, for the third time today. Disconnection is only a finding
+while the market is open.
+
+One further distinction fell out of it: a *stale status file* means the bridge
+process is not running, which is a different failure from a dropped link and
+outranks it, because a stale file's `connected` flag describes a moment that has
+passed. That also gives the bridge a liveness proof independent of whether any
+candle moved — the file is rewritten every run regardless.
+
+**The running lesson, fifth instance:** every defect today has been an absence
+that looked expected. What is new here is the fix's shape. The earlier ones were
+answered by recording more (a heartbeat, a run record). This one needed
+recording *and* a rule for reading it, and the rule came from the user, not the
+code. A system cannot infer which absences are normal in a domain it only sees
+through data.
+
+**Hypotheses affected:** none. No trading evidence.
+
+---
+
 ## Template for future entries
 
 ```markdown

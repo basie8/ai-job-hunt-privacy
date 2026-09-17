@@ -492,6 +492,20 @@ def render(payload: Dict[str, Any]) -> str:
     else:
         feed_block = _state_block(health_section, "candles")
 
+    link = (health_section.get("data") or {}).get("link") or {}
+    if link:
+        pill = {"ok": "done", "warning": "out", "critical": "block"}.get(
+            link.get("severity", "ok"), "out")
+        label = {"ok": "MT5 linked", "warning": "MT5 unknown",
+                 "critical": "MT5 down"}.get(link.get("severity", "ok"), "MT5")
+        link_block = (
+            f'<div class="panel-note" style="margin-bottom:10px">'
+            f'<span class="pill {pill}">{_esc(label)}</span> '
+            f'{_esc(link.get("message", ""))}</div>'
+        )
+    else:
+        link_block = ""
+
     runs = sections["runs"]
     if runs["status"] == "ok":
         run_rows = ""
@@ -637,6 +651,7 @@ def render(payload: Dict[str, Any]) -> str:
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Candle feed</h2></div>
+      {link_block}
       {feed_block}
       <div class="src mono">{_esc(health_section['source'])}</div>
     </div>

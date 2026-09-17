@@ -8,8 +8,9 @@
  MetaTrader 5 terminal and pushes them to GitHub, where the analysis pipeline
  picks them up.
 
- It is READ-ONLY with respect to MetaTrader. It calls three functions: one to
- read candles, one to read a price tick, one to read the clock. There is no order function in this kit or in
+ It is READ-ONLY with respect to MetaTrader. It calls four functions: one to
+ read candles, one to read a price tick, one to read the clock, and one to ask
+ the terminal whether it is connected to your broker. There is no order function in this kit or in
  the wider project, and your account balance is never read or used. A GBP 0.00
  balance or a demo account works exactly the same - the terminal only has to be
  running and logged in.
@@ -113,6 +114,14 @@
 
    "MT5 returned no h4 data"
        The symbol is not in Market Watch. Right-click Market Watch > Show All.
+
+   "link DISCONNECTED"
+       The terminal is not connected to your broker, so candles are frozen.
+       This is NORMAL while the market is closed - MT5 drops the link at the
+       daily close and reconnects at the reopen. It only matters while the
+       market is open, and the cloud side works that out for you: it will only
+       raise it as a fault when gold should be trading.
+       Check the connection indicator in MT5, bottom right.
 
    "no GBPUSD tick" / the cloud run prints FX WARNING
        The bridge also reads GBPUSD, to convert the GBP paper notional into the

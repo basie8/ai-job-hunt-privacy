@@ -39,6 +39,29 @@ This is the only always-on requirement in the whole system, and the only part
 that runs on hardware you control. If the PC sleeps, the laptop lid closes, or
 MT5 logs out, candles stop arriving.
 
+**It also reports itself.** Every run writes `data/bridge.json` with the
+terminal's connection state, server, ping and build, and pushes it with the
+candles. The bridge judges none of it — deciding whether a disconnection matters
+needs gold's trading hours, and `zoneinfo` on Windows depends on a `tzdata`
+package that may not be installed. The pipeline does the judging:
+
+| Terminal | Market | Verdict |
+|---|---|---|
+| Connected | open | fine |
+| **Disconnected** | **open** | **critical — the feed is frozen** |
+| Disconnected | closed | fine; it drops the link at every close and reconnects at the reopen |
+| *file stale >45min* | either | critical — the bridge process itself is not running |
+
+That last row is a different failure from the others and outranks them: a stale
+file's `connected` flag describes a moment that has passed. It also means the
+status file's own freshness is proof the bridge executed, independently of
+whether any candle moved.
+
+This existed because on 2026-09-17 the data branch had a four-hour gap with the
+PC on throughout, and nothing could say whether the terminal had dropped its
+link or the market had simply been quiet. Both produce a bridge that runs, finds
+nothing new, and pushes nothing.
+
 **When it stops:** nothing breaks loudly. The scheduled runs pull stale data, the
 staleness gate refuses to signal, and the 12-hourly audit notices and tells you
 — once a day, not every two hours.

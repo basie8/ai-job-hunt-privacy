@@ -302,9 +302,21 @@ def collect_data_health(repo: str) -> Section:
     rows = describe_data_dir(data_dir)
     if not rows:
         return Section(EMPTY, reason="data/ exists but holds no XAUUSD_*.csv", source="data/")
+
+    # The terminal's own account of itself. Without it, a disconnected feed and
+    # a quiet market look identical from here.
+    from .bridge_status import assess, load_status
+
+    status = load_status(data_dir)
+    severity, message = assess(status)
     return Section(
         OK,
-        data={"series": rows, "freshest_min": min(r["age_min"] for r in rows)},
+        data={
+            "series": rows,
+            "freshest_min": min(r["age_min"] for r in rows),
+            "link": {"severity": severity, "message": message,
+                     **(status.to_dict() if status else {})},
+        },
         source="data/",
     )
 
@@ -427,6 +439,15 @@ def build(repo: str = ".") -> Dict[str, Any]:
                     "severity": "critical", "source": "selfcheck",
                     "message": f"{result['component']}/{result['check']}: {result['detail']}",
                 })
+
+    feed = sections["data_health"]
+    if feed.status == OK:
+        link = feed.data.get("link") or {}
+        if link.get("severity") in ("critical", "warning"):
+            problems.append({
+                "severity": link["severity"], "source": "bridge",
+                "message": link["message"],
+            })
 
     runs = sections["runs"]
     if runs.status == OK:

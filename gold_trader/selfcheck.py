@@ -589,6 +589,46 @@ def check_market_hours(report: Report) -> None:
     run(_schedule)
 
 
+def check_bridge_link(report: Report) -> None:
+    """A dead feed and a quiet market must not look the same.
+
+    The terminal drops its broker connection at every close, so the state alone
+    means nothing -- it only becomes a finding when the market should be open.
+    Getting that backwards would page the owner every single evening.
+    """
+    from .bridge_status import CRITICAL, OK, STALE_AFTER_MIN, BridgeStatus, assess
+
+    open_dt = datetime(2026, 9, 17, 20, 30, tzinfo=timezone.utc)
+    break_dt = datetime(2026, 9, 17, 21, 30, tzinfo=timezone.utc)
+
+    def at(connected, minutes_ago, now):
+        return BridgeStatus(
+            as_of=(now - timedelta(minutes=minutes_ago)).isoformat(), connected=connected)
+
+    run = _guard(report, "bridge", "a dead feed is told apart from a quiet market")
+    def _distinguishes():
+        down_open = assess(at(False, 5, open_dt), open_dt)
+        down_shut = assess(at(False, 5, break_dt), break_dt)
+        assert down_open[0] == CRITICAL, "a disconnected terminal was not flagged while open"
+        assert down_shut[0] == OK, "a closed-market disconnection was reported as a fault"
+        assert down_open[1] != down_shut[1], "both closures produced the same message"
+        return "disconnection judged against market hours"
+    run(_distinguishes)
+
+    run = _guard(report, "bridge", "a stopped bridge outranks a dropped link")
+    def _stale_wins():
+        # A stale file's connected flag describes a moment that has passed, so
+        # it cannot be trusted to excuse anything.
+        stale = assess(at(True, STALE_AFTER_MIN + 10, open_dt), open_dt)
+        assert stale[0] == CRITICAL, "a bridge that stopped running was not flagged"
+        assert "has not run" in stale[1], "the stale case was reported as something else"
+        weekend = datetime(2026, 9, 19, 12, 0, tzinfo=timezone.utc)
+        assert assess(at(True, STALE_AFTER_MIN + 10, weekend), weekend)[0] == CRITICAL, (
+            "the weekend excused a bridge that was not running")
+        return f"stale beyond {STALE_AFTER_MIN}min is critical in any market state"
+    run(_stale_wins)
+
+
 def check_learning_guarantees(report: Report) -> None:
     """The three anti-overfitting guards, verified as properties not examples."""
     from .journal import Journal
@@ -717,6 +757,7 @@ def run_all(repo: str = ".") -> Report:
     check_state_is_committable(report, repo)
     check_credentials_path(report)
     check_market_hours(report)
+    check_bridge_link(report)
     check_learning_guarantees(report)
     check_smc_and_sessions(report)
     check_pipeline(report)

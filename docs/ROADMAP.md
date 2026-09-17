@@ -33,6 +33,7 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 | DAT-02 | MT5 bridge | done | `file:gold_trader/bridge/mt5_export.py` | Plumbing-only push, never touches your tree |
 | DAT-06 | Windows install kit | done | `files:gold_trader/bridge/windows_kit/SETUP.bat,gold_trader/bridge/windows_kit/README.txt` | Zip with one-click setup; needs no clone of the project |
 | DAT-03 | market-data branch sync | done | `file:gold_trader/sync.py` | Round-trip tested over real git repos |
+| DAT-08 | Terminal link state reported and judged | done | `file:gold_trader/bridge_status.py` | Bridge writes `data/bridge.json`; disconnection only a fault while the market is open |
 | DAT-07 | GBPUSD sourced from MT5 | done | `file:gold_trader/fx.py` | Bridge writes `data/fx.json`; a missing or absurd rate falls back loudly |
 | DAT-04 | Bridge running on Pieter's machine | done | `data:180` | Confirmed 2026-09-17: market-data branch live, newest bar minutes old |
 | OPS-08 | Anthropic API key in the cloud environment | outstanding | `manual` | **Needs you.** Without it the four stages cannot run at all — see docs/INSTALL.md part 2 |
@@ -74,7 +75,7 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 
 | ID | Task | Status | Verify | Notes |
 |----|------|--------|--------|-------|
-| TST-01 | Gold test suite | done | `tests:tests_gold:345` | Offline, no network |
+| TST-01 | Gold test suite | done | `tests:tests_gold:360` | Offline, no network |
 | TST-02 | Pipeline test suite | done | `tests:tests:44` | Offline, no network |
 | TST-03 | Component self-check | done | `file:gold_trader/selfcheck.py` | Placeholders, config coherence, cross-artifact drift |
 | TST-04 | Config coherence checks | done | `file:gold_trader/config_checks.py` | Limits that contradict each other |

@@ -166,6 +166,53 @@ FX_MIN_MOVE_PCT = 0.05
 FX_REFRESH_HOURS = 6
 
 
+#: The bridge reports the terminal's state and judges none of it. Whether a
+#: disconnection matters depends on whether the market should be open, which
+#: needs a timezone database this script cannot count on having: zoneinfo on
+#: Windows falls back to the `tzdata` package, and that may not be installed.
+#: The pipeline already knows gold's hours exactly, so it does the judging.
+STATUS_FILENAME = "bridge.json"
+
+
+def read_terminal_state(mt5, symbol: str = "") -> dict:
+    """What the terminal says about itself. Never raises -- a status read that
+    breaks the bridge would be worse than no status at all."""
+    state = {"connected": None, "server": "", "ping_ms": None,
+             "terminal_build": None, "symbol": symbol, "trade_allowed": None}
+    try:
+        info = mt5.terminal_info()
+        if info is not None:
+            state["connected"] = bool(getattr(info, "connected", False))
+            state["terminal_build"] = getattr(info, "build", None)
+            state["trade_allowed"] = bool(getattr(info, "trade_allowed", False))
+            ping = getattr(info, "ping_last", None)
+            if ping:
+                state["ping_ms"] = round(ping / 1000.0, 1)  # MT5 reports microseconds
+    except Exception as exc:  # noqa: BLE001 - never let this stop a candle push
+        state["read_error"] = f"{type(exc).__name__}: {exc}"
+    try:
+        account = mt5.account_info()
+        if account is not None:
+            state["server"] = str(getattr(account, "server", "") or "")
+    except Exception:  # noqa: BLE001
+        pass
+    return state
+
+
+def write_status(directory: str, state: dict, now_iso: str) -> str:
+    """Write the terminal state next to the candles, every run without
+    exception. This file existing and being fresh is itself the evidence that
+    the bridge ran; a gap in it is a gap in the bridge."""
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, STATUS_FILENAME)
+    payload = dict(state)
+    payload["as_of"] = now_iso
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(payload, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    return path
+
+
 def fx_needs_writing(directory: str, pair: str, rate: float, now_iso: str) -> str:
     """Return why the rate should be written, or "" to leave the file alone."""
     path = os.path.join(directory, "fx.json")
@@ -251,7 +298,7 @@ def push_data_branch(
 
     names = sorted(
         f for f in os.listdir(data_dir)
-        if f.lower().endswith(".csv") or f.lower() == "fx.json"
+        if f.lower().endswith(".csv") or f.lower() in ("fx.json", "bridge.json")
     )
     if not names:
         print(f"No candle files in {data_dir}; nothing to push.")
@@ -320,6 +367,20 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
         try:
             symbol = resolve_symbol(mt5, args.symbol)
+            # Read and write the terminal's state before anything else can fail.
+            # A run that dies mid-way should still have said whether the
+            # terminal was connected when it started.
+            state = read_terminal_state(mt5, symbol)
+            write_status(data_dir, state,
+                         datetime.now(timezone.utc).isoformat(timespec="seconds"))
+            changed = True  # the status file moves every run, by design
+            link = "connected" if state["connected"] else "DISCONNECTED"
+            ping = f", ping {state['ping_ms']}ms" if state.get("ping_ms") else ""
+            server = f" [{state['server']}]" if state.get("server") else ""
+            print(f"  link {link}{server}{ping}")
+            if state["connected"] is False:
+                print("       The terminal is not connected to the broker. Candles will "
+                      "not update until it is. This is normal while the market is closed.")
             offset = (
                 args.server_offset_hours
                 if args.server_offset_hours is not None
