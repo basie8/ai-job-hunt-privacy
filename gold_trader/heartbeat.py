@@ -173,9 +173,27 @@ class RunReport:
     def expected(self) -> int:
         return len(self.recorded) + len(self.missed)
 
+    @property
+    def unresolved_errors(self) -> List[Beat]:
+        """Errors with no successful run after them.
+
+        An error that a later run has superseded is history, not a fault. Left
+        as a standing critical it would sit on the dashboard until it aged out
+        of the window -- shouting about something already fixed, which is how a
+        reader learns to scroll past the red.
+        """
+        out: List[Beat] = []
+        for index, beat in enumerate(self.recorded):
+            if beat.outcome != "error":
+                continue
+            later = self.recorded[index + 1:]
+            if not any(b.outcome != "error" for b in later):
+                out.append(beat)
+        return out
+
     def healthy(self) -> bool:
         """Unarmed is not healthy and not a failure: it is 'cannot say yet'."""
-        return not self.missed and not self.errors
+        return not self.missed and not self.unresolved_errors
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -189,6 +207,7 @@ class RunReport:
             "recorded": len(self.recorded),
             "missed": [m.isoformat() for m in self.missed],
             "errors": [b.to_dict() for b in self.errors],
+            "unresolved_errors": [b.to_dict() for b in self.unresolved_errors],
             "outcomes": _tally(self.recorded),
             "healthy": self.healthy(),
         }
@@ -208,8 +227,12 @@ class RunReport:
         for moment in self.missed:
             lines.append(f"  MISSED  {moment:%Y-%m-%d %H:%M} UTC - "
                          "the run left no trace, so it died before reaching the pipeline")
+        unresolved = {b.ts for b in self.unresolved_errors}
         for beat in self.errors:
-            lines.append(f"  ERROR   {beat.ts} - {beat.detail or '(no detail recorded)'}")
+            mark = "ERROR  " if beat.ts in unresolved else "was-err"
+            suffix = "" if beat.ts in unresolved else "  (a later run succeeded)"
+            lines.append(
+                f"  {mark} {beat.ts} - {beat.detail or '(no detail recorded)'}{suffix}")
         if self.healthy():
             lines.append("  no gaps")
         return "\n".join(lines)

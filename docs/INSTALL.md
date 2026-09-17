@@ -198,9 +198,18 @@ To fix, add the key to the cloud environment the Routines use:
 1. Create a key at [console.anthropic.com](https://console.anthropic.com) →
    API keys. This is **separate from the claude.ai subscription** and bills
    pay-as-you-go.
-2. At [claude.ai/code](https://claude.ai/code), open the environment the
-   Routines run in (`Default`, unless you changed it) → **Environment
-   variables** → add `ANTHROPIC_API_KEY` with that value.
+2. At [claude.ai/code](https://claude.ai/code), click the **cloud icon above the
+   message box** → hover the environment (**PIM**) → **gear** → **Environment
+   variables**, and add one line:
+
+   ```
+   AURUM_ANTHROPIC_API_KEY=sk-ant-...
+   ```
+
+   **Not `ANTHROPIC_API_KEY`.** That name is reserved inside a Claude Code
+   session: the platform authenticates the session through your account and
+   drops it, warning *"won't be used to authenticate requests"*. It looks like
+   it worked and does nothing.
 3. The next scheduled run picks it up. Nothing to redeploy.
 
 **Cost:** roughly $0.35 per signal run at the configured model tiers, so about

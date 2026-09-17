@@ -55,6 +55,43 @@ class StageClient:
         raise NotImplementedError
 
 
+#: Where to look for the key, in order. AURUM_ANTHROPIC_API_KEY comes first
+#: because ANTHROPIC_API_KEY is *reserved* inside a Claude Code session: the
+#: platform authenticates the session through the account and refuses to pass
+#: that name through to the sandbox, warning "won't be used to authenticate
+#: requests". The pipeline is a separate API consumer running inside that
+#: session, so it needs a name the platform does not claim.
+#:
+#: The reserved names are still read, because they work fine outside a Claude
+#: Code session -- a local shell, CI, a plain container.
+CREDENTIAL_ENV_VARS = (
+    "AURUM_ANTHROPIC_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+)
+
+
+def resolve_api_key() -> str:
+    """The first credential found, or "" so the SDK can try its own resolution."""
+    import os
+
+    for name in CREDENTIAL_ENV_VARS:
+        value = (os.environ.get(name) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def credential_source() -> str:
+    """Which variable supplied the key, for reporting. Never the key itself."""
+    import os
+
+    for name in CREDENTIAL_ENV_VARS:
+        if (os.environ.get(name) or "").strip():
+            return name
+    return ""
+
+
 class AnthropicStageClient(StageClient):
     """Real client. Requires the ``anthropic`` package and credentials.
 
@@ -67,7 +104,8 @@ class AnthropicStageClient(StageClient):
         if client is None:
             import anthropic  # imported lazily so the rest of the package has no hard dep
 
-            client = anthropic.Anthropic()
+            key = resolve_api_key()
+            client = anthropic.Anthropic(api_key=key) if key else anthropic.Anthropic()
         self._client = client
         self._max_attempts = max(1, max_attempts)
 

@@ -343,7 +343,7 @@ def collect_runs(repo: str) -> Section:
         data={
             "routines": [r.to_dict() for r in reports],
             "missed_total": sum(len(r.missed) for r in reports),
-            "error_total": sum(len(r.errors) for r in reports),
+            "error_total": sum(len(r.unresolved_errors) for r in reports),
         },
         source=f"state/{HEARTBEAT_FILENAME}",
     )
@@ -460,7 +460,7 @@ def build(repo: str = ".") -> Dict[str, Any]:
                                 "no trace, so it died before reaching the pipeline "
                                 "(account usage limit, provisioning failure, or an outage)."),
                 })
-            for beat in routine["errors"]:
+            for beat in routine["unresolved_errors"]:
                 problems.append({
                     "severity": "critical", "source": "runs",
                     "message": (f"The {routine['routine']} run at {beat['ts'][:16]} "

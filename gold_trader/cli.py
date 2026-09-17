@@ -113,17 +113,22 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 #: not obvious from a TypeError raised inside the SDK constructor.
 CREDENTIALS_REMEDY = """No Anthropic API credentials, so the four stages cannot run.
 
-The SDK looks for ANTHROPIC_API_KEY, then ANTHROPIC_AUTH_TOKEN, then an
-`ant auth login` profile, and found none. Note that a Claude Code session's own
-subscription login does not satisfy this: the agent running this command is
-authenticated, the pipeline it invokes is not.
+**Use AURUM_ANTHROPIC_API_KEY, not ANTHROPIC_API_KEY.**
 
-To fix, either:
-  1. Put a key in the environment this runs in. For the scheduled Routines that
-     means adding ANTHROPIC_API_KEY to the cloud environment's variables
-     (claude.ai/code -> environment -> Environment variables). Keys come from
-     console.anthropic.com and bill separately from the claude.ai subscription.
-  2. Locally, export ANTHROPIC_API_KEY=... before running.
+ANTHROPIC_API_KEY is reserved inside a Claude Code session. The platform
+authenticates the session through your Anthropic account and refuses to pass
+that name into the sandbox -- the environment settings say so plainly: "won't
+be used to authenticate requests". The pipeline is a separate API consumer
+running inside that session, so it needs a name the platform does not claim.
+
+To fix, in the cloud environment the Routines use (claude.ai/code -> the cloud
+icon above the message box -> hover the environment -> gear -> Environment
+variables), add one line:
+
+    AURUM_ANTHROPIC_API_KEY=sk-ant-...
+
+Keys come from console.anthropic.com and bill separately from the claude.ai
+subscription. Locally, either name works: export AURUM_ANTHROPIC_API_KEY=...
 
 Everything that does not call a model still works without a key:
   resolve, status, learn, runs, progress, selfcheck, dashboard, pull-data.

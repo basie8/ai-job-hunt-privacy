@@ -46,14 +46,53 @@ class Detection(unittest.TestCase):
 
 
 class TheRemedy(unittest.TestCase):
-    def test_it_names_both_ways_to_supply_a_credential(self):
-        self.assertIn("ANTHROPIC_API_KEY", CREDENTIALS_REMEDY)
-        self.assertIn("ANTHROPIC_AUTH_TOKEN", CREDENTIALS_REMEDY)
+    def test_it_leads_with_the_variable_that_actually_works(self):
+        # ANTHROPIC_API_KEY is reserved inside a Claude Code session and is
+        # silently dropped. Naming it first would send someone down the exact
+        # path that already wasted an evening.
+        self.assertIn("Use AURUM_ANTHROPIC_API_KEY, not ANTHROPIC_API_KEY",
+                      CREDENTIALS_REMEDY)
+        self.assertLess(CREDENTIALS_REMEDY.index("AURUM_ANTHROPIC_API_KEY"),
+                        CREDENTIALS_REMEDY.index("console.anthropic.com"))
 
-    def test_it_says_a_session_login_does_not_count(self):
-        # The single most confusing part: the agent is authenticated and the
-        # pipeline it runs is not.
-        self.assertIn("subscription login does not satisfy this", CREDENTIALS_REMEDY)
+    def test_it_explains_why_the_obvious_name_fails(self):
+        self.assertIn("reserved inside a Claude Code session", CREDENTIALS_REMEDY)
+
+    def test_the_unreserved_name_is_preferred_when_both_are_set(self):
+        import os
+        from investment_pipeline.llm import credential_source, resolve_api_key
+
+        previous = {k: os.environ.get(k) for k in ("AURUM_ANTHROPIC_API_KEY",
+                                                   "ANTHROPIC_API_KEY")}
+        os.environ["AURUM_ANTHROPIC_API_KEY"] = "sk-ant-aurum"
+        os.environ["ANTHROPIC_API_KEY"] = "sk-ant-reserved"
+        try:
+            self.assertEqual(credential_source(), "AURUM_ANTHROPIC_API_KEY")
+            self.assertEqual(resolve_api_key(), "sk-ant-aurum")
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_the_reserved_names_still_work_outside_a_session(self):
+        # A local shell, CI, a plain container: there the obvious name is fine.
+        import os
+        from investment_pipeline.llm import resolve_api_key
+
+        previous = {k: os.environ.get(k) for k in ("AURUM_ANTHROPIC_API_KEY",
+                                                   "ANTHROPIC_API_KEY")}
+        os.environ.pop("AURUM_ANTHROPIC_API_KEY", None)
+        os.environ["ANTHROPIC_API_KEY"] = "sk-ant-local"
+        try:
+            self.assertEqual(resolve_api_key(), "sk-ant-local")
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
     def test_it_names_what_still_works_without_a_key(self):
         # Most of the system does not call a model. Saying so stops a missing

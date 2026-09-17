@@ -259,3 +259,60 @@ class StateIsCommittable(unittest.TestCase):
         # So nobody re-adds the pattern in good faith.
         with open(os.path.join(self._repo(), ".gitignore")) as fh:
             self.assertIn("durable state", fh.read())
+
+
+class ErrorsThatLaterRunsFixed(unittest.TestCase):
+    """An error a later run superseded is history, not a fault. Left standing
+    it sits on the dashboard shouting about something already fixed, until it
+    ages out of the window -- which is how a reader learns to scroll past red."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "heartbeat.jsonl")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _beat(self, hour, outcome, detail=""):
+        record(self.path, "signal", outcome, detail, now=at(17, hour, 25))
+
+    def test_an_error_with_nothing_after_it_is_unresolved(self):
+        self._beat(15, "error", "no credentials")
+        report = audit_runs(self.path, "signal", now=at(17, 16, 0))
+        self.assertEqual(len(report.unresolved_errors), 1)
+        self.assertFalse(report.healthy())
+
+    def test_a_later_successful_run_resolves_it(self):
+        self._beat(15, "error", "no credentials")
+        self._beat(17, "no_trade", "analyst flat")
+        report = audit_runs(self.path, "signal", now=at(17, 18, 0))
+        self.assertEqual(report.unresolved_errors, [])
+        self.assertTrue(report.healthy())
+
+    def test_the_error_is_still_in_the_record(self):
+        # Resolved is not erased. The history stays queryable.
+        self._beat(15, "error", "no credentials")
+        self._beat(17, "no_trade")
+        report = audit_runs(self.path, "signal", now=at(17, 18, 0))
+        self.assertEqual(len(report.errors), 1)
+        self.assertIn("a later run succeeded", report.render())
+
+    def test_a_later_error_does_not_resolve_an_earlier_one(self):
+        self._beat(15, "error", "first")
+        self._beat(17, "error", "second")
+        report = audit_runs(self.path, "signal", now=at(17, 18, 0))
+        self.assertEqual(len(report.unresolved_errors), 2)
+
+    def test_a_stale_data_run_counts_as_a_successful_run(self):
+        # It is a legitimate outcome: the run happened and reported correctly.
+        self._beat(15, "error", "no credentials")
+        self._beat(17, "stale_data", "bridge quiet")
+        report = audit_runs(self.path, "signal", now=at(17, 18, 0))
+        self.assertTrue(report.healthy())
+
+    def test_resolution_is_exposed_to_the_dashboard(self):
+        self._beat(15, "error", "boom")
+        self._beat(17, "no_trade")
+        blob = audit_runs(self.path, "signal", now=at(17, 18, 0)).to_dict()
+        self.assertEqual(blob["unresolved_errors"], [])
+        self.assertEqual(len(blob["errors"]), 1)

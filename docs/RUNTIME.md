@@ -86,14 +86,32 @@ rather than a technical floor; hourly is available if you want it.
 **Cost:** ~8 signal runs/day × ~$0.35 ≈ $14/week, plus the audits. Billed to your
 Anthropic account.
 
-**Credentials — the part that is easy to miss.** The four stages call the
-Anthropic API directly and need an `ANTHROPIC_API_KEY` in the environment. The
-session's own subscription login does *not* satisfy this: the agent driving the
-run is authenticated, the pipeline it invokes is not. Without the key the SDK
-constructs without complaint and raises `TypeError` on the first request, so the
-failure arrives late and unexplained — `gold_trader signal` now checks first and
-names the remedy. Set it under the cloud environment's **Environment variables**;
-see `docs/INSTALL.md` part 2.
+**Credentials — the part that is easy to miss, twice over.**
+
+The four stages call the Anthropic API directly and need their own key. The
+session's subscription login does *not* satisfy this: the agent driving the run
+is authenticated, the pipeline it invokes is not.
+
+And the obvious variable name does not work. **`ANTHROPIC_API_KEY` is reserved
+inside a Claude Code session** — the platform authenticates the session through
+the account and refuses to pass that name into the sandbox, saying so in the
+environment settings: *"won't be used to authenticate requests"*. Setting it
+looks like it worked and changes nothing.
+
+Use a name the platform does not claim:
+
+```
+AURUM_ANTHROPIC_API_KEY=sk-ant-...
+```
+
+`investment_pipeline.llm` reads `AURUM_ANTHROPIC_API_KEY` first, then falls back
+to `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN`, which work fine outside a
+Claude Code session — a local shell, CI, a plain container.
+
+Without a key the SDK constructs without complaint and raises `TypeError` from
+inside `_validate_headers` on the first request, so the failure arrives late and
+unexplained. `gold_trader signal` checks first, exits 3, and names the variable
+that works. See `docs/INSTALL.md` part 2.
 
 ### When gold is actually open
 

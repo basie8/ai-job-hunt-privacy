@@ -422,6 +422,21 @@ def check_run_health(report: Report, repo: str) -> None:
             return "no_trade recorded and accepted"
     run(_quiet)
 
+    run = _guard(report, "runs", "a fixed error stops shouting")
+    def _resolves():
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "heartbeat.jsonl")
+            base = datetime(2026, 9, 17, 15, 25, tzinfo=timezone.utc)
+            record(path, "signal", "error", "boom", now=base)
+            broken = audit_runs(path, "signal", now=base + timedelta(minutes=30))
+            assert not broken.healthy(), "a standing error was not reported"
+            record(path, "signal", "no_trade", "flat", now=base + timedelta(hours=2))
+            fixed = audit_runs(path, "signal", now=base + timedelta(hours=2, minutes=30))
+            assert fixed.healthy(), "an error a later run superseded still reads critical"
+            assert len(fixed.errors) == 1, "the error was erased rather than resolved"
+            return "resolved errors kept in the record, out of the alarm"
+    run(_resolves)
+
     run = _guard(report, "runs", "unarmed reports nothing rather than everything")
     def _unarmed():
         with tempfile.TemporaryDirectory() as tmp:
@@ -511,14 +526,21 @@ def check_credentials_path(report: Report) -> None:
 
     run = _guard(report, "credentials", "the remedy names the fix, not the symptom")
     def _remedy():
-        for needle in ("ANTHROPIC_API_KEY", "console.anthropic.com",
-                       "subscription login does not satisfy this", "RUNTIME.md"):
+        for needle in ("AURUM_ANTHROPIC_API_KEY", "console.anthropic.com",
+                       "reserved inside a Claude Code session", "RUNTIME.md"):
             assert needle in CREDENTIALS_REMEDY, f"remedy does not mention {needle!r}"
         # The commands that work without a key, so a missing key does not read
         # as a total outage.
         for command in ("resolve", "status", "learn", "runs", "dashboard"):
             assert command in CREDENTIALS_REMEDY, f"remedy omits working command {command!r}"
-        return f"{len(CREDENTIALS_REMEDY.splitlines())} lines, actionable"
+        # The trap: ANTHROPIC_API_KEY looks obviously right and is silently
+        # dropped by the platform. The remedy must lead with the name that works.
+        aurum = CREDENTIALS_REMEDY.index("AURUM_ANTHROPIC_API_KEY")
+        assert "Use AURUM_ANTHROPIC_API_KEY, not ANTHROPIC_API_KEY" in CREDENTIALS_REMEDY, (
+            "the remedy does not warn against the reserved variable name")
+        assert aurum < CREDENTIALS_REMEDY.index("console.anthropic.com"), (
+            "the working variable name is not named before the console link")
+        return f"{len(CREDENTIALS_REMEDY.splitlines())} lines, names the unreserved variable"
     run(_remedy)
 
 
