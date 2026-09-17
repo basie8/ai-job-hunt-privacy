@@ -7,8 +7,9 @@ CLAIM** — that is the point, because a progress doc that only self-reports is
 the easiest thing in the world to fool yourself with.
 
 ```bash
-python -m gold_trader progress          # full audit
-python -m gold_trader progress --json   # machine readable
+python -m gold_trader progress           # roadmap audit (verifies each claim)
+python -m gold_trader selfcheck          # component audit (errors, placeholders, drift)
+python -m gold_trader progress --json    # machine readable
 ```
 
 Statuses: `done` · `in_progress` · `outstanding` · `blocked`
@@ -68,11 +69,15 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 
 | ID | Task | Status | Verify | Notes |
 |----|------|--------|--------|-------|
-| TST-01 | Gold test suite | done | `tests:tests_gold:180` | Offline, no network |
+| TST-01 | Gold test suite | done | `tests:tests_gold:220` | Offline, no network |
 | TST-02 | Pipeline test suite | done | `tests:tests:44` | Offline, no network |
+| TST-03 | Component self-check | done | `file:gold_trader/selfcheck.py` | Placeholders, config coherence, cross-artifact drift |
+| TST-04 | Config coherence checks | done | `file:gold_trader/config_checks.py` | Limits that contradict each other |
 | EVL-01 | Backtest harness over historical candles | outstanding | `file:gold_trader/backtest.py` | Would let setups be scored before risking money |
 | EVL-02 | Prompt hillclimb against the journal | outstanding | `journal:60` | Needs a real sample first |
 | DOC-01 | AURUM operating doc wired to the prompt | done | `file:docs/AURUM.md` | Editing it changes how the analyst thinks |
+| DOC-02 | Phased development plan | done | `file:docs/DEVELOPMENT_PLAN.md` | Machine-checkable gate per phase |
+| DOC-03 | Runtime topology documented | done | `file:docs/RUNTIME.md` | Where each component runs and how it fails |
 
 ---
 

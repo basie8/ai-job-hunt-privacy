@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Sequence
 
 from datetime import datetime
 
-from .feed import Candle, Series
+from .feed import Candle, Series, timeframe_minutes
 from .sessions import SessionRead, read_sessions
 from .smc import SmcRead, read_structure
 
@@ -291,12 +291,10 @@ def build_features(snapshot, now: Optional[datetime] = None) -> FeatureSet:
     """Indicators, structure and session context from one market snapshot."""
     usable = {tf: s for tf, s in snapshot.series.items() if len(s) >= 2}
     moment = now or snapshot.as_of
-    finest = min(usable.values(), key=lambda s: len(s.candles) and 1, default=None)
-    if usable:
-        # Session ranges come off the finest timeframe available.
-        from .feed import timeframe_minutes
-
-        finest = min(usable.values(), key=lambda s: timeframe_minutes(s.timeframe))
+    # Session ranges come off the finest timeframe available.
+    finest = (
+        min(usable.values(), key=lambda s: timeframe_minutes(s.timeframe)) if usable else None
+    )
     return FeatureSet(
         spot=snapshot.spot,
         per_timeframe={tf: features_for(s) for tf, s in usable.items()},

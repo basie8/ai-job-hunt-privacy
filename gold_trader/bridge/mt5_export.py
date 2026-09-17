@@ -22,7 +22,6 @@ Three things this handles that a naive exporter does not:
 from __future__ import annotations
 
 import argparse
-import csv
 import os
 import subprocess
 import sys

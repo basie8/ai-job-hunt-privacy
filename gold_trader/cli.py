@@ -25,6 +25,7 @@ from .pipeline import GoldConfig, run_signal
 from .risk import TradingLimits, realised_r_today, signals_today
 from .sync import DATA_BRANCH, pull_data_branch, describe_data_dir
 from .progress import audit
+from .selfcheck import run_all
 
 
 def _config(args: argparse.Namespace) -> GoldConfig:
@@ -72,7 +73,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         else:
             print(f"  {directory}/: not present")
     config = _config(args)
-    print(f"\nState:")
+    print("\nState:")
     for label, path in (
         ("journal", config.journal_path),
         ("audit", config.audit_path),
@@ -228,6 +229,18 @@ def cmd_progress(args: argparse.Namespace) -> int:
     return 1 if result.stale else 0
 
 
+def cmd_selfcheck(args: argparse.Namespace) -> int:
+    """Audit every component for errors, placeholders and cross-artifact drift."""
+    report = run_all(args.repo)
+    if args.json_out:
+        json.dump(report.to_dict(), sys.stdout, indent=2)
+        sys.stdout.write("\n")
+    else:
+        print("Component self-check\n")
+        print(report.render(verbose=args.verbose))
+    return 1 if report.failures else 0
+
+
 def _common(parser: argparse.ArgumentParser, data: bool = False) -> None:
     parser.add_argument("--state-dir", default=None, help="Directory for journal/audit/calendar.")
     parser.add_argument("--journal", default=None)
@@ -276,6 +289,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--repo", default=".")
     p.add_argument("--json-out", action="store_true")
     p.set_defaults(func=cmd_progress)
+
+    p = sub.add_parser("selfcheck", help="Audit all components for errors and placeholders.")
+    p.add_argument("--repo", default=".")
+    p.add_argument("--verbose", action="store_true", help="Show passing checks too.")
+    p.add_argument("--json-out", action="store_true")
+    p.set_defaults(func=cmd_selfcheck)
 
     p = sub.add_parser("calendar", help="The event diary as currently loaded.")
     _common(p)

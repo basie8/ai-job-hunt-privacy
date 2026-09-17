@@ -21,8 +21,8 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta, timezone
-from typing import Dict, List, Optional, Sequence
+from datetime import date, datetime, timedelta, timezone
+from typing import Dict, List, Optional
 
 try:  # pragma: no cover - platform dependent
     from zoneinfo import ZoneInfo
@@ -135,6 +135,9 @@ class MacroCalendar:
     confidence: str = "derived_only"
     scheduled_horizon: Optional[str] = None
     readings: List[MacroReading] = field(default_factory=list)
+    #: Parse problems in the hand-edited calendar file. Non-empty means some
+    #: events were dropped and the blackout windows are narrower than intended.
+    load_errors: List[str] = field(default_factory=list)
 
     @classmethod
     def build(
@@ -160,31 +163,59 @@ class MacroCalendar:
         horizon: Optional[str] = None
         readings: List[MacroReading] = []
 
+        errors: List[str] = []
         if scheduled_path and os.path.exists(scheduled_path):
-            with open(scheduled_path, encoding="utf-8") as fh:
-                blob = json.load(fh)
+            # This file is hand-edited every week, so it WILL be malformed at
+            # some point. A bad row must degrade the calendar, never take down
+            # a scheduled run: one dropped event is a narrower blackout window,
+            # a raised exception is no signal at all.
+            blob = None
+            try:
+                with open(scheduled_path, encoding="utf-8") as fh:
+                    blob = json.load(fh)
+            except (json.JSONDecodeError, OSError) as exc:
+                errors.append(f"could not read {os.path.basename(scheduled_path)}: {exc}")
+
+            if not isinstance(blob, dict):
+                if blob is not None:
+                    errors.append("calendar file is not a JSON object")
+                blob = {}
+
             horizon = blob.get("covers_through")
-            for raw in blob.get("events", []):
-                when = datetime.fromisoformat(str(raw["when"]).replace("Z", "+00:00"))
-                if when.tzinfo is None:
-                    when = when.replace(tzinfo=timezone.utc)
-                events.append(
-                    MacroEvent(
-                        raw.get("name", raw["kind"]),
-                        raw["kind"].upper(),
-                        when,
-                        raw.get("impact", "high"),
+            for index, raw in enumerate(blob.get("events") or []):
+                try:
+                    when = datetime.fromisoformat(str(raw["when"]).replace("Z", "+00:00"))
+                    if when.tzinfo is None:
+                        when = when.replace(tzinfo=timezone.utc)
+                    kind = str(raw["kind"]).upper()
+                    events.append(
+                        MacroEvent(raw.get("name", kind), kind, when, raw.get("impact", "high"))
                     )
-                )
-            for raw in blob.get("readings", []):
-                readings.append(
-                    MacroReading(raw["name"], str(raw["value"]), raw["as_of"], raw.get("source", "supplied"))
-                )
-            if horizon:
-                covers = datetime.fromisoformat(str(horizon).replace("Z", "+00:00"))
-                if covers.tzinfo is None:
-                    covers = covers.replace(tzinfo=timezone.utc)
-                confidence = "current" if covers >= now else "stale"
+                except (KeyError, TypeError, ValueError) as exc:
+                    errors.append(f"event {index}: {exc}")
+
+            for index, raw in enumerate(blob.get("readings") or []):
+                try:
+                    readings.append(
+                        MacroReading(
+                            raw["name"], str(raw["value"]), raw["as_of"],
+                            raw.get("source", "supplied"),
+                        )
+                    )
+                except (KeyError, TypeError) as exc:
+                    errors.append(f"reading {index}: {exc}")
+
+            if errors:
+                confidence = "invalid"
+            elif horizon:
+                try:
+                    covers = datetime.fromisoformat(str(horizon).replace("Z", "+00:00"))
+                    if covers.tzinfo is None:
+                        covers = covers.replace(tzinfo=timezone.utc)
+                    confidence = "current" if covers >= now else "stale"
+                except (TypeError, ValueError) as exc:
+                    errors.append(f"covers_through: {exc}")
+                    confidence = "invalid"
             else:
                 confidence = "stale"
 
@@ -193,7 +224,10 @@ class MacroCalendar:
             (e for e in events if now - timedelta(hours=6) <= e.when <= cutoff),
             key=lambda e: e.when,
         )
-        return cls(events=events, confidence=confidence, scheduled_horizon=horizon, readings=readings)
+        return cls(
+            events=events, confidence=confidence, scheduled_horizon=horizon,
+            readings=readings, load_errors=errors,
+        )
 
     def upcoming(self, now: datetime, within_hours: int = 48) -> List[MacroEvent]:
         limit = now + timedelta(hours=within_hours)
@@ -210,6 +244,13 @@ class MacroCalendar:
 
     def as_prompt_block(self, now: datetime) -> str:
         lines = [f"Calendar confidence: {self.confidence}"]
+        if self.load_errors:
+            lines.append(
+                "  WARNING: the calendar file failed to parse cleanly, so some events were "
+                "dropped and the blackout windows are narrower than intended:"
+            )
+            for err in self.load_errors[:5]:
+                lines.append(f"    - {err}")
         if self.confidence == "stale":
             lines.append(
                 "  WARNING: the scheduled-event file is out of date. FOMC/CPI/PCE dates may be "
@@ -243,6 +284,7 @@ class MacroCalendar:
     def to_dict(self, now: datetime) -> Dict[str, object]:
         return {
             "confidence": self.confidence,
+            "load_errors": self.load_errors,
             "scheduled_horizon": self.scheduled_horizon,
             "upcoming": [e.to_dict() for e in self.upcoming(now, 72)],
             "readings": [r.to_dict() for r in self.readings],

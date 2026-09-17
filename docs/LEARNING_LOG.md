@@ -15,7 +15,8 @@ Rules for entries:
 
 ## Current state
 
-**Closed trades: 0.** The learning loop is at cold start. Every statement below
+**Closed trades: 0.** Phase 1 of `DEVELOPMENT_PLAN.md`, blocked on the bridge.
+The learning loop is at cold start. Every statement below
 is a hypothesis carried in from design, not a measured finding. Nothing here has
 earned its place yet.
 
@@ -60,6 +61,49 @@ and per-setup clamps.
    before it was caught. Guarded.
 5. Tasks marked done with an unverifiable predicate vanished from the audit report
    entirely. Now surfaced in their own section.
+
+---
+
+## 2026-09-17 — Component audit: three defects, all the same shape
+
+**Evidence:** static analysis plus a probe of every documented entry point. No
+trades involved — this is a code audit, not a trading finding.
+
+**Observation:** three defects, and all three shared a failure pattern worth
+naming, because it will recur.
+
+| # | Defect | Why it mattered |
+|---|---|---|
+| 1 | With no ATR available, the stop-width check silently disappeared | A 10-cent stop on $4305 gold was **approved at 5000oz**. Spread alone would have taken it out. The least reliable input path had the fewest checks. |
+| 2 | A malformed `state/calendar.json` raised `JSONDecodeError` and killed the whole run | That file is hand-edited weekly, so it *will* be malformed eventually. A typo would have silently stopped every scheduled signal. |
+| 3 | An event row missing a key raised `KeyError` | Same cause, same consequence, from one bad line in an otherwise fine file. |
+
+**The pattern:** *degraded input reduced scrutiny instead of increasing it.* Less
+data meant fewer gates, and a hand-edited file was trusted to be well-formed.
+Both are backwards.
+
+**Change:**
+- Stop width now falls back to a percent-of-spot band (0.12%–0.60%) when ATR is
+  unavailable, and is a **hard block** when neither ATR nor spot exists.
+- Calendar loading degrades per-row: a bad event is dropped and recorded, the
+  derived NFP/claims events survive, confidence reports `invalid`, and the parse
+  errors reach the analyst prompt, the risk engine and the audit log.
+- Added `gold_trader/selfcheck.py` (20 checks) and `config_checks.py` to catch
+  this class mechanically: placeholders in shipped source, limits that contradict
+  each other, and cross-artifact drift between code and docs.
+- 25 regression tests in `tests_gold/test_degradation.py`.
+
+**Hypothesis affected:** none of H1–H6. This was a robustness finding, not a
+market one. H1's stop band is now enforced through two measures rather than one,
+which makes it *more* testable, not less.
+
+**Also found and fixed:** the self-check flagged itself (it grepped for the word
+`NotImplementedError`, which its own source contains); dead code in
+`build_features`; eight unused imports.
+
+**Standing lesson for future audits:** probe the *degraded* paths, not the happy
+one. All three defects sat on paths that only execute when something is already
+missing — which is exactly when a wrong answer does the most damage.
 
 ---
 

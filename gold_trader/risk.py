@@ -9,7 +9,7 @@ Everything here is deterministic and runs after the model has spoken.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from .journal import Journal
@@ -30,6 +30,12 @@ class TradingLimits:
     #: Stop distance must sit inside this band, measured in ATR.
     min_stop_atr_mult: float = 0.6
     max_stop_atr_mult: float = 3.0
+    #: Fallback band as a percent of spot, used when ATR cannot be computed
+    #: (a hand-read level, or too few candles). Without this, losing ATR would
+    #: silently remove the only stop-width check -- a 10-cent stop on $4300 gold
+    #: would size 5000oz and be taken out by the spread.
+    min_stop_pct_of_spot: float = 0.12
+    max_stop_pct_of_spot: float = 0.60
     #: Refuse to act on prices older than this.
     max_staleness_min: int = 90
     #: A level read off a screenshot cannot support a high-conviction call.
@@ -46,7 +52,9 @@ class TradingLimits:
             f"{self.risk_per_trade_pct:.2f}% (${self.base_risk_usd:,.0f})\n"
             f"- Minimum reward:risk {self.min_reward_risk:.2f}\n"
             f"- Stop distance must be between {self.min_stop_atr_mult:.1f}x and "
-            f"{self.max_stop_atr_mult:.1f}x ATR\n"
+            f"{self.max_stop_atr_mult:.1f}x ATR, or between "
+            f"{self.min_stop_pct_of_spot:.2f}% and {self.max_stop_pct_of_spot:.2f}% of spot "
+            f"when no ATR is available\n"
             f"- Max {self.max_open_positions} open positions, "
             f"{self.max_signals_per_day} signals per day\n"
             f"- Daily stop: trading halts at -{self.max_daily_loss_r:.1f}R realised\n"
@@ -176,12 +184,14 @@ def evaluate(
                 f"new entries are blocked inside its window.",
             )
         )
-    if calendar.confidence in ("stale", "derived_only"):
+    if calendar.confidence in ("stale", "derived_only", "invalid"):
         breaches.append(
             Breach(
                 "CALENDAR_INCOMPLETE",
                 "warning",
-                f"Event calendar is {calendar.confidence}; an unlisted release may be pending.",
+                f"Event calendar is {calendar.confidence}"
+                + (f" ({len(calendar.load_errors)} parse errors)" if calendar.load_errors else "")
+                + "; an unlisted release may be pending.",
             )
         )
 
@@ -262,6 +272,9 @@ def evaluate(
     else:
         breaches.append(Breach("NO_TARGET", "hard", "A target is required to size the trade."))
 
+    # Stop width must always be checked against something. ATR is the good
+    # measure; percent-of-spot is the fallback. Losing both is a hard block,
+    # never a pass -- less information must mean more scrutiny, not less.
     if atr:
         mult = stop_distance / atr
         if mult < limits.min_stop_atr_mult:
@@ -281,9 +294,41 @@ def evaluate(
                     f"Stop is {mult:.2f}x ATR, beyond the {limits.max_stop_atr_mult:.1f}x ceiling.",
                 )
             )
+    elif spot and spot > 0:
+        pct = stop_distance / spot * 100.0
+        breaches.append(
+            Breach(
+                "NO_ATR",
+                "info",
+                f"No ATR available; stop width checked against the percent-of-spot band "
+                f"({limits.min_stop_pct_of_spot:.2f}%-{limits.max_stop_pct_of_spot:.2f}%) instead.",
+            )
+        )
+        if pct < limits.min_stop_pct_of_spot:
+            breaches.append(
+                Breach(
+                    "STOP_TOO_TIGHT",
+                    "hard",
+                    f"Stop is {pct:.3f}% of spot ({stop_distance:.2f}), inside the "
+                    f"{limits.min_stop_pct_of_spot:.2f}% floor; spread alone would take it out.",
+                )
+            )
+        elif pct > limits.max_stop_pct_of_spot:
+            breaches.append(
+                Breach(
+                    "STOP_TOO_WIDE",
+                    "hard",
+                    f"Stop is {pct:.3f}% of spot ({stop_distance:.2f}), beyond the "
+                    f"{limits.max_stop_pct_of_spot:.2f}% ceiling.",
+                )
+            )
     else:
         breaches.append(
-            Breach("NO_ATR", "warning", "No ATR available, so stop width could not be sanity-checked.")
+            Breach(
+                "STOP_UNVERIFIABLE",
+                "hard",
+                "Neither ATR nor spot is available, so the stop width cannot be checked at all.",
+            )
         )
 
     if entry and spot and abs(entry - spot) / spot > 0.02:

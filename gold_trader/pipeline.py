@@ -18,12 +18,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
-from investment_pipeline.audit import AuditLog, sha256_of
+from investment_pipeline.audit import AuditLog
 from investment_pipeline.config import ModelSpec, resolve_model_tiers
 from investment_pipeline.llm import StageClient, run_stage
 
 from . import prompts, risk as gold_risk
-from .feed import Feed, FeedUnavailable, MarketSnapshot
+from .feed import Feed, MarketSnapshot
 from .indicators import FeatureSet, build_features
 from .journal import Journal, SignalRecord, resolve_all
 from .learning import LearningState, learn
