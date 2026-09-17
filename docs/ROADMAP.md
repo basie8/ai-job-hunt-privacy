@@ -72,7 +72,7 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 
 | ID | Task | Status | Verify | Notes |
 |----|------|--------|--------|-------|
-| TST-01 | Gold test suite | done | `tests:tests_gold:285` | Offline, no network |
+| TST-01 | Gold test suite | done | `tests:tests_gold:320` | Offline, no network |
 | TST-02 | Pipeline test suite | done | `tests:tests:44` | Offline, no network |
 | TST-03 | Component self-check | done | `file:gold_trader/selfcheck.py` | Placeholders, config coherence, cross-artifact drift |
 | TST-04 | Config coherence checks | done | `file:gold_trader/config_checks.py` | Limits that contradict each other |
@@ -83,6 +83,7 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 | DOC-03 | Runtime topology documented | done | `file:docs/RUNTIME.md` | Where each component runs and how it fails |
 | DOC-04 | Full installation guide | done | `file:docs/INSTALL.md` | Start-to-finish, Windows side |
 | OPS-05 | Live operations dashboard | done | `file:gold_trader/dashboard_html.py` | Republished by both Routines |
+| OPS-07 | Runs that never happen are detected | done | `file:gold_trader/heartbeat.py` | Every run records a heartbeat; `gold_trader runs` finds the gaps. Built after a usage-limit rejection went unnoticed |
 | OPS-06 | Paper mode stamped end to end | done | `file:gold_trader/config_checks.py` | Only 'paper' is a valid mode |
 
 ---

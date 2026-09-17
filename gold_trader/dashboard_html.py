@@ -492,6 +492,31 @@ def render(payload: Dict[str, Any]) -> str:
     else:
         feed_block = _state_block(health_section, "candles")
 
+    runs = sections["runs"]
+    if runs["status"] == "ok":
+        run_rows = ""
+        for routine in runs["data"]["routines"]:
+            gaps = len(routine["missed"]) + len(routine["errors"])
+            pill = "block" if gaps else "done"
+            label = f"{gaps} gap{'s' if gaps != 1 else ''}" if gaps else "complete"
+            run_rows += (
+                f"<tr><td class='mono'>{_esc(routine['routine'])}</td>"
+                f"<td class='num mono'>{routine['recorded']}/{routine['expected']}</td>"
+                f"<td><span class='pill {pill}'>{_esc(label)}</span></td></tr>"
+            )
+        missed = runs["data"]["missed_total"] + runs["data"]["error_total"]
+        note = ("Every run records that it happened, on every path. A gap means a run "
+                "died before reaching the pipeline." if not missed else
+                f"{missed} scheduled run(s) never happened or errored — see the top of the page.")
+        runs_block = (
+            '<div class="scroll"><table><thead><tr><th>Routine</th>'
+            '<th class="num">Ran</th><th>State</th></tr></thead><tbody>'
+            + run_rows + "</tbody></table></div>"
+            + f'<div class="panel-note" style="margin-top:10px">{_esc(note)}</div>'
+        )
+    else:
+        runs_block = _state_block(runs, "recorded runs")
+
     config = sections["config"]
     if config["status"] == "ok":
         c = config["data"]
@@ -619,6 +644,12 @@ def render(payload: Dict[str, Any]) -> str:
       <div class="panel-head"><h2>Event diary</h2></div>
       {calendar_block}
       <div class="src mono">{_esc(calendar['source'])}</div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Scheduled runs</h2>
+        <span class="panel-note">did they actually happen</span></div>
+      {runs_block}
+      <div class="src mono">{_esc(sections['runs']['source'])}</div>
     </div>
   </div>
 

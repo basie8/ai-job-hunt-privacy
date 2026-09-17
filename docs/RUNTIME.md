@@ -104,9 +104,39 @@ decision.
 | If this stops | Symptom | Who notices |
 |---|---|---|
 | Your PC / MT5 | Candles go stale | 12-hourly audit, then you, once a day |
-| A Routine | No signals, no audits | You, by absence — worth a manual check if quiet >24h |
+| A Routine | No signals, no audits | `gold_trader runs` — every run records a heartbeat, so a run that never happened is visible as a gap |
+| Account usage limit | A run is rejected in seconds and does nothing | Same — this is the case the heartbeat was built for |
 | GitHub push | Journal silently loses a signal | The next audit sees a gap between audit log and journal |
 | Anthropic API | Run errors | The Routine reports the error text — that one always notifies |
 
 The weakest link is the PC, and it fails quietly. That is why the audit runs
 twice a day and why the staleness gate is a hard block rather than a warning.
+
+### Runs that never happen
+
+A Routine run can die before it reaches any of this code — the account usage
+limit is rejected in seconds, a container may fail to provision, the API may be
+down. Such a run writes no commit, sends no alert and leaves no trace. On
+2026-09-17 a signal run was rejected for hitting the usage limit and nothing
+anywhere said so.
+
+So every run now records a line in `gold_trader/state/heartbeat.jsonl` before it
+finishes, **on every path including the ones that produce nothing else** — a flat
+read, a hard block, a stale-data early stop. A quiet run and a missing run must
+never look the same.
+
+```
+python -m gold_trader runs           # gaps in the last 26 hours, exits non-zero on any
+python -m gold_trader runs --hours 168 --json-out
+```
+
+Detection compares the schedule against the record and needs nothing but a clock
+and a file — deliberately, because a detector that called the Routines API would
+go blind in exactly the sessions where it matters. The API is still worth
+consulting for *why* a run failed, and the audit Routine does so when it can.
+
+Two properties keep it honest. A run inside its 25-minute grace window is not yet
+missed, because runs are staggered and take minutes. And the detector reports
+"not armed" rather than a wall of failures for any period before its first
+recorded heartbeat: it cannot speak for a time it was not watching, and a false
+alarm on day one is how a real alert gets learned into background noise.

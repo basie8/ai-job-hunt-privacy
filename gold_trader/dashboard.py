@@ -309,6 +309,34 @@ def collect_data_health(repo: str) -> Section:
     )
 
 
+def collect_runs(repo: str) -> Section:
+    """Scheduled runs that happened, and scheduled runs that never did.
+
+    A run rejected for an account usage limit dies in seconds and writes
+    nothing. Without this panel its only symptom is the page slowly ageing.
+    """
+    from .heartbeat import HEARTBEAT_FILENAME, audit_all
+
+    path = os.path.join(repo, "gold_trader", "state", HEARTBEAT_FILENAME)
+    reports = audit_all(path)
+    if not any(r.armed for r in reports):
+        return Section(
+            EMPTY,
+            reason=("No run has recorded a heartbeat yet. The detector starts watching "
+                    "from the first recorded run — it cannot speak for the runs before it."),
+            source=f"state/{HEARTBEAT_FILENAME}",
+        )
+    return Section(
+        OK,
+        data={
+            "routines": [r.to_dict() for r in reports],
+            "missed_total": sum(len(r.missed) for r in reports),
+            "error_total": sum(len(r.errors) for r in reports),
+        },
+        source=f"state/{HEARTBEAT_FILENAME}",
+    )
+
+
 def collect_calendar(repo: str) -> Section:
     from .macro import MacroCalendar
 
@@ -376,6 +404,7 @@ def build(repo: str = ".") -> Dict[str, Any]:
         "trading": _collect("state/journal.jsonl", lambda: collect_trading(repo)),
         "funnel": _collect("state/audit.jsonl", lambda: collect_funnel(repo)),
         "data_health": _collect("data/", lambda: collect_data_health(repo)),
+        "runs": _collect("state/heartbeat.jsonl", lambda: collect_runs(repo)),
         "calendar": _collect("state/calendar.json", lambda: collect_calendar(repo)),
         "config": _collect("gold_trader/config.py", lambda: collect_config(repo)),
     }
@@ -397,6 +426,24 @@ def build(repo: str = ".") -> Dict[str, Any]:
                 problems.append({
                     "severity": "critical", "source": "selfcheck",
                     "message": f"{result['component']}/{result['check']}: {result['detail']}",
+                })
+
+    runs = sections["runs"]
+    if runs.status == OK:
+        for routine in runs.data["routines"]:
+            for moment in routine["missed"]:
+                problems.append({
+                    "severity": "critical", "source": "runs",
+                    "message": (f"The {routine['routine']} run scheduled for "
+                                f"{moment[:16].replace('T', ' ')} UTC never happened — it left "
+                                "no trace, so it died before reaching the pipeline "
+                                "(account usage limit, provisioning failure, or an outage)."),
+                })
+            for beat in routine["errors"]:
+                problems.append({
+                    "severity": "critical", "source": "runs",
+                    "message": (f"The {routine['routine']} run at {beat['ts'][:16]} "
+                                f"reported an error: {beat['detail'] or '(no detail)'}"),
                 })
 
     tasks = sections["tasks"]

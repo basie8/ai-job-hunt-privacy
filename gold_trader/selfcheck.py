@@ -392,6 +392,63 @@ def check_money(report: Report) -> None:
     run(_cli_config)
 
 
+def check_run_health(report: Report, repo: str) -> None:
+    """The detector for runs that never happened. It only ever runs when
+    something has already gone wrong, so it gets exercised here on every audit."""
+    from .heartbeat import GRACE_MIN, SCHEDULES, audit_runs, record
+
+    run = _guard(report, "runs", "a missing run is detected")
+    def _detects():
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "heartbeat.jsonl")
+            base = datetime(2026, 9, 17, tzinfo=timezone.utc)
+            for hour in (7, 9, 11, 13):
+                record(path, "signal", "no_trade", now=base.replace(hour=hour, minute=25))
+            # 15:23 never ran; 17:00 is well past its grace period.
+            result = audit_runs(path, "signal", now=base.replace(hour=17))
+            assert [m.hour for m in result.missed] == [15], f"missed {result.missed}"
+            assert not result.healthy(), "a gap did not make the report unhealthy"
+            return f"{len(result.recorded)} recorded, 1 gap found"
+    run(_detects)
+
+    run = _guard(report, "runs", "a quiet run is not mistaken for a missing one")
+    def _quiet():
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "heartbeat.jsonl")
+            base = datetime(2026, 9, 17, 15, 25, tzinfo=timezone.utc)
+            record(path, "signal", "no_trade", "analyst flat", now=base)
+            result = audit_runs(path, "signal", now=base.replace(hour=16))
+            assert result.healthy(), "a run that reported nothing was counted as failed"
+            return "no_trade recorded and accepted"
+    run(_quiet)
+
+    run = _guard(report, "runs", "unarmed reports nothing rather than everything")
+    def _unarmed():
+        with tempfile.TemporaryDirectory() as tmp:
+            result = audit_runs(os.path.join(tmp, "absent.jsonl"), "signal")
+            assert not result.armed, "an empty record claimed to be watching"
+            assert result.missed == [], "an empty record invented failures"
+            return "cold start is silent"
+    run(_unarmed)
+
+    run = _guard(report, "runs", "schedules match the documented cron")
+    def _cron():
+        # The Schedule objects restate the live Routines' cron expressions.
+        # Nothing in the repo can read the Routine, so the cron string in
+        # RUNTIME.md is the reference both sides are checked against.
+        with open(os.path.join(repo, "docs/RUNTIME.md"), encoding="utf-8") as fh:
+            runtime = fh.read()
+        expected = {"signal": "23 7-21/2 * * 1-5", "audit": "41 6,18 * * *"}
+        for name, cron in expected.items():
+            assert cron in runtime, f"{name} cron {cron!r} is not documented in RUNTIME.md"
+            minute, hours, _, _, _ = cron.split()
+            schedule = SCHEDULES[name]
+            assert schedule.minute == int(minute), f"{name} minute drifted from {cron!r}"
+        assert GRACE_MIN > 0
+        return f"{len(SCHEDULES)} schedules pinned to RUNTIME.md"
+    run(_cron)
+
+
 def check_learning_guarantees(report: Report) -> None:
     """The three anti-overfitting guards, verified as properties not examples."""
     from .journal import Journal
@@ -516,6 +573,7 @@ def run_all(repo: str = ".") -> Report:
     check_feeds(report)
     check_degradation(report)
     check_money(report)
+    check_run_health(report, repo)
     check_learning_guarantees(report)
     check_smc_and_sessions(report)
     check_pipeline(report)

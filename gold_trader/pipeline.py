@@ -46,6 +46,9 @@ class GoldConfig:
     journal_path: str = "gold_trader/state/journal.jsonl"
     audit_path: str = "gold_trader/state/audit.jsonl"
     calendar_path: str = "gold_trader/state/calendar.json"
+    #: Proof that each scheduled run happened. A missing entry is the only
+    #: evidence a run died before it could report anything.
+    heartbeat_path: str = "gold_trader/state/heartbeat.jsonl"
     min_samples: int = 20
     #: Timeframe whose candles resolve open trades.
     resolution_timeframe: str = "m15"

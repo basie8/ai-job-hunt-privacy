@@ -31,6 +31,7 @@ from .progress import audit
 from .selfcheck import run_all
 from .dashboard import build as build_dashboard
 from .dashboard_html import render as render_dashboard
+from .heartbeat import OUTCOMES, SCHEDULES, audit_all, audit_runs, record
 
 
 def _data_dir(args: argparse.Namespace) -> str:
@@ -58,6 +59,7 @@ def _config(args: argparse.Namespace) -> GoldConfig:
         config.journal_path = os.path.join(args.state_dir, "journal.jsonl")
         config.audit_path = os.path.join(args.state_dir, "audit.jsonl")
         config.calendar_path = os.path.join(args.state_dir, "calendar.json")
+        config.heartbeat_path = os.path.join(args.state_dir, "heartbeat.jsonl")
     return config
 
 
@@ -288,6 +290,38 @@ def cmd_dashboard(args: argparse.Namespace) -> int:
     return 1 if payload["health"] == "critical" else 0
 
 
+def cmd_heartbeat(args: argparse.Namespace) -> int:
+    """Record that a scheduled run happened, whatever it concluded.
+
+    Every run calls this, including the ones that produce nothing else. A run
+    that leaves no trace is indistinguishable from a run that never started,
+    and the one that never started is the one worth knowing about.
+    """
+    config = _config(args)
+    beat = record(config.heartbeat_path, args.routine, args.outcome, args.detail or "")
+    print(f"recorded {beat.routine} {beat.outcome} at {beat.ts}")
+    return 0
+
+
+def cmd_runs(args: argparse.Namespace) -> int:
+    """Report scheduled runs that left no trace, and runs that errored.
+
+    Exits non-zero when a run is missing, so a caller cannot overlook it.
+    """
+    config = _config(args)
+    reports = ([audit_runs(config.heartbeat_path, args.routine, args.hours)]
+               if args.routine else audit_all(config.heartbeat_path, args.hours))
+    if args.json_out:
+        json.dump([r.to_dict() for r in reports], sys.stdout, indent=2)
+        sys.stdout.write("\n")
+    else:
+        print("Scheduled run health\n")
+        for report in reports:
+            print(report.render())
+            print()
+    return 0 if all(r.healthy() for r in reports) else 1
+
+
 def _common(parser: argparse.ArgumentParser, data: bool = False) -> None:
     parser.add_argument("--state-dir", default=None, help="Directory for journal/audit/calendar.")
     parser.add_argument("--journal", default=None)
@@ -336,6 +370,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--repo", default=".")
     p.add_argument("--json-out", action="store_true")
     p.set_defaults(func=cmd_progress)
+
+    p = sub.add_parser("heartbeat", help="Record that a scheduled run happened.")
+    _common(p)
+    p.add_argument("--routine", required=True, choices=sorted(SCHEDULES))
+    p.add_argument("--outcome", required=True, choices=list(OUTCOMES))
+    p.add_argument("--detail", default="", help="Error text, or a one-line note.")
+    p.set_defaults(func=cmd_heartbeat)
+
+    p = sub.add_parser("runs", help="Report scheduled runs that never happened.")
+    _common(p)
+    p.add_argument("--routine", default=None, choices=sorted(SCHEDULES))
+    p.add_argument("--hours", type=int, default=26)
+    p.add_argument("--json-out", action="store_true")
+    p.set_defaults(func=cmd_runs)
 
     p = sub.add_parser("selfcheck", help="Audit all components for errors and placeholders.")
     p.add_argument("--repo", default=".")
