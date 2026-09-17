@@ -248,6 +248,54 @@ system they use*.
 
 ---
 
+## 2026-09-17 — A run that never happened
+
+**Evidence:** one Routine run, rejected in five seconds.
+
+The 17:23 signal run failed with `You've hit your session limit · resets 5:30pm
+(UTC)`. Not a code fault — the account's usage limit, hit while a foreground
+session was working. It was found by hand, while answering a question about
+whether notifications were configured. Nothing in the system had noticed.
+
+**Why it was invisible.** The run died before `git pull`. It wrote no journal
+entry, no audit-log line, no commit, and produced nothing to notify about. The
+only trace it left anywhere was the absence of a trace. The dashboard would have
+aged past 26 hours and turned red eventually, but only if the outage lasted a
+day; a handful of lost runs inside a day would have gone unremarked entirely.
+
+Every failure detector in this system to date watches *output*: a stale claim, a
+failing check, an old candle. None of them could see a run that produced no
+output at all. Absence has to be measured against an expectation, and the
+expectation — the schedule — lived only on the Routine, outside the repo.
+
+**Change.** Every run now records a heartbeat before it finishes, on every path,
+including the paths that produce nothing else. The detector compares the
+schedule against the record; a scheduled slot with no beat inside its grace
+window is a run that never happened.
+
+Two design decisions are worth stating because both were tempting to get wrong:
+
+*Detection reads the repo, not the API.* The Routines API knows **why** a run
+failed and is genuinely better evidence — but a detector that depended on it
+would go blind in exactly the sessions where the tool might be unavailable.
+Expected-versus-recorded needs a clock and a file. The API is an enrichment, and
+the audit prompt says to note its absence rather than guess.
+
+*The detector refuses to speak about time it was not watching.* The first
+implementation reported every scheduled run since the beginning of the window as
+missed, because none of them had heartbeats — nine false alarms on the first
+run. A detector that cries wolf on day one is worse than no detector: it teaches
+you to ignore the channel before it has ever been right. It now reports "not
+armed" until the first heartbeat lands.
+
+**The general lesson**, and the third clause on the standing one: *a system can
+only detect failures in the things it produces. To detect a failure to produce
+anything, something must independently know what was expected.*
+
+**Hypotheses affected:** none. No trading evidence in this entry.
+
+---
+
 ## Template for future entries
 
 ```markdown

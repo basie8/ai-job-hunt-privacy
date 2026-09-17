@@ -81,6 +81,9 @@ data collection, and it should feel uneventful.
 - ✅ Found and fixed a `TypeError` that made **every CLI command** unrunnable
   while 290 tests stayed green. Guards added at both the test and self-check
   level. See `LEARNING_LOG.md`.
+- ✅ Found a scheduled run that failed silently (account usage limit) and built
+  the detector for it: every run records a heartbeat, `gold_trader runs` finds
+  the gaps, and the 12-hourly audit now notifies on one (OPS-07).
 
 **Yours:** the weekly review, every week, from the first one. Especially the
 loss post-mortems — thesis / level / variance.
