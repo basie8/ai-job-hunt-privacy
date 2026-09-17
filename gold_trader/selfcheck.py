@@ -484,6 +484,44 @@ def check_state_is_committable(report: Report, repo: str) -> None:
     run(_not_ignored)
 
 
+def check_credentials_path(report: Report) -> None:
+    """A run without an API key must say so, not raise from library internals.
+
+    The four stages need their own Anthropic credential; a Claude Code session's
+    subscription login does not provide one. The SDK constructs happily without
+    it and raises TypeError on the first request, so the failure arrives late
+    and unexplained unless something checks first.
+    """
+    from .cli import CREDENTIALS_REMEDY, _has_credentials
+
+    run = _guard(report, "credentials", "a missing key is detected, not stumbled on")
+    def _detects():
+        class _Bare:
+            api_key = None
+            auth_token = None
+
+        class _Keyed:
+            api_key = "sk-ant-placeholder"
+            auth_token = None
+
+        assert not _has_credentials(_Bare()), "a credential-less client read as authenticated"
+        assert _has_credentials(_Keyed()), "a real key read as missing"
+        return "both directions distinguishable"
+    run(_detects)
+
+    run = _guard(report, "credentials", "the remedy names the fix, not the symptom")
+    def _remedy():
+        for needle in ("ANTHROPIC_API_KEY", "console.anthropic.com",
+                       "subscription login does not satisfy this", "RUNTIME.md"):
+            assert needle in CREDENTIALS_REMEDY, f"remedy does not mention {needle!r}"
+        # The commands that work without a key, so a missing key does not read
+        # as a total outage.
+        for command in ("resolve", "status", "learn", "runs", "dashboard"):
+            assert command in CREDENTIALS_REMEDY, f"remedy omits working command {command!r}"
+        return f"{len(CREDENTIALS_REMEDY.splitlines())} lines, actionable"
+    run(_remedy)
+
+
 def check_learning_guarantees(report: Report) -> None:
     """The three anti-overfitting guards, verified as properties not examples."""
     from .journal import Journal
@@ -610,6 +648,7 @@ def run_all(repo: str = ".") -> Report:
     check_money(report)
     check_run_health(report, repo)
     check_state_is_committable(report, repo)
+    check_credentials_path(report)
     check_learning_guarantees(report)
     check_smc_and_sessions(report)
     check_pipeline(report)

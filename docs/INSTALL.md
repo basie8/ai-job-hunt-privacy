@@ -184,6 +184,35 @@ event blackouts accurate instead of `derived_only`.
 Python, the `anthropic` SDK and the repository are installed fresh in each cloud
 container. You never touch them.
 
+### One thing the cloud side does need from you: an API key
+
+The four stages call the Anthropic API directly, and that needs a credential of
+its own. A Claude Code session authenticates through your claude.ai
+subscription, which covers the agent *driving* the run but is not visible to the
+pipeline it invokes — so a scheduled run has credentials for one and none for
+the other. Discovered the hard way on 2026-09-17: `signal` failed with a
+`TypeError` from inside the SDK.
+
+To fix, add the key to the cloud environment the Routines use:
+
+1. Create a key at [console.anthropic.com](https://console.anthropic.com) →
+   API keys. This is **separate from the claude.ai subscription** and bills
+   pay-as-you-go.
+2. At [claude.ai/code](https://claude.ai/code), open the environment the
+   Routines run in (`Default`, unless you changed it) → **Environment
+   variables** → add `ANTHROPIC_API_KEY` with that value.
+3. The next scheduled run picks it up. Nothing to redeploy.
+
+**Cost:** roughly $0.35 per signal run at the configured model tiers, so about
+8 runs a weekday ≈ $14/week, plus the audits. Reduce it by widening the signal
+Routine's interval if that is more than you want to spend while the book is
+still on paper.
+
+Until the key is in place, everything that does not call a model still works —
+`resolve`, `status`, `learn`, `runs`, `progress`, `selfcheck`, `dashboard`,
+`pull-data`. The bridge keeps delivering candles and the journal keeps its
+integrity; only the four stages are blocked, so no signal can be produced.
+
 ---
 
 ## Part 3 — Confirming it worked

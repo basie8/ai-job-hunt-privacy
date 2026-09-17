@@ -322,6 +322,56 @@ nobody re-adds it in good faith. Guarded by a self-check and a test that run
 
 ---
 
+## 2026-09-17 — The pipeline has never run
+
+**Evidence:** the 19:23 signal run, which reported `no Anthropic credentials in
+env` and recorded an `error` heartbeat.
+
+The four stages call the Anthropic API directly. That needs a credential of
+their own, and a Claude Code session does not provide one: the session
+authenticates through the claude.ai subscription, which covers the agent
+*driving* the run but is invisible to the pipeline it invokes. Every scheduled
+signal run since the Routines were created has failed at the first model call.
+
+**So the journal is empty for two reasons, not one.** It is early — but also the
+pipeline has never once completed. I had been attributing the empty journal and
+empty audit log entirely to cold start, which was the available explanation and
+happened to be true on its own terms. It was not the whole truth, and nothing
+distinguished the two until a run finally reported why it stopped.
+
+That is the same shape as the two defects found earlier today, for the third
+time: **an expected-looking absence concealing a different cause.** An empty
+journal during cold start looks exactly like an empty journal that can never
+fill — whether the cause is a gitignore rule, a run that never started, or a
+pipeline that cannot authenticate. The run record is what separated them here,
+which is the first return on having built it.
+
+**Two fixes, neither of which supplies the key** — that part needs a human:
+
+*The failure now arrives early and explains itself.* The SDK constructs happily
+without credentials and raises `TypeError` from inside `_validate_headers` on
+the first request, so the error surfaced late and named a header problem rather
+than a missing key. `signal` now checks the resolved credential before doing any
+feature work and prints what to do about it.
+
+*Verified rather than assumed.* The failing run reported the TypeError as coming
+from "client construction before any model call". It does not — construction
+succeeds. Writing the guard against that description would have put it in the
+wrong place, and it would have passed review while catching nothing. There is
+now a test that asserts the SDK constructs without credentials, so if a future
+version starts failing earlier, the guard's placement is re-examined rather than
+silently redundant.
+
+**Also worth recording:** the run that found this reported it. Push reached the
+phone with the error text. The heartbeat it wrote was lost, because that run
+predated the gitignore fix by six minutes — but the alert arrived, which is the
+first time the notification path has done its actual job.
+
+**Hypotheses affected:** none. Still no trading evidence, and now a documented
+reason why there is none.
+
+---
+
 ## Template for future entries
 
 ```markdown

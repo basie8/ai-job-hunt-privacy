@@ -35,6 +35,7 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 | DAT-03 | market-data branch sync | done | `file:gold_trader/sync.py` | Round-trip tested over real git repos |
 | DAT-07 | GBPUSD sourced from MT5 | done | `file:gold_trader/fx.py` | Bridge writes `data/fx.json`; a missing or absurd rate falls back loudly |
 | DAT-04 | Bridge running on Pieter's machine | done | `data:180` | Confirmed 2026-09-17: market-data branch live, newest bar minutes old |
+| OPS-08 | Anthropic API key in the cloud environment | outstanding | `manual` | **Needs you.** Without it the four stages cannot run at all — see docs/INSTALL.md part 2 |
 | DAT-05 | Live vendor feed (egress + key) | outstanding | `manual` | Optional. Only if you want runs independent of your PC being on. |
 
 ## Structure and context
@@ -72,7 +73,7 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 
 | ID | Task | Status | Verify | Notes |
 |----|------|--------|--------|-------|
-| TST-01 | Gold test suite | done | `tests:tests_gold:320` | Offline, no network |
+| TST-01 | Gold test suite | done | `tests:tests_gold:330` | Offline, no network |
 | TST-02 | Pipeline test suite | done | `tests:tests:44` | Offline, no network |
 | TST-03 | Component self-check | done | `file:gold_trader/selfcheck.py` | Placeholders, config coherence, cross-artifact drift |
 | TST-04 | Config coherence checks | done | `file:gold_trader/config_checks.py` | Limits that contradict each other |

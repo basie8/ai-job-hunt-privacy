@@ -63,6 +63,15 @@ rather than a technical floor; hourly is available if you want it.
 **Cost:** ~8 signal runs/day × ~$0.35 ≈ $14/week, plus the audits. Billed to your
 Anthropic account.
 
+**Credentials — the part that is easy to miss.** The four stages call the
+Anthropic API directly and need an `ANTHROPIC_API_KEY` in the environment. The
+session's own subscription login does *not* satisfy this: the agent driving the
+run is authenticated, the pipeline it invokes is not. Without the key the SDK
+constructs without complaint and raises `TypeError` on the first request, so the
+failure arrives late and unexplained — `gold_trader signal` now checks first and
+names the remedy. Set it under the cloud environment's **Environment variables**;
+see `docs/INSTALL.md` part 2.
+
 ## 3. GitHub — the state
 
 **The repository is the only durable store in this system.** Which means

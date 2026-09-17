@@ -106,15 +106,76 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+#: The four stages call the Anthropic API directly, which needs a key of its
+#: own. A Claude Code session authenticates through the subscription and does
+#: not expose one inside the sandbox, so a scheduled run has credentials for
+#: the agent driving it and none for the pipeline it runs. That distinction is
+#: not obvious from a TypeError raised inside the SDK constructor.
+CREDENTIALS_REMEDY = """No Anthropic API credentials, so the four stages cannot run.
+
+The SDK looks for ANTHROPIC_API_KEY, then ANTHROPIC_AUTH_TOKEN, then an
+`ant auth login` profile, and found none. Note that a Claude Code session's own
+subscription login does not satisfy this: the agent running this command is
+authenticated, the pipeline it invokes is not.
+
+To fix, either:
+  1. Put a key in the environment this runs in. For the scheduled Routines that
+     means adding ANTHROPIC_API_KEY to the cloud environment's variables
+     (claude.ai/code -> environment -> Environment variables). Keys come from
+     console.anthropic.com and bill separately from the claude.ai subscription.
+  2. Locally, export ANTHROPIC_API_KEY=... before running.
+
+Everything that does not call a model still works without a key:
+  resolve, status, learn, runs, progress, selfcheck, dashboard, pull-data.
+See docs/RUNTIME.md section 2."""
+
+
+def _has_credentials(client: object) -> bool:
+    """True when the SDK client actually resolved a credential.
+
+    Mirrors the SDK's own resolution (api_key, then auth_token) by reading what
+    it resolved, rather than re-reading the environment here -- the environment
+    is not the only place it looks.
+    """
+    inner = getattr(client, "_client", client)
+    return bool(getattr(inner, "api_key", None) or getattr(inner, "auth_token", None))
+
+
 def cmd_signal(args: argparse.Namespace) -> int:
     from investment_pipeline.llm import AnthropicStageClient
 
     config = _config(args)
     try:
-        result = run_signal(_feed(args), AnthropicStageClient(), config=config)
+        client = AnthropicStageClient()
+    except ImportError as exc:
+        # A missing package is not a missing key. Reporting one as the other
+        # sends you to the wrong settings page.
+        print(f"The anthropic SDK is not installed: {exc}\n"
+              "Install it with:  pip install anthropic", file=sys.stderr)
+        return 4
+
+    # Checked here, before any feature work, because the SDK does not fail at
+    # construction -- it constructs happily and raises TypeError from inside
+    # _validate_headers on the first request. Verified against the installed
+    # SDK rather than assumed: a run that is going to fail for want of a key
+    # should say so in a second, not after building a full feature set.
+    if not _has_credentials(client):
+        print(CREDENTIALS_REMEDY, file=sys.stderr)
+        return 3
+
+    try:
+        result = run_signal(_feed(args), client, config=config)
     except FeedUnavailable as exc:
         print(f"Feed unavailable: {exc}", file=sys.stderr)
         return 2
+    except TypeError as exc:
+        # Belt and braces: if a future SDK resolves credentials differently and
+        # the check above stops matching, this still names the real remedy
+        # instead of surfacing a bare TypeError from library internals.
+        if "authentication" not in str(exc).lower():
+            raise
+        print(CREDENTIALS_REMEDY, file=sys.stderr)
+        return 3
 
     if args.json_out:
         json.dump(result.to_dict(), sys.stdout, indent=2, default=str)
