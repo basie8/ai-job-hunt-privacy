@@ -12,6 +12,7 @@ Predicates
 ``files:<a>,<b>``         every path exists
 ``tests:<dir>:<n>``       at least n tests pass under that directory
 ``journal:<n>``           at least n closed trades in the journal
+``data:<minutes>``        candles on disk newer than that many minutes
 ``learning:active``       the learning state has left warm-up
 ``routine``               a scheduled Routine exists (human-confirmed)
 ``manual``                only a human can confirm this
@@ -172,6 +173,22 @@ def verify(task: Task, repo: str = ".", run_tests: bool = True) -> Task:
         minimum = int(predicate.split(":", 1)[1])
         count = _closed_trades(repo)
         return settle(count >= minimum, f"{count} closed trades (need {minimum})")
+
+    if predicate.startswith("data:"):
+        max_age = float(predicate.split(":", 1)[1])
+        try:
+            from .sync import describe_data_dir
+
+            rows = describe_data_dir(os.path.join(repo, "data"))
+        except Exception as exc:  # noqa: BLE001
+            return settle(False, f"could not read data/: {exc}")
+        if not rows:
+            return settle(False, "no candles in data/ — the bridge has not delivered")
+        freshest = min(r["age_min"] for r in rows)
+        return settle(
+            freshest <= max_age,
+            f"{len(rows)} series, newest bar {freshest:.0f}min old (limit {max_age:.0f})",
+        )
 
     if predicate == "learning:active":
         count = _closed_trades(repo)

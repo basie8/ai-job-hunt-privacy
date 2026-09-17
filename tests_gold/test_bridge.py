@@ -50,6 +50,65 @@ class FakeMT5:
         return (0, "ok")
 
 
+class StdinIsBytes(unittest.TestCase):
+    """Regression: Windows translated "\\n" to "\\r\\n" writing git's stdin.
+
+    `git mktree` reads one entry per line, so the stray carriage return became
+    part of every filename and the branch shipped 'data\\r/XAUUSD_h1.csv\\r'.
+    It looked correct on the machine that pushed it and broke every reader.
+    Linux never reproduced it, so the guard is on the call itself.
+    """
+
+    def test_stdin_is_sent_as_bytes_not_text(self):
+        captured = {}
+        real = subprocess.run
+
+        def spy(args, **kwargs):
+            captured["input"] = kwargs.get("input")
+            captured["text"] = kwargs.get("text")
+            return real(["true"], capture_output=True)
+
+        subprocess.run = spy
+        try:
+            mt5_export.git(".", "mktree", stdin="100644 blob abc\tfile.csv\n")
+        finally:
+            subprocess.run = real
+
+        self.assertIsInstance(captured["input"], bytes, "stdin must bypass text mode")
+        self.assertNotIn(captured.get("text"), (True,), "text=True re-enables translation")
+        self.assertNotIn(b"\r", captured["input"])
+
+    def test_a_tree_entry_containing_a_carriage_return_is_refused(self):
+        with self.assertRaises(RuntimeError) as ctx:
+            mt5_export._mktree(".", ["100644 blob abc\tfile.csv\r"])
+        self.assertIn("line break", str(ctx.exception))
+
+    def test_pushed_paths_have_no_stray_characters(self):
+        import os as _os
+        from datetime import datetime, timedelta, timezone
+
+        with tempfile.TemporaryDirectory() as tmp:
+            origin = _os.path.join(tmp, "origin.git")
+            subprocess.run(["git", "init", "--bare", "-q", origin], check=True)
+            repo = _os.path.join(tmp, "repo")
+            subprocess.run(["git", "init", "-q", repo], check=True)
+            subprocess.run(["git", "-C", repo, "remote", "add", "origin", origin], check=True)
+            subprocess.run(["git", "-C", repo, "config", "user.email", "t@e.com"], check=True)
+            subprocess.run(["git", "-C", repo, "config", "user.name", "T"], check=True)
+
+            end = datetime(2026, 9, 17, 12, tzinfo=timezone.utc)
+            rows = [{"time": (end - timedelta(hours=i)).isoformat(), "open": 1, "high": 2,
+                     "low": 0.5, "close": 1.5, "volume": 10} for i in range(3)]
+            mt5_export.write_csv(rows, _os.path.join(repo, "data", "XAUUSD_h1.csv"))
+            mt5_export.push_data_branch(repo, _os.path.join(repo, "data"), "test")
+
+            listing = subprocess.run(
+                ["git", "-C", repo, "ls-tree", "-r", "--name-only", "origin/market-data"],
+                capture_output=True, text=True, check=True,
+            ).stdout.split()
+            self.assertEqual(listing, ["data/XAUUSD_h1.csv"])
+
+
 class SymbolResolution(unittest.TestCase):
     def test_the_plain_name_is_preferred(self):
         mt5 = FakeMT5(["EURUSD", "XAUUSD", "GOLD"])

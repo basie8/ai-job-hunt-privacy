@@ -4,3 +4,4 @@ __pycache__/
 audit/
 gold_trader/state/*.jsonl
 gold_trader/state/calendar.json
+data/

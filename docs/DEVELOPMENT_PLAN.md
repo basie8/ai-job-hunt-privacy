@@ -5,13 +5,13 @@ organised into phases, each with an **entry gate**, a **defined scope**, and an
 **exit gate that is machine-checkable**. A phase does not end because it feels
 finished; it ends when its gate verifies.
 
-Current position: **Phase 1, blocked.**
+Current position: **Phase 2, cold start.** Phase 1 cleared 2026-09-17.
 
 | Phase | Name | Gate to exit | State |
 |---|---|---|---|
 | 0 | Foundation | `selfcheck` green, suites pass | ✅ complete |
-| 1 | First data | ≥1 candle from the live bridge | 🔴 blocked on you |
-| 2 | Cold start | 20 closed trades journalled | ⏸ waiting |
+| 1 | First data | ≥1 candle from the live bridge | ✅ complete |
+| 2 | Cold start | 20 closed trades journalled | 🔴 active |
 | 3 | Learning active | Clamps engaged, calibration measured | ⏸ waiting |
 | 4 | Validation | 60 trades, H1–H6 tested | ⏸ waiting |
 | 5 | Refinement | Backtest + hillclimb against a real sample | ⏸ waiting |
@@ -28,7 +28,7 @@ component self-check.
 **Exit gate:** `python -m gold_trader selfcheck` → 20/20; `tests_gold` 221 pass;
 `tests` 44 pass. **Verified.**
 
-## Phase 1 — First data 🔴
+## Phase 1 — First data ✅
 
 **Entry gate:** Phase 0 complete.
 
@@ -59,7 +59,7 @@ minutes old. Roadmap row DAT-04 flips to done on its own.
 
 **What unblocks:** SMC-03, LRN-03, LRN-04, LRN-05, MAC-02, EVL-02.
 
-## Phase 2 — Cold start ⏸
+## Phase 2 — Cold start 🔴 active
 
 **Entry gate:** DAT-04 verified.
 
@@ -67,14 +67,12 @@ minutes old. Roadmap row DAT-04 flips to done on its own.
 nothing during this phase — no clamps, no blocks, no conviction shrinkage. It is
 data collection, and it should feel uneventful.
 
-**Mine, in the first week of live data:**
-- Validate the SMC detectors against real gold. The open question is **zone
-  count**: if a live session generates 40 order blocks and FVGs, the prompt
-  becomes noise and the detectors need a significance filter. Synthetic data
-  cannot answer this.
-- Re-check the swing `lookback=2` fractal on real M15. It may be too sensitive.
-- Confirm real ATR values sit sensibly inside the 0.6x–3.0x stop band on $4300
-  gold rather than at an edge.
+**Mine, done 2026-09-17** (see `LEARNING_LOG.md` for numbers):
+- ✅ Zone count answered: ~100 FVGs collapse to 5 unmitigated. No filter needed.
+- ✅ ATR band checked: sane on all three timeframes. Found and fixed a
+  mis-calibrated percent fallback that would have refused every H1 stop.
+- ⚠️ Swing `lookback=2` gives 24–27 swings per 100 bars, producing a structural
+  break every 2.7 bars. Too frequent to be meaningful — roadmap SMC-04.
 
 **Yours:** the weekly review, every week, from the first one. Especially the
 loss post-mortems — thesis / level / variance.

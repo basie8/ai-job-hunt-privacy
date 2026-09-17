@@ -41,8 +41,14 @@ class TradingLimits:
     #: (a hand-read level, or too few candles). Without this, losing ATR would
     #: silently remove the only stop-width check -- a 10-cent stop on $4300 gold
     #: would size 5000oz and be taken out by the spread.
+    #:
+    #: Calibrated against real XAUUSD (2026-09-17, spot 4362): the ATR band
+    #: permits 0.12%-0.61% on M15 and 0.28%-1.40% on H1, so a fallback ceiling
+    #: of 0.60% would have refused every legitimate H1 stop. The band now spans
+    #: M15 through H1. H4 swing stops (up to 2.86% of spot) still fall outside
+    #: it on purpose: a multi-day stop should not be set from a screenshot.
     min_stop_pct_of_spot: float = 0.12
-    max_stop_pct_of_spot: float = 0.60
+    max_stop_pct_of_spot: float = 1.50
     #: Refuse to act on prices older than this.
     max_staleness_min: int = 90
     #: A level read off a screenshot cannot support a high-conviction call.

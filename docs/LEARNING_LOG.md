@@ -15,8 +15,8 @@ Rules for entries:
 
 ## Current state
 
-**Closed trades: 0.** Phase 1 of `DEVELOPMENT_PLAN.md`, blocked on the bridge.
-The learning loop is at cold start. Every statement below
+**Closed trades: 0.** Phase 2 of `DEVELOPMENT_PLAN.md` — the bridge is live as
+of 2026-09-17 and signals are now accumulating. The learning loop is at cold start. Every statement below
 is a hypothesis carried in from design, not a measured finding. Nothing here has
 earned its place yet.
 
@@ -104,6 +104,97 @@ which makes it *more* testable, not less.
 **Standing lesson for future audits:** probe the *degraded* paths, not the happy
 one. All three defects sat on paths that only execute when something is already
 missing — which is exactly when a wrong answer does the most damage.
+
+---
+
+## 2026-09-17 — First real gold data. Two bugs, one hypothesis contradicted.
+
+**Evidence:** 500 H1 bars (2026-08-19 to 2026-09-17), 400 H4, 500 M15, from
+Pieter's live MT5 feed. Spot 4362.10. Still zero closed trades — this is a
+measurement of the *detectors*, not of any edge.
+
+### The bridge worked, then didn't
+
+The `market-data` branch appeared on the first attempt, with paths
+`"data\r/XAUUSD_h1.csv\r"`. Carriage returns baked into the git tree.
+
+**Cause:** `subprocess.run(..., text=True)` translates `\n` to `\r\n` when
+writing a child's stdin **on Windows**. `git mktree` reads one entry per line and
+took the stray `\r` as part of each filename. Every Linux test passed; the bug
+only exists on the platform the bridge actually runs on.
+
+**Change:** stdin is now sent as raw bytes, `_mktree` refuses any entry
+containing a line break, and three regression tests assert the call shape rather
+than the platform behaviour. The already-pushed branch was repaired from here.
+
+**Lesson worth keeping:** a test suite that runs only on the developer's platform
+cannot cover a cross-platform boundary. The guard had to move from *the output*
+to *the call*.
+
+### H-SMC-1 (zone count) — CONTRADICTED, and that is good news
+
+The open worry was that live gold would generate so many order blocks and fair
+value gaps that the analyst's prompt would become noise. Measured:
+
+| TF | bars | FVGs found | unmitigated | OBs found | unmitigated |
+|---|---|---|---|---|---|
+| H4 | 400 | 97 | **5** | 131 | **0** |
+| H1 | 500 | 115 | **5** | 183 | **13** |
+| M15 | 500 | 104 | **5** | 181 | **7** |
+
+The mitigation filter does the whole job: ~100 zones collapse to a handful, and
+the display cap of 6 is rarely reached. **No significance filter is needed for
+zones.** The concern was misplaced.
+
+### New concern: structure events are far too frequent
+
+183 BOS/CHoCH events across 500 H1 bars is **one structural break every 2.7
+bars**. Structure that changes every three candles is not structure. This traces
+to swing sensitivity: `lookback=2` produces 24–27 swings per 100 bars on every
+timeframe, so the break detector re-arms almost immediately.
+
+**Consequence for H6** (structural alignment predicts outcomes): both alignment
+readings currently say "conflicted", and with breaks this frequent that may be
+noise rather than signal. H6 is not yet testable in a meaningful way.
+
+**Change:** none to the detector — that is a larger change than a live-data
+observation justifies, and there are no closed trades to validate it against.
+Logged as roadmap **SMC-04**.
+
+### Bug: duplicate order blocks
+
+Consecutive structure breaks often resolve to the same preceding candle, so the
+same zone was emitted twice — visible in the prompt as the identical OB listed
+back to back. One zone reading as two confirmations is worse than a wasted line.
+Deduplicated on (kind, direction, top, bottom).
+
+### H1 (stop band) — partially answered, and a mis-calibration found
+
+Real ATR by timeframe, with the stop range the 0.6x–3.0x band permits:
+
+| TF | ATR14 | as % of spot | permitted stop | as % of spot |
+|---|---|---|---|---|
+| M15 | $8.81 | 0.202% | $5.29–$26.43 | 0.121%–0.606% |
+| H1 | $20.40 | 0.468% | $12.24–$61.20 | 0.281%–1.403% |
+| H4 | $41.54 | 0.952% | $24.92–$124.61 | 0.571%–2.857% |
+
+The ATR band itself looks sane. But the **percent-of-spot fallback** — added last
+audit for when ATR is unavailable — was set to 0.12%–0.60%, calibrated against
+synthetic data whose ATR was tiny. That ceiling happens to match M15 almost
+exactly and would have **refused every legitimate H1 stop**, and every H4 one.
+
+**Change:** fallback band widened to 0.12%–1.50%, covering M15 through H1. H4
+swing stops stay outside it deliberately — a multi-day stop should not be set
+from a screenshot, which is the only path where the fallback applies.
+
+This is a widened bound, so stating the reasoning explicitly: the ATR band is the
+primary check and is unchanged; the fallback exists to *approximate* it when ATR
+is missing, and it demonstrably did not. Correcting an approximation to match its
+target is not the same as relaxing a limit.
+
+**Hypotheses affected:** H-SMC-1 contradicted (no filter needed). H1 still open —
+the band looks plausible but needs MAE data from closed trades. H6 now doubtful
+for the reason above.
 
 ---
 

@@ -124,10 +124,24 @@ class RealRoadmap(unittest.TestCase):
         # If this fails, the roadmap claims something that is not true.
         self.assertEqual([t.id for t in self._audit().stale], [])
 
-    def test_the_critical_path_task_is_present_and_blocked(self):
-        # DAT-04 is what everything else waits on; it must not quietly go green.
+    def test_the_critical_path_task_is_machine_verified(self):
+        # DAT-04 (the bridge delivering candles) is what everything waited on.
+        # It went green on 2026-09-17 when real candles arrived. The guard now
+        # is that it can never be marked done on a human's say-so: its predicate
+        # must actually test the thing the row claims.
         task = next(t for t in self._audit().tasks if t.id == "DAT-04")
-        self.assertEqual(task.status, "blocked")
+        self.assertNotIn(task.verify, ("manual", "routine"),
+                         "the critical path must not be self-certified")
+        self.assertTrue(task.verify.startswith("data:"),
+                        f"DAT-04 should verify candle freshness, not {task.verify!r}")
+
+    def test_the_bridge_predicate_fails_when_candles_are_missing(self):
+        # The predicate has to be able to fail, or it proves nothing.
+        from gold_trader.progress import Task, verify
+        with tempfile.TemporaryDirectory() as empty:
+            task = verify(Task("DAT-04", "bridge", "done", "data:180"), empty)
+            self.assertEqual(task.verdict, VERDICT_STALE)
+            self.assertIn("has not delivered", task.detail)
 
 
 if __name__ == "__main__":

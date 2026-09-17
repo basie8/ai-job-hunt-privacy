@@ -133,15 +133,27 @@ def write_csv(rows: Sequence[Dict[str, object]], path: str) -> bool:
 
 
 def git(repo: str, *args: str, stdin: Optional[str] = None, check: bool = True) -> subprocess.CompletedProcess:
-    result = subprocess.run(
-        ["git", "-C", repo, *args], capture_output=True, text=True, input=stdin
-    )
+    """Run git. stdin is sent as raw bytes, deliberately.
+
+    With ``text=True`` Python translates "\\n" to "\\r\\n" on Windows when
+    writing to a child's stdin. ``git mktree`` reads one entry per line and
+    treats the stray "\\r" as part of the filename, so the pushed tree ends up
+    holding 'data\\r/XAUUSD_h1.csv\\r'. It looks fine on the pushing machine and
+    breaks every reader. Encoding here bypasses the translation entirely.
+    """
+    payload = stdin.encode("utf-8") if stdin is not None else None
+    result = subprocess.run(["git", "-C", repo, *args], capture_output=True, input=payload)
+    stdout = result.stdout.decode("utf-8", "replace")
+    stderr = result.stderr.decode("utf-8", "replace")
     if check and result.returncode != 0:
-        raise RuntimeError(f"git {' '.join(args)}: {(result.stderr or result.stdout).strip()}")
-    return result
+        raise RuntimeError(f"git {' '.join(args)}: {(stderr or stdout).strip()}")
+    return subprocess.CompletedProcess(result.args, result.returncode, stdout, stderr)
 
 
 def _mktree(repo: str, entries: Sequence[str]) -> str:
+    for entry in entries:
+        if "\r" in entry or "\n" in entry.rstrip("\n"):
+            raise RuntimeError(f"tree entry contains a line break: {entry!r}")
     return git(repo, "mktree", stdin="\n".join(entries) + "\n").stdout.strip()
 
 

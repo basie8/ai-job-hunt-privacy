@@ -342,7 +342,18 @@ def read_structure(
     swings = find_swings(candles, lookback)
     cutoff = len(candles) - recent_bars
 
-    zones = [z for z in fair_value_gaps(candles) + order_blocks(candles, lookback) if not z.mitigated]
+    # Consecutive structure breaks often resolve to the same preceding candle,
+    # so the same order block can be found more than once. Showing it twice
+    # wastes prompt space and makes one zone read as two confirmations.
+    seen, zones = set(), []
+    for zone in fair_value_gaps(candles) + order_blocks(candles, lookback):
+        if zone.mitigated:
+            continue
+        key = (zone.kind, zone.direction, round(zone.top, 4), round(zone.bottom, 4))
+        if key in seen:
+            continue
+        seen.add(key)
+        zones.append(zone)
     zones.sort(key=lambda z: z.index, reverse=True)
 
     highs = [s for s in swings if s.kind == "high"]

@@ -33,7 +33,7 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 | DAT-02 | MT5 bridge | done | `file:gold_trader/bridge/mt5_export.py` | Plumbing-only push, never touches your tree |
 | DAT-06 | Windows install kit | done | `files:gold_trader/bridge/windows_kit/SETUP.bat,gold_trader/bridge/windows_kit/README.txt` | Zip with one-click setup; needs no clone of the project |
 | DAT-03 | market-data branch sync | done | `file:gold_trader/sync.py` | Round-trip tested over real git repos |
-| DAT-04 | Bridge running on Pieter's machine | blocked | `journal:1` | **Needs you.** Nothing downstream can start until candles arrive. |
+| DAT-04 | Bridge running on Pieter's machine | done | `data:180` | Confirmed 2026-09-17: market-data branch live, newest bar minutes old |
 | DAT-05 | Live vendor feed (egress + key) | outstanding | `manual` | Optional. Only if you want runs independent of your PC being on. |
 
 ## Structure and context
@@ -42,7 +42,8 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 |----|------|--------|--------|-------|
 | SMC-01 | CHoCH / BOS / OB / FVG / sweeps | done | `file:gold_trader/smc.py` | One documented interpretation, computed identically each run |
 | SMC-02 | Sessions, killzones, session ranges | done | `file:gold_trader/sessions.py` | DST-correct via zoneinfo |
-| SMC-03 | Detectors validated against real gold data | blocked | `journal:1` | Synthetic data only so far. Blocked on DAT-04. |
+| SMC-03 | Detectors validated against real gold data | done | `data:180` | Run against real XAUUSD 2026-09-17; findings in LEARNING_LOG |
+| SMC-04 | Significance filter for structure events | outstanding | `manual` | 183 BOS/CHoCH per 500 H1 bars is too frequent to mean much |
 | MAC-01 | Event calendar with blackout windows | done | `file:gold_trader/macro.py` | NFP/claims derived; FOMC/CPI/PCE from file |
 | MAC-02 | Calendar file filled through year-end | outstanding | `file:gold_trader/state/calendar.json` | **Needs you.** CPI/PCE dates from BLS/BEA. |
 | MAC-03 | DXY / real-yield / VIX readings supplied weekly | outstanding | `manual` | **Needs you.** Weekly review covers this. |
@@ -53,7 +54,7 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 |----|------|--------|--------|-------|
 | LRN-01 | Journal with feature snapshots | done | `file:gold_trader/journal.py` | Pessimistic same-bar resolution |
 | LRN-02 | Calibration and per-setup clamps | done | `file:gold_trader/learning.py` | Can only reduce risk, never increase |
-| LRN-03 | First 20 closed trades | blocked | `journal:20` | Blocked on DAT-04. Nothing to learn from yet. |
+| LRN-03 | First 20 closed trades | blocked | `journal:20` | Unblocked by DAT-04; now accumulating |
 | LRN-04 | Learning state leaves warm-up | blocked | `learning:active` | Clamps stay inert until LRN-03 |
 | LRN-05 | Setup taxonomy validated against real outcomes | outstanding | `journal:40` | Some setups may prove undetectable or useless |
 
@@ -70,7 +71,7 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 
 | ID | Task | Status | Verify | Notes |
 |----|------|--------|--------|-------|
-| TST-01 | Gold test suite | done | `tests:tests_gold:240` | Offline, no network |
+| TST-01 | Gold test suite | done | `tests:tests_gold:245` | Offline, no network |
 | TST-02 | Pipeline test suite | done | `tests:tests:44` | Offline, no network |
 | TST-03 | Component self-check | done | `file:gold_trader/selfcheck.py` | Placeholders, config coherence, cross-artifact drift |
 | TST-04 | Config coherence checks | done | `file:gold_trader/config_checks.py` | Limits that contradict each other |
