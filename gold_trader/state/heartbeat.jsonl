@@ -1,0 +1,1 @@
+{"detail": "signal stage failed: no Anthropic credentials in env (ANTHROPIC_API_KEY/ANTHROPIC_AUTH_TOKEN/ant auth login all absent); AnthropicStageClient() raised TypeError at client construction before any model call", "outcome": "error", "routine": "signal", "ts": "2026-09-17T19:24:58+00:00"}
