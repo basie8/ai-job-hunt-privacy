@@ -215,3 +215,64 @@ class BridgeRoundTrip(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PerTimeframeFreshness(unittest.TestCase):
+    """A bar cannot be fresher than its own interval. Judging every timeframe
+    against one flat threshold made h4 read STALE for roughly two thirds of its
+    normal life -- and a reader who sees that nightly stops believing the word."""
+
+    def test_each_timeframe_gets_its_own_limit(self):
+        from gold_trader.sync import STALENESS_GRACE_MIN, expected_age_min
+
+        self.assertEqual(expected_age_min("m15"), 15 + STALENESS_GRACE_MIN)
+        self.assertEqual(expected_age_min("h1"), 60 + STALENESS_GRACE_MIN)
+        self.assertEqual(expected_age_min("h4"), 240 + STALENESS_GRACE_MIN)
+
+    def test_the_limit_is_case_insensitive(self):
+        from gold_trader.sync import expected_age_min
+
+        self.assertEqual(expected_age_min("H4"), expected_age_min("h4"))
+
+    def test_an_unknown_timeframe_is_judged_strictly_not_waved_through(self):
+        # Better to question an unrecognised series than to assume it is fine.
+        from gold_trader.sync import STALENESS_GRACE_MIN, expected_age_min
+
+        self.assertEqual(expected_age_min("w1"), STALENESS_GRACE_MIN)
+
+    def test_a_two_hour_old_h4_bar_is_not_stale(self):
+        # The exact false positive: 114 minutes read STALE under the flat rule.
+        rows = self._describe({"h4": 120, "m15": 10})
+        self.assertFalse(self._row(rows, "h4")["stale"])
+
+    def test_an_h4_bar_past_its_own_cadence_is_stale(self):
+        rows = self._describe({"h4": 300})
+        self.assertTrue(self._row(rows, "h4")["stale"])
+
+    def test_an_m15_bar_at_ninety_minutes_is_stale_though_the_old_rule_allowed_it(self):
+        # The flat 90-minute rule cut both ways: it was too lax for m15.
+        rows = self._describe({"m15": 90})
+        self.assertTrue(self._row(rows, "m15")["stale"])
+
+    def _row(self, rows, timeframe):
+        return next(r for r in rows if r["timeframe"] == timeframe)
+
+    def _describe(self, ages_min):
+        """Write CSVs whose newest bar is N minutes old, then describe them."""
+        import csv as _csv
+        import os as _os
+        import tempfile as _tempfile
+        from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+        from gold_trader.sync import describe_data_dir
+
+        now = _dt(2026, 9, 17, 22, 54, tzinfo=_tz.utc)
+        tmp = _tempfile.mkdtemp()
+        for timeframe, age in ages_min.items():
+            path = _os.path.join(tmp, f"XAUUSD_{timeframe}.csv")
+            with open(path, "w", newline="") as fh:
+                writer = _csv.writer(fh)
+                writer.writerow(["time", "open", "high", "low", "close", "volume"])
+                writer.writerow([(now - _td(minutes=age)).isoformat(),
+                                 1, 2, 0.5, 1.5, 10])
+        return describe_data_dir(tmp, now)

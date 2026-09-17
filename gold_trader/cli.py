@@ -285,15 +285,20 @@ def cmd_pull_data(args: argparse.Namespace) -> int:
         print(f"No XAUUSD_*.csv under {args.data_dir}. Is the bridge running?", file=sys.stderr)
         return 2
     for row in rows:
-        flag = "  STALE" if row["age_min"] > args.max_age_min else ""
+        # Judged per timeframe: an h4 bar is not late at 90 minutes, it is
+        # simply an h4 bar. --max-age-min overrides for every series at once.
+        limit = args.max_age_min if args.max_age_min else row["expected_max_min"]
+        flag = "  STALE" if row["age_min"] > limit else ""
         print(
             f"  {row['timeframe']:<4} {row['bars']:>4} bars, last {row['last_ts']} "
-            f"({row['age_min']:.0f}min old, close {row['last_close']}){flag}"
+            f"({row['age_min']:.0f}min old of {limit:.0f} allowed, "
+            f"close {row['last_close']}){flag}"
         )
-    freshest = min(r["age_min"] for r in rows)
-    if freshest > args.max_age_min:
+    behind = [r for r in rows
+              if r["age_min"] > (args.max_age_min or r["expected_max_min"])]
+    if len(behind) == len(rows):
         print(
-            f"\nEvery series is older than {args.max_age_min}min. The pipeline will refuse "
+            "\nEvery series is behind its own cadence. The pipeline will refuse "
             "to signal on this. Check the bridge on your machine.",
             file=sys.stderr,
         )
@@ -423,7 +428,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--repo", default=".")
     p.add_argument("--branch", default=DATA_BRANCH)
     p.add_argument("--data-dir", default="data")
-    p.add_argument("--max-age-min", type=int, default=90)
+    p.add_argument("--max-age-min", type=int, default=0,
+                   help="Override the per-timeframe freshness limit for every series.")
     p.set_defaults(func=cmd_pull_data)
 
     p = sub.add_parser("progress", help="Audit the roadmap, verifying each claim.")

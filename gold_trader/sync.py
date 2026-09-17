@@ -51,6 +51,30 @@ def _snapshot(directory: str) -> Dict[str, str]:
     return out
 
 
+#: How often each series produces a bar. A bar cannot be fresher than its own
+#: interval, so judging every timeframe against one threshold is a category
+#: error: at a flat 90 minutes, an h4 bar reads STALE for roughly two thirds of
+#: its perfectly normal life, and a reader who sees that nightly stops believing
+#: the word.
+TIMEFRAME_MINUTES = {
+    "m1": 1, "m5": 5, "m15": 15, "m30": 30,
+    "h1": 60, "h2": 120, "h4": 240, "h8": 480, "d1": 1440,
+}
+
+#: Allowed on top of the interval: the bar has to close, the bridge runs every
+#: 15 minutes, and the push takes a moment.
+STALENESS_GRACE_MIN = 30
+
+
+def expected_age_min(timeframe: str, grace: float = STALENESS_GRACE_MIN) -> float:
+    """The oldest a series' newest bar can legitimately be.
+
+    An unknown timeframe falls back to the grace alone, which is deliberately
+    strict: better to question an unrecognised series than to wave it through.
+    """
+    return TIMEFRAME_MINUTES.get(timeframe.lower(), 0) + grace
+
+
 def describe_data_dir(data_dir: str, now: datetime = None) -> List[Dict[str, object]]:
     """Freshness of each XAUUSD series on disk, newest bar first."""
     now = now or datetime.now(timezone.utc)
@@ -80,6 +104,10 @@ def describe_data_dir(data_dir: str, now: datetime = None) -> List[Dict[str, obj
                 "last_ts": ts.isoformat(),
                 "last_close": last.get("close"),
                 "age_min": (now - ts).total_seconds() / 60.0,
+                "expected_max_min": expected_age_min(
+                    name[len("XAUUSD_") : -len(".csv")]),
+                "stale": (now - ts).total_seconds() / 60.0
+                > expected_age_min(name[len("XAUUSD_") : -len(".csv")]),
             }
         )
     return rows

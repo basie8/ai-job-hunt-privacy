@@ -629,6 +629,24 @@ def check_bridge_link(report: Report) -> None:
     run(_stale_wins)
 
 
+def check_freshness_is_per_timeframe(report: Report) -> None:
+    """A bar cannot be fresher than its own interval."""
+    from .sync import STALENESS_GRACE_MIN, expected_age_min
+
+    run = _guard(report, "feed", "freshness is judged per timeframe")
+    def _per_tf():
+        assert expected_age_min("h4") > expected_age_min("h1") > expected_age_min("m15"), (
+            "timeframes are not ordered by their own cadence")
+        # The exact false positive this replaced: a 114-minute-old h4 bar read
+        # STALE under a flat 90-minute rule, every single evening.
+        assert expected_age_min("h4") > 114, "an h4 bar two hours old would still read stale"
+        assert expected_age_min("m15") < 90, "the m15 limit is looser than the old flat rule"
+        assert expected_age_min("nonsense") == STALENESS_GRACE_MIN, (
+            "an unrecognised timeframe was waved through instead of questioned")
+        return "m15/h1/h4 each judged against their own cadence"
+    run(_per_tf)
+
+
 def check_learning_guarantees(report: Report) -> None:
     """The three anti-overfitting guards, verified as properties not examples."""
     from .journal import Journal
@@ -758,6 +776,7 @@ def run_all(repo: str = ".") -> Report:
     check_credentials_path(report)
     check_market_hours(report)
     check_bridge_link(report)
+    check_freshness_is_per_timeframe(report)
     check_learning_guarantees(report)
     check_smc_and_sessions(report)
     check_pipeline(report)

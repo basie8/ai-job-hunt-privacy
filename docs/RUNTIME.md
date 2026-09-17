@@ -120,7 +120,14 @@ Two consequences, both live in code rather than in a prompt:
   rollover. `gold_trader selfcheck` now verifies that no scheduled slot falls in
   a closure, in both summer and winter.
 
-Candle freshness is not judged while the market is shut. A healthy bridge
+Candle freshness is judged **per timeframe**, against each series' own cadence
+(interval + 30 minutes' grace): 45 minutes for m15, 90 for h1, 270 for h4. A
+single flat threshold is a category error — at 90 minutes an h4 bar read STALE
+for roughly two thirds of its perfectly normal life, and a reader who sees that
+every evening stops believing the word. It cut the other way too: 90 minutes was
+far too lax for m15.
+
+Candle freshness is not judged at all while the market is shut. A healthy bridge
 delivers nothing over a weekend because there is nothing to deliver, and a
 bridge that dies during a closure is undetectable until the reopen either way —
 the first run after it catches the gap.
