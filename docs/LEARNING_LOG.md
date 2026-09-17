@@ -292,6 +292,32 @@ armed" until the first heartbeat lands.
 only detect failures in the things it produces. To detect a failure to produce
 anything, something must independently know what was expected.*
 
+### Found the same day: the state directory was gitignored
+
+Chasing the first defect turned up a worse one. `gold_trader/state/*.jsonl` was
+in `.gitignore`, so the journal, the audit log and the brand-new heartbeat could
+never be committed. Every `git add gold_trader/state/` in both scheduled
+Routines had been a silent no-op since the day they were written.
+
+Containers are ephemeral. `RUNTIME.md` states it plainly — "the repository is
+the only durable store in this system" — and the `.gitignore` quietly
+contradicted it. Nothing failed, nothing warned. The first signal would have
+been journalled, committed to nothing, and gone. The journal would have read
+zero trades forever; the learning loop could never have left cold start no
+matter how many months it ran; LRN-03 was unreachable by construction. The
+system would have looked healthy the entire time, because every check it had
+was measuring things that were working.
+
+It was invisible for the same reason as the missed run: **the absence of an
+effect looks exactly like a thing that has not happened yet.** An empty journal
+during cold start is the expected state, so an empty journal that can never fill
+is indistinguishable from it — until something asks whether the write could have
+worked at all, which nothing did.
+
+Removed the pattern, with the reasoning written into `.gitignore` itself so
+nobody re-adds it in good faith. Guarded by a self-check and a test that run
+`git check-ignore` against every state path.
+
 **Hypotheses affected:** none. No trading evidence in this entry.
 
 ---

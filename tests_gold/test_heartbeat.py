@@ -224,3 +224,36 @@ class CoherenceWithTheRoutines(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StateIsCommittable(unittest.TestCase):
+    """The heartbeat is only evidence once it is pushed. It was gitignored on
+    the day it was written, along with the journal and the audit log, which
+    made every `git add gold_trader/state/` in the scheduled runs a no-op."""
+
+    def _repo(self):
+        return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+    def test_no_state_file_is_gitignored(self):
+        import subprocess
+
+        paths = [
+            "gold_trader/state/journal.jsonl",
+            "gold_trader/state/audit.jsonl",
+            "gold_trader/state/heartbeat.jsonl",
+            "gold_trader/state/calendar.json",
+        ]
+        result = subprocess.run(
+            ["git", "-C", self._repo(), "check-ignore", "--no-index", *paths],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(
+            result.stdout.strip(), "",
+            "gitignored state cannot be committed, and a container that cannot "
+            "commit its state starts every run from nothing",
+        )
+
+    def test_the_gitignore_says_why_the_exclusion_was_removed(self):
+        # So nobody re-adds the pattern in good faith.
+        with open(os.path.join(self._repo(), ".gitignore")) as fh:
+            self.assertIn("durable state", fh.read())

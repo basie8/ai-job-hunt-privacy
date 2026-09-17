@@ -449,6 +449,41 @@ def check_run_health(report: Report, repo: str) -> None:
     run(_cron)
 
 
+def check_state_is_committable(report: Report, repo: str) -> None:
+    """The durable state must actually be committable.
+
+    Containers are ephemeral; the repository is the only thing that survives
+    them. `gold_trader/state/*.jsonl` was gitignored until 2026-09-17, which
+    made every `git add gold_trader/state/` in the scheduled runs a silent
+    no-op. Nothing failed, nothing warned -- the journal simply could never
+    accumulate a trade across runs, so the learning loop could never have left
+    cold start no matter how long it ran.
+    """
+    import subprocess
+
+    run = _guard(report, "state", "durable state is not gitignored")
+    def _not_ignored():
+        paths = [
+            "gold_trader/state/journal.jsonl",
+            "gold_trader/state/audit.jsonl",
+            "gold_trader/state/heartbeat.jsonl",
+            "gold_trader/state/calendar.json",
+        ]
+        result = subprocess.run(
+            ["git", "-C", repo, "check-ignore", "--no-index", *paths],
+            capture_output=True, text=True,
+        )
+        # check-ignore exits 0 and lists paths when any IS ignored.
+        ignored = [line for line in result.stdout.splitlines() if line.strip()]
+        assert not ignored, (
+            "these are ignored and so can never be committed, which silently "
+            f"discards the system's only durable state: {ignored}"
+        )
+        assert result.returncode in (1, 128), f"git check-ignore failed: {result.stderr.strip()}"
+        return f"{len(paths)} state paths committable"
+    run(_not_ignored)
+
+
 def check_learning_guarantees(report: Report) -> None:
     """The three anti-overfitting guards, verified as properties not examples."""
     from .journal import Journal
@@ -574,6 +609,7 @@ def run_all(repo: str = ".") -> Report:
     check_degradation(report)
     check_money(report)
     check_run_health(report, repo)
+    check_state_is_committable(report, repo)
     check_learning_guarantees(report)
     check_smc_and_sessions(report)
     check_pipeline(report)

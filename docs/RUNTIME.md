@@ -65,7 +65,12 @@ Anthropic account.
 
 ## 3. GitHub — the state
 
-**The repository is the only durable store in this system.** Containers are
+**The repository is the only durable store in this system.** Which means
+anything under `gold_trader/state/` must be committable, and a `.gitignore`
+rule there is not a tidiness preference — it silently deletes the system's
+memory. One such rule was live until 2026-09-17; `gold_trader selfcheck` now
+fails if any state path becomes ignored again.
+ Containers are
 reclaimed; your PC could be replaced tomorrow. Everything that must survive is
 committed:
 

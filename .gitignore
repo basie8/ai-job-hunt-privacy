@@ -2,7 +2,11 @@ __pycache__/
 *.py[cod]
 .venv/
 audit/
-gold_trader/state/*.jsonl
-gold_trader/state/calendar.json
+# NOT ignored, deliberately: gold_trader/state/ is the durable state of this
+# system. Containers are ephemeral and the repository is the only thing that
+# survives them, so the journal, the audit log, the heartbeat and the calendar
+# must all be committed. They were ignored until 2026-09-17, which made every
+# `git add gold_trader/state/` in the scheduled runs a silent no-op -- no trade
+# could ever have accumulated across runs. Guarded now by a self-check.
 data/
 AURUM-bridge.zip
