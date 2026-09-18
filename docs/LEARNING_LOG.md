@@ -472,6 +472,38 @@ through data.
 
 ---
 
+## 2026-09-18 — First closed trade
+
+**Evidence:** 1 closed trade (paper). Long `ob_retest`, entry 4353.00, stop
+4339.50, target 4374.00 (R:R 1.56), conviction 0.30 (cold-start clamp).
+Signalled 00:37 UTC, filled 00:45, stopped out 03:15 at 4339.50. Result
+-1.00R. MFE +0.94R before reversing; MAE -1.39R (the simulated fill's
+intra-candle excursion ran past the eventual stop print, which is normal for
+worst-case-in-candle resolution and not itself a defect). This is a paper
+result — no order was placed, and the fill and stop-out are both simulated
+against the candles that followed the signal.
+
+**Observation:** the trade got most of the way to target (+0.94R) before
+giving it back and hitting the stop. One trade proves nothing about whether
+that pattern (a good excursion that reverses) is real or noise — it needs a
+real sample.
+
+Calibration on this single trade: stated conviction 0.30 vs realized outcome
+0 (loss), Brier 0.090, nominally "overconfident by 0.30." This is n=1 and is
+recorded only because the dashboard and `gold_trader learn` compute it either
+way — it is not evidence for or against H5 and must not be read as such
+until the 20-trade floor.
+
+**Change:** none. LRN-03 (first 20 closed trades) is now at 1/20 and
+genuinely accumulating — this is the first evidence Phase 2 is moving, not
+just configured to move.
+
+**Hypotheses affected:** none confirmed or contradicted. Sample is 1;
+the floor for any read is 20 (H1-H6) or 40-60 (setup-level, hillclimb). Noted
+here only because "first closed trade" is itself the milestone.
+
+---
+
 ## Template for future entries
 
 ```markdown

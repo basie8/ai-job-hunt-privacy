@@ -93,10 +93,13 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 
 ## The critical path
 
-Everything blocked traces to one row: **DAT-04**. Until the bridge pushes
-candles, the pipeline has nothing to read, the journal stays empty, the learning
-loop stays at cold start, and the SMC detectors remain unvalidated against real
-gold.
+**DAT-04 cleared 2026-09-17** — the bridge is delivering live candles and SMC-03
+is validated. Everything now blocked traces to **LRN-03**: the journal has its
+first closed trade (2026-09-18) and needs 19 more before the 20-trade floor
+unblocks LRN-04 and the learning clamps engage. That is accumulation, not a
+setup task — nothing to configure, just signals running and resolving over the
+next several weeks.
 
-No amount of conversation substitutes for that. It is roughly ten minutes of
-setup on your side.
+DAT-04 still re-verifies live bridge freshness on every audit (`data:180`), so
+it can read STALE CLAIM again if the bridge itself goes down or to sleep — see
+its row note above. That would be a live-freshness regression, not doc drift.
