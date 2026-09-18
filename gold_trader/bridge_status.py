@@ -41,6 +41,18 @@ STATUS_FILENAME = "bridge.json"
 #: found nothing. Generous enough to absorb a missed tick or two.
 STALE_AFTER_MIN = 45
 
+#: One late tick is noise; a whole cycle missed is a pattern. Between this and
+#: STALE_AFTER_MIN the bridge is late enough to say so without claiming it is
+#: dead.
+#:
+#: Without this tier the report read "ok" for the first 45 minutes -- three
+#: missed runs -- and then jumped straight to critical. At 01:12 on 2026-09-18
+#: the bridge had not run for 40 minutes, having been started by hand once and
+#: never picked up by Task Scheduler, and the dashboard showed green while
+#: saying "last checked 40min ago" in the same breath. A number that contradicts
+#: the verdict beside it teaches the reader to stop reading the verdict.
+LATE_AFTER_MIN = 20
+
 OK = "ok"
 WARNING = "warning"
 CRITICAL = "critical"
@@ -134,6 +146,15 @@ def assess(status: Optional[BridgeStatus], now: Optional[datetime] = None):
             f"The bridge has not run for {age:.0f} minutes (it should run every 15). "
             "This is the bridge process itself, not the market: check the PC, "
             "Task Scheduler, and that MetaTrader 5 is open."
+        )
+
+    if age > LATE_AFTER_MIN and not closed:
+        missed = int(age // 15)
+        return WARNING, (
+            f"The bridge last ran {age:.0f} minutes ago and should run every 15: "
+            f"{missed} scheduled run(s) missed. Not yet long enough to call it "
+            "dead, but it is not keeping its cadence -- check Task Scheduler's "
+            "Last Run Result for the AURUM bridge task (0x0 is success)."
         )
 
     if status.read_error:

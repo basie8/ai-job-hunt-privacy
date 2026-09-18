@@ -74,9 +74,16 @@ class TheBridgeItselfStopping(unittest.TestCase):
             status(True, minutes_ago=STALE_AFTER_MIN + 10, now=WEEKEND), WEEKEND)
         self.assertEqual(severity, CRITICAL)
 
-    def test_a_fresh_file_inside_the_window_is_not_stale(self):
-        severity, _ = assess(status(True, minutes_ago=STALE_AFTER_MIN - 5), MARKET_OPEN)
+    def test_a_genuinely_fresh_file_is_not_stale(self):
+        severity, _ = assess(status(True, minutes_ago=5), MARKET_OPEN)
         self.assertEqual(severity, OK)
+
+    def test_inside_the_critical_window_but_past_a_whole_cycle_warns(self):
+        # This used to assert OK at STALE_AFTER_MIN - 5, i.e. 40 minutes and
+        # two missed runs, because there was nothing between fine and dead. The
+        # assumption was the defect, not the assertion.
+        severity, _ = assess(status(True, minutes_ago=STALE_AFTER_MIN - 5), MARKET_OPEN)
+        self.assertEqual(severity, WARNING)
 
     def test_no_status_file_at_all_asks_for_the_bridge_to_be_updated(self):
         severity, message = assess(None, MARKET_OPEN)
@@ -159,3 +166,66 @@ class RoundTrip(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LateIsNotDeadAndNotFine(unittest.TestCase):
+    """A bridge keeping no cadence used to report "ok" for 45 minutes.
+
+    The bridge runs every 15 minutes. With only an ok/critical split, three
+    missed runs in a row still read green -- and the message said so out loud,
+    "Terminal connected, last checked 40min ago", a number flatly contradicting
+    the verdict printed beside it. A reader who sees that learns to stop reading
+    the verdict.
+
+    Found at 01:12 on 2026-09-18: the bridge had been started by hand once and
+    Task Scheduler never picked it up, so it sat at 40 minutes old, silent and
+    green.
+    """
+
+    def test_one_late_tick_is_still_ok(self):
+        # A single missed tick is noise, and an alarm for noise is worse than
+        # no alarm.
+        severity, _ = self._assess(age_min=18)
+        self.assertEqual(severity, OK)
+
+    def test_a_whole_cycle_missed_warns(self):
+        severity, _ = self._assess(age_min=40)
+        self.assertEqual(severity, WARNING)
+
+    def test_the_warning_counts_the_missed_runs(self):
+        _, message = self._assess(age_min=40)
+        self.assertIn("2 scheduled run(s) missed", message)
+
+    def test_the_warning_names_where_to_look(self):
+        # The remedy is on the Windows PC, and saying "late" without saying
+        # where is the report that wastes the evening.
+        _, message = self._assess(age_min=40)
+        self.assertIn("Task Scheduler", message)
+        self.assertIn("0x0", message)
+
+    def test_long_enough_is_still_critical(self):
+        severity, _ = self._assess(age_min=90)
+        self.assertEqual(severity, CRITICAL)
+
+    def test_lateness_while_the_market_is_shut_is_not_reported(self):
+        # The terminal drops the broker at the close and the bridge has nothing
+        # to do. Warning nightly is how a real alert becomes background noise.
+        closed = datetime(2026, 9, 19, 23, 0, tzinfo=timezone.utc)  # Friday night
+        severity, _ = self._assess(age_min=40, now=closed)
+        self.assertEqual(severity, OK)
+
+    def test_the_tiers_are_ordered(self):
+        from gold_trader.bridge_status import LATE_AFTER_MIN, STALE_AFTER_MIN
+
+        self.assertLess(LATE_AFTER_MIN, STALE_AFTER_MIN)
+        # Late must be longer than one cadence, or a bridge that is merely
+        # running slightly behind trips it every time.
+        self.assertGreater(LATE_AFTER_MIN, 15)
+
+    def _assess(self, age_min, now=None):
+        now = now or datetime(2026, 9, 17, 14, 0, tzinfo=timezone.utc)  # Thursday
+        status = BridgeStatus(
+            as_of=(now - timedelta(minutes=age_min)).isoformat(),
+            connected=True, server="PepperstoneUK-Live", ping_ms=15.4,
+        )
+        return assess(status, now)
