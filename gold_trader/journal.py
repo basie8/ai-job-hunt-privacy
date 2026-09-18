@@ -53,6 +53,15 @@ class SignalRecord:
     #: Stamped so a simulated result can never be mistaken for a real fill.
     mode: str = "paper"
 
+    #: When price first traded at the entry, or None while the order rests.
+    #:
+    #: Persisted rather than recomputed. resolve_against derives it by walking
+    #: candles, but the candle files hold a rolling window -- once the filling
+    #: bar ages out of the CSV, a trade that really was entered would read as
+    #: never filled and silently stop being scored. A fact this important must
+    #: be written down the first time it is known.
+    filled_at: Optional[str] = None
+
     # Outcome, filled in later.
     status: str = OPEN
     exit_price: Optional[float] = None
@@ -151,7 +160,16 @@ class Journal:
 
     # -- views -----------------------------------------------------------
     def open_signals(self) -> List[SignalRecord]:
+        """Everything still unresolved: resting orders and live positions both."""
         return [r for r in self.records if r.status == OPEN and r.direction != "flat"]
+
+    def resting(self) -> List[SignalRecord]:
+        """Orders price has not reached. No money is at risk in these."""
+        return [r for r in self.open_signals() if r.filled_at is None]
+
+    def live(self) -> List[SignalRecord]:
+        """Positions actually entered. These are the ones carrying risk."""
+        return [r for r in self.open_signals() if r.filled_at is not None]
 
     def closed(self) -> List[SignalRecord]:
         return [r for r in self.records if r.status in CLOSED_STATES and r.r_multiple is not None]
@@ -203,7 +221,16 @@ def resolve_against(
     long = record.direction == "long"
     mae_r = 0.0
     mfe_r = 0.0
-    filled = False
+
+    # A fill already on the record is authoritative. Re-deriving it every run
+    # would lose it as soon as the filling bar rolls out of the candle window.
+    filled = record.filled_at is not None
+    filled_at: Optional[str] = record.filled_at
+    if filled:
+        fill_ts = datetime.fromisoformat(record.filled_at.replace("Z", "+00:00"))
+        if fill_ts.tzinfo is None:
+            fill_ts = fill_ts.replace(tzinfo=timezone.utc)
+        forward = [c for c in forward if c.ts >= fill_ts]
 
     for candle in forward:
         # Nothing happens until price actually trades at the entry.
@@ -224,6 +251,7 @@ def resolve_against(
             if not (candle.low <= record.entry <= candle.high):
                 continue
             filled = True
+            filled_at = candle.ts.isoformat()
             # Fall through: the bar that fills can also stop out, and the
             # unfavourable branch is assumed for the same reason as below --
             # bar data cannot order intrabar touches.
@@ -242,6 +270,7 @@ def resolve_against(
         if hit_stop:
             return {
                 "status": LOST,
+                "filled_at": filled_at,
                 "exit_price": record.stop,
                 "exit_ts": candle.ts.isoformat(),
                 "r_multiple": round(record.r_of(record.stop) or -1.0, 4),
@@ -252,6 +281,7 @@ def resolve_against(
         if hit_target:
             return {
                 "status": WON,
+                "filled_at": filled_at,
                 "exit_price": record.target,
                 "exit_ts": candle.ts.isoformat(),
                 "r_multiple": round(record.r_of(record.target) or 0.0, 4),
@@ -284,6 +314,7 @@ def resolve_against(
             r = record.r_of(last.close) or 0.0
             return {
                 "status": EXPIRED,
+                "filled_at": filled_at,
                 "exit_price": last.close,
                 "exit_ts": last.ts.isoformat(),
                 "r_multiple": round(r, 4),
@@ -291,6 +322,13 @@ def resolve_against(
                 "mfe_r": round(mfe_r, 4),
                 "resolution": "expired_at_close",
             }
+
+    # Unresolved -- but if the order filled during this walk, that is a change
+    # worth writing down even though the trade is still running. Returning None
+    # here would discard it and the order would keep reading as resting while a
+    # real position sat open.
+    if filled_at != record.filled_at:
+        return {"filled_at": filled_at}
     return None
 
 
@@ -299,7 +337,13 @@ def resolve_all(journal: Journal, series: Series) -> List[SignalRecord]:
     resolved: List[SignalRecord] = []
     for record in journal.open_signals():
         changes = resolve_against(record, series.candles)
-        if changes:
-            journal.update_outcome(record, **changes)
+        if not changes:
+            continue
+        journal.update_outcome(record, **changes)
+        # A fill is persisted but is not a resolution: the trade is still
+        # running. Reporting it as resolved would announce a closed trade that
+        # has not closed, and every caller here formats an R multiple that a
+        # fill does not have.
+        if record.status != OPEN:
             resolved.append(record)
     return resolved

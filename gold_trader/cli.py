@@ -296,12 +296,20 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         print(f"No {config.resolution_timeframe} series to resolve against.", file=sys.stderr)
         return 2
     resolved = resolve_all(journal, series)
+    resting, live = journal.resting(), journal.live()
     if not resolved:
-        print(f"Nothing to resolve. {len(journal.open_signals())} still open.")
+        print(f"Nothing to resolve. {len(live)} position(s) live, "
+              f"{len(resting)} order(s) resting unfilled.")
         return 0
     for r in resolved:
-        print(f"{r.id} {r.setup_type:<22} {r.status:<10} {r.r_multiple:+.2f}R  ({r.resolution})")
-    print(f"\n{len(resolved)} resolved. Journal: {json.dumps(journal.summary())}")
+        # An order that expired without ever being reached has no R multiple,
+        # because it was never a trade. Formatting None as a float crashed the
+        # command outright, on a path that only runs once a signal goes
+        # unfilled -- which is to say, on the quiet path nobody exercises.
+        score = f"{r.r_multiple:+.2f}R" if r.r_multiple is not None else "  --  "
+        print(f"{r.id} {r.setup_type:<22} {r.status:<10} {score}  ({r.resolution})")
+    print(f"\n{len(resolved)} resolved, {len(live)} live, {len(resting)} resting. "
+          f"Journal: {json.dumps(journal.summary())}")
     return 0
 
 
@@ -341,7 +349,12 @@ def cmd_status(args: argparse.Namespace) -> int:
           f"(daily stop -{config.limits.max_daily_loss_r:.1f}R)")
     print(f"Signals today: {signals_today(journal, now)} / {config.limits.max_signals_per_day}")
     for record in journal.open_signals():
-        print(f"  OPEN {record.id} {record.direction} {record.entry} "
+        # RESTING and LIVE are not cosmetic. A resting order has no money at
+        # risk; a live one has the full 1R. Printing both as OPEN leaves the
+        # reader unable to answer "am I exposed right now", which is the first
+        # question this command exists to answer.
+        state = "LIVE   " if record.filled_at else "RESTING"
+        print(f"  {state} {record.id} {record.direction} {record.entry} "
               f"stop {record.stop} target {record.target} ({record.setup_type})")
     return 0
 

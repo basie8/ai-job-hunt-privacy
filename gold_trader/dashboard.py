@@ -201,9 +201,18 @@ def collect_trading(repo: str) -> Section:
                     "id": r.id, "direction": r.direction, "entry": r.entry, "stop": r.stop,
                     "target": r.target, "setup": r.setup_type, "ts": r.ts,
                     "size_units": r.size_units, "risk_usd": r.risk_usd,
+                    # A resting limit is not a position and carries no risk.
+                    # The dashboard showed both identically, so a page reading
+                    # "1 open position, $133.60 at risk" could mean nothing was
+                    # at risk at all.
+                    "filled_at": r.filled_at,
+                    "state": "live" if r.filled_at else "resting",
                 }
                 for r in journal.open_signals()
             ],
+            "live_n": len(journal.live()),
+            "resting_n": len(journal.resting()),
+            "risk_at_work_usd": round(sum(r.risk_usd for r in journal.live()), 2),
             "equity_curve": equity,
             "max_drawdown_r": round(max_drawdown, 3),
             "setups": {k: v.to_dict() for k, v in sorted(stats.items())},

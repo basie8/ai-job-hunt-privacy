@@ -50,7 +50,10 @@ class OutcomeResolution(unittest.TestCase):
         self.assertAlmostEqual(out["r_multiple"], 2.0)
 
     def test_an_untouched_trade_stays_open(self):
-        self.assertIsNone(resolve_against(long_signal(), [bar(1, 2398, 2405)]))
+        # That bar spans the entry, so the order fills and the fill is
+        # persisted -- but nothing resolves, which is what this asserts.
+        out = resolve_against(long_signal(), [bar(1, 2398, 2405)])
+        self.assertIsNone(out.get("status"))
 
     def test_candles_before_entry_are_ignored(self):
         early = Candle(START - timedelta(hours=2), 2400, 2430, 2380, 2400)
@@ -293,3 +296,88 @@ class AnUnfilledOrderIsNotATrade(unittest.TestCase):
         out = resolve_against(signal, [bar(1, 2395, 2405), bar(4, 2398, 2406)])
         self.assertEqual(out["status"], "expired")
         self.assertIsNotNone(out["r_multiple"])
+
+
+class RestingIsNotTheSameAsLive(unittest.TestCase):
+    """Whether an order filled is a fact the system must keep, not recompute.
+
+    `resolve_against` worked out the fill and then dropped it on the floor, so
+    five separate consumers -- the position cap, `status`, the dashboard, the
+    journal summary and the resolve report -- all saw one undifferentiated
+    "open". A reader could not answer "is money at risk right now", which is
+    the first question any of them exists to answer.
+    """
+
+    def test_a_fill_is_persisted_even_though_nothing_resolved(self):
+        out = resolve_against(long_signal(), [bar(1, 2395, 2405)])
+        self.assertIsNotNone(out)
+        self.assertIn("filled_at", out)
+
+    def test_an_untouched_order_persists_nothing(self):
+        self.assertIsNone(resolve_against(long_signal(), [bar(1, 2402, 2408)]))
+
+    def test_a_known_fill_is_not_re_derived_from_the_candles(self):
+        # The candle files are a rolling window. Once the filling bar ages out,
+        # re-deriving would read a live position as never filled and silently
+        # stop scoring it.
+        signal = long_signal()
+        signal.filled_at = START.isoformat()
+        out = resolve_against(signal, [bar(1, 2402, 2425)])
+        self.assertEqual(out["status"], "won")
+
+    def test_the_resolution_carries_the_fill_that_produced_it(self):
+        out = resolve_against(long_signal(), [bar(1, 2395, 2425)])
+        self.assertIsNotNone(out["filled_at"])
+
+    def test_a_fill_is_not_reported_as_a_resolution(self):
+        # resolve_all's callers format an R multiple a fill does not have, and
+        # announcing a closed trade that has not closed is its own lie.
+        journal = Journal(os.path.join(self.dir, "journal.jsonl"))
+        record = self._journalled(journal)
+        resolved = resolve_all(journal, self._series([bar(1, 2395, 2405)]))
+        self.assertEqual(resolved, [])
+        self.assertIsNotNone(journal.records[0].filled_at)
+
+    def test_the_views_separate_the_two(self):
+        journal = Journal(os.path.join(self.dir, "journal.jsonl"))
+        self._journalled(journal)
+        self.assertEqual(len(journal.resting()), 1)
+        self.assertEqual(len(journal.live()), 0)
+
+        resolve_all(journal, self._series([bar(1, 2395, 2405)]))
+        self.assertEqual(len(journal.resting()), 0)
+        self.assertEqual(len(journal.live()), 1)
+
+    def test_both_are_still_open_signals(self):
+        # open_signals keeps its meaning -- unresolved -- so the position cap
+        # and every other existing consumer behave exactly as before until
+        # someone deliberately changes them.
+        journal = Journal(os.path.join(self.dir, "journal.jsonl"))
+        self._journalled(journal)
+        self.assertEqual(len(journal.open_signals()), 1)
+        resolve_all(journal, self._series([bar(1, 2395, 2405)]))
+        self.assertEqual(len(journal.open_signals()), 1)
+
+    def test_the_fill_survives_a_reload(self):
+        path = os.path.join(self.dir, "journal.jsonl")
+        journal = Journal(path)
+        self._journalled(journal)
+        resolve_all(journal, self._series([bar(1, 2395, 2405)]))
+        self.assertIsNotNone(Journal(path).records[0].filled_at)
+
+    def setUp(self):
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = self._tmp.name
+
+    def _journalled(self, journal):
+        record = long_signal()
+        journal.add(record)
+        return record
+
+    def _series(self, candles):
+        from gold_trader.feed import Series
+
+        return Series(timeframe="m15", candles=candles)
