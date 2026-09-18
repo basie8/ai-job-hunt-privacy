@@ -2,3 +2,4 @@
 {"detail": "signal exit 3: No Anthropic API credentials (AURUM_ANTHROPIC_API_KEY/ANTHROPIC_API_KEY/ANTHROPIC_AUTH_TOKEN all unset)", "outcome": "error", "routine": "signal", "ts": "2026-09-18T00:00:38+00:00"}
 {"detail": "signal stage exit 5: Anthropic API 401 - key present but invalid/revoked (authentication_error, no request_id); check AURUM_ANTHROPIC_API_KEY in console.anthropic.com", "outcome": "error", "routine": "signal", "ts": "2026-09-18T00:10:01+00:00"}
 {"detail": "Risk manager reject: stale price feed (81min old) and conflicting H4/H1 bias; no entry approved", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-18T00:25:08+00:00"}
+{"detail": "BUY XAUUSD limit 4353.00, stop 4339.50, target 4374.00, R:R 1.56, conviction 0.30 (cold start clamp)", "outcome": "signal", "routine": "signal", "ts": "2026-09-18T00:38:01+00:00"}
