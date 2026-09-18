@@ -378,3 +378,92 @@ class _FrozenClock:
 
     def now(self, tz=None):
         return self._moment
+
+
+class ThePullMustNotTouchTheIndex(unittest.TestCase):
+    """`data/` is owned by the data branch and must never be tracked here.
+
+    The pull used `git checkout origin/<branch> -- data/`, and that form of
+    checkout updates the index as well as the working tree -- by definition,
+    not by accident. So every pull re-added the candles to the index, they
+    became tracked on the working branch, and `.gitignore` was powerless:
+    gitignore has no say over a path already in the index.
+
+    `data/` was untracked on 2026-09-17, came back, was untracked again on
+    2026-09-18, and came back inside the same hour. Neither time was somebody
+    forgetting to untrack it. The pull put it back, and would have kept putting
+    it back forever.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = self.tmp.name
+        self.origin = os.path.join(root, "origin.git")
+        run("git", "init", "--bare", "-b", "main", self.origin)
+
+        seed = init_clone(self.origin, os.path.join(root, "seed"))
+        with open(os.path.join(seed, "README.md"), "w") as fh:
+            fh.write("project\n")
+        with open(os.path.join(seed, ".gitignore"), "w") as fh:
+            fh.write("data/\n")
+        run("git", "-C", seed, "add", "-A")
+        run("git", "-C", seed, "commit", "-m", "seed")
+        run("git", "-C", seed, "push", "origin", "main")
+
+        # A data branch carrying only candles, as the bridge builds it.
+        data = init_clone(self.origin, os.path.join(root, "data"))
+        run("git", "-C", data, "checkout", "--orphan", DATA_BRANCH)
+        run("git", "-C", data, "rm", "-rf", "--quiet", ".")
+        os.makedirs(os.path.join(data, "data"))
+        self.now = datetime.now(timezone.utc).replace(microsecond=0)
+        mt5_export.write_csv(bars(5, self.now),
+                             os.path.join(data, "data", "XAUUSD_h1.csv"))
+        run("git", "-C", data, "add", "-A")
+        run("git", "-C", data, "commit", "-m", "candles")
+        run("git", "-C", data, "push", "origin", DATA_BRANCH)
+
+        self.work = init_clone(self.origin, os.path.join(root, "work"))
+
+    def test_a_pull_leaves_the_candles_untracked(self):
+        pull_data_branch(self.work, DATA_BRANCH, "data")
+        self.assertEqual(self._tracked_data(), [])
+
+    def test_the_candles_still_arrive_in_the_working_tree(self):
+        # The index must stay clean, but the files are the point of the pull.
+        pull_data_branch(self.work, DATA_BRANCH, "data")
+        self.assertTrue(os.path.exists(
+            os.path.join(self.work, "data", "XAUUSD_h1.csv")))
+
+    def test_a_pull_leaves_nothing_staged(self):
+        # Otherwise the next `git add -A` in a scheduled run commits whatever
+        # candles that container happened to hold.
+        pull_data_branch(self.work, DATA_BRANCH, "data")
+        staged = run("git", "-C", self.work, "diff", "--cached", "--name-only")
+        self.assertEqual(staged.stdout.strip(), "")
+
+    def test_repeated_pulls_never_start_tracking_them(self):
+        for _ in range(3):
+            pull_data_branch(self.work, DATA_BRANCH, "data")
+        self.assertEqual(self._tracked_data(), [])
+
+    def test_an_updated_candle_still_propagates(self):
+        # The fix must not cost the pull its actual job.
+        pull_data_branch(self.work, DATA_BRANCH, "data")
+        data = init_clone(self.origin, os.path.join(self.tmp.name, "data2"))
+        run("git", "-C", data, "checkout", DATA_BRANCH)
+        later = self.now + timedelta(hours=1)
+        mt5_export.write_csv(bars(6, later),
+                             os.path.join(data, "data", "XAUUSD_h1.csv"))
+        run("git", "-C", data, "add", "-A")
+        run("git", "-C", data, "commit", "-m", "later bar")
+        run("git", "-C", data, "push", "origin", DATA_BRANCH)
+
+        self.assertTrue(pull_data_branch(self.work, DATA_BRANCH, "data"))
+        rows = describe_data_dir(os.path.join(self.work, "data"), now=later)
+        self.assertEqual(rows[0]["bars"], 6)
+        self.assertEqual(self._tracked_data(), [])
+
+    def _tracked_data(self):
+        listed = run("git", "-C", self.work, "ls-files", "data/")
+        return [line for line in listed.stdout.splitlines() if line.strip()]

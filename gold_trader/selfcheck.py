@@ -499,6 +499,39 @@ def check_state_is_committable(report: Report, repo: str) -> None:
     run(_not_ignored)
 
 
+def check_market_data_is_not_tracked_here(report: Report, repo: str) -> None:
+    """Candles live on the data branch, never on this one.
+
+    `.gitignore` lists `data/`, but gitignore has no effect on a file already
+    tracked, so the CSVs kept riding every commit and every `pull-data` left
+    the tree dirty. Worse, a `git add -A` in a scheduled run silently commits
+    whatever candles that container happened to pull, so the working branch
+    accumulates a second, stale copy of the market data that nothing reads and
+    that conflicts on the next merge.
+
+    Untracked twice now, on 2026-09-17 and again on 2026-09-18. This check
+    exists so there is no third time.
+    """
+    import subprocess
+
+    run = _guard(report, "data", "candles are not tracked on the working branch")
+    def _untracked():
+        result = subprocess.run(
+            ["git", "-C", repo, "ls-files", "data/"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            return "not a git repository; nothing to check"
+        tracked = [line for line in result.stdout.splitlines() if line.strip()]
+        assert not tracked, (
+            "these are tracked on the working branch though .gitignore lists "
+            "data/ -- gitignore does not apply to an already-tracked file. "
+            "Untrack with: git rm -r --cached data/  ... " + str(tracked)
+        )
+        return "data/ is untracked, as the data branch owns it"
+    run(_untracked)
+
+
 def check_credentials_path(report: Report) -> None:
     """A run without an API key must say so, not raise from library internals.
 
@@ -831,6 +864,7 @@ def run_all(repo: str = ".") -> Report:
     check_money(report)
     check_run_health(report, repo)
     check_state_is_committable(report, repo)
+    check_market_data_is_not_tracked_here(report, repo)
     check_credentials_path(report)
     check_market_hours(report)
     check_bridge_link(report)

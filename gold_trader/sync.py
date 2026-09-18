@@ -27,14 +27,35 @@ def _git(repo: str, *args: str) -> subprocess.CompletedProcess:
 
 
 def pull_data_branch(repo: str = ".", branch: str = DATA_BRANCH, data_dir: str = "data") -> bool:
-    """Check the data directory out of ``branch`` without switching branches.
+    """Copy the data directory out of ``branch`` into the working tree only.
 
     Returns True when the working tree actually changed.
+
+    The index is deliberately left alone. This used to be
+
+        git checkout origin/<branch> -- data/
+
+    which updates the index as well as the working tree -- that is what
+    `git checkout <tree-ish> -- <path>` is defined to do. The effect was that
+    every single pull re-added `data/` to the index, so the candles became
+    tracked on the working branch no matter how often they were untracked, and
+    `.gitignore` could not prevent it: gitignore has no say over a path already
+    in the index.
+
+    So `data/` was untracked on 2026-09-17, came back, was untracked again on
+    2026-09-18, and came back within the same hour. Neither time was it
+    somebody forgetting; the pull put it back. Meanwhile every `git add -A` in
+    a scheduled run committed whatever candles that container happened to hold,
+    leaving a second stale copy of the market data on the working branch that
+    nothing reads and that conflicts on the next merge.
+
+    `git restore --worktree` is the operation actually wanted: same file
+    contents, index untouched.
     """
     before = _snapshot(os.path.join(repo, data_dir))
     _git(repo, "fetch", "origin", branch)
     rel = data_dir.replace(os.sep, "/")
-    _git(repo, "checkout", f"origin/{branch}", "--", rel)
+    _git(repo, "restore", "--source", f"origin/{branch}", "--worktree", "--", rel)
     return _snapshot(os.path.join(repo, data_dir)) != before
 
 
