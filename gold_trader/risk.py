@@ -50,7 +50,19 @@ class TradingLimits:
     min_equity_pct_of_start: float = 60.0
     #: Stop trading for the day once cumulative realised loss hits this many R.
     max_daily_loss_r: float = 2.0
-    max_open_positions: int = 2
+    #: Positions actually entered -- price has traded at the entry and 1R is
+    #: at risk in each. This is the number that bounds real exposure.
+    max_live_positions: int = 2
+
+    #: Unresolved signals of any kind, resting orders included. A resting limit
+    #: risks nothing yet, so it should not consume a position slot; but it can
+    #: fill, so it cannot be unlimited either.
+    #:
+    #: These two only bound exposure together with the fill-time check in
+    #: journal.resolve_all. Without it, four resting orders could all fill and
+    #: leave 4R at risk under a "2 position" limit -- which is how a limit gets
+    #: raised without anyone deciding to raise it.
+    max_working_orders: int = 4
     max_signals_per_day: int = 4
     min_reward_risk: float = 1.5
     #: Stop distance must sit inside this band, measured in ATR.
@@ -103,7 +115,8 @@ class TradingLimits:
             f"{self.max_stop_atr_mult:.1f}x ATR, or between "
             f"{self.min_stop_pct_of_spot:.2f}% and {self.max_stop_pct_of_spot:.2f}% of spot "
             f"when no ATR is available\n"
-            f"- Max {self.max_open_positions} open positions, "
+            f"- Max {self.max_live_positions} live positions and "
+            f"{self.max_working_orders} working orders, "
             f"{self.max_signals_per_day} signals per day\n"
             f"- Daily stop: trading halts at -{self.max_daily_loss_r:.1f}R realised\n"
             f"- Entry blackout: {self.blackout.before_high}min before / "
@@ -286,14 +299,29 @@ def evaluate(
                 "daily stop. Done for the day.",
             )
         )
-    open_count = len(journal.open_signals())
-    if open_count >= limits.max_open_positions:
+    # Counted separately, because they are different facts with different
+    # consequences. A resting order has no money at risk and blocking new
+    # signals on it stalls the book on ideas price never reached; a live
+    # position has the full 1R at risk and is what the exposure limit is for.
+    live_count = len(journal.live())
+    if live_count >= limits.max_live_positions:
         breaches.append(
             Breach(
-                "MAX_OPEN_POSITIONS",
+                "MAX_LIVE_POSITIONS",
                 "hard",
-                f"{open_count} positions already open against a limit of "
-                f"{limits.max_open_positions}.",
+                f"{live_count} position(s) already live against a limit of "
+                f"{limits.max_live_positions}. Exposure is at its cap.",
+            )
+        )
+    working_count = len(journal.open_signals())
+    if working_count >= limits.max_working_orders:
+        breaches.append(
+            Breach(
+                "MAX_WORKING_ORDERS",
+                "hard",
+                f"{working_count} unresolved signal(s) against a limit of "
+                f"{limits.max_working_orders}. Nothing is necessarily at risk, "
+                "but the book will not stack more orders than it can manage.",
             )
         )
     if signals_today(journal, now) >= limits.max_signals_per_day:

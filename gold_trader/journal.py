@@ -332,13 +332,42 @@ def resolve_against(
     return None
 
 
-def resolve_all(journal: Journal, series: Series) -> List[SignalRecord]:
-    """Resolve every open signal it can against a candle series."""
+def resolve_all(journal: Journal, series: Series,
+                max_live: Optional[int] = None) -> List[SignalRecord]:
+    """Resolve every open signal it can against a candle series.
+
+    ``max_live`` enforces the live-position cap at the moment of fill, which is
+    the only place it can actually be enforced. The risk engine checks the cap
+    when a signal is *written*, and that is not enough: orders rest, and
+    several resting orders can fill before any of them resolves. With a limit
+    of two live positions and four working orders, all four could fill and
+    leave 4R at risk under a limit that says 2 -- a limit raised without anyone
+    deciding to raise it.
+
+    An order that would breach the cap is cancelled rather than filled, which
+    is what a desk with a position limit actually does. Cancelled sits outside
+    CLOSED_STATES, so it never enters the track record: it was never a trade,
+    and counting it as a flat outcome would dilute the sample with events that
+    say nothing about whether the setup works.
+    """
     resolved: List[SignalRecord] = []
     for record in journal.open_signals():
         changes = resolve_against(record, series.candles)
         if not changes:
             continue
+
+        newly_filled = (changes.get("filled_at") is not None
+                        and record.filled_at is None)
+        if newly_filled and max_live is not None and len(journal.live()) >= max_live:
+            journal.update_outcome(
+                record,
+                status=CANCELLED,
+                exit_ts=changes.get("filled_at"),
+                resolution="live_cap_reached",
+            )
+            resolved.append(record)
+            continue
+
         journal.update_outcome(record, **changes)
         # A fill is persisted but is not a resolution: the trade is still
         # running. Reporting it as resolved would announce a closed trade that

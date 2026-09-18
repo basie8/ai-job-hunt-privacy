@@ -199,3 +199,48 @@ class PaperMode(unittest.TestCase):
         self.assertIn('class="paper"', html)
         self.assertIn("PAPER", html)
         self.assertIn("simulated against the candles", html)
+
+
+class NoPanelMayQuietlyDie(unittest.TestCase):
+    """Every collector runs against the real repo, and none may raise.
+
+    `_collect` turns any exception into a visible ERROR panel rather than a
+    dark page, which is the right trade -- but it also means a plain coding
+    mistake inside one collector is caught, rendered as a small red box, and
+    otherwise ignored. A reference to an out-of-scope name did exactly that
+    here on 2026-09-18: the panel reported "NameError: name 'limits' is not
+    defined" and every other panel carried on as if nothing were wrong.
+
+    The per-section tests below each check one panel. This checks all of them
+    at once, so a panel added later is covered without anyone remembering to.
+    """
+
+    def test_no_section_reports_an_error(self):
+        payload = dashboard_payload()
+        broken = {
+            name: section.get("reason")
+            for name, section in payload["sections"].items()
+            if section["status"] == ERROR
+        }
+        self.assertEqual(broken, {}, f"collectors raised: {broken}")
+
+    def test_an_errored_section_makes_the_whole_page_critical(self):
+        # The protection that makes the above recoverable rather than silent:
+        # a dead panel must fail the dashboard command, or the audit Routine
+        # republishes a broken page and reports all clear.
+        from gold_trader.dashboard import ERROR as E, Section, _collect
+
+        def explode():
+            raise RuntimeError("collector fell over")
+
+        section = _collect("somewhere", explode)
+        self.assertEqual(section.status, E)
+        self.assertIn("collector fell over", section.reason)
+
+    def test_the_trading_panel_states_both_caps(self):
+        # A count of live positions with no ceiling beside it cannot be read.
+        payload = dashboard_payload()
+        data = payload["sections"]["trading"]["data"]
+        for key in ("live_n", "resting_n", "max_live_positions",
+                    "max_working_orders", "risk_at_work_usd"):
+            self.assertIn(key, data)

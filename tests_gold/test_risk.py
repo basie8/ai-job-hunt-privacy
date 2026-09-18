@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from gold_trader.journal import Journal
+from gold_trader.journal import Journal, resolve_all
 from gold_trader.learning import learn
 from gold_trader.macro import BlackoutPolicy, MacroCalendar, MacroEvent
 from gold_trader.risk import TradingLimits, evaluate
@@ -119,16 +119,37 @@ class SessionBudgets(unittest.TestCase):
             )
         self.assertIn("DAILY_LOSS_LIMIT", codes(assess(journal=journal)))
 
-    def test_too_many_open_positions_blocks_a_new_one(self):
+    def test_resting_orders_do_not_consume_a_position_slot(self):
+        # Two unfilled limits risk nothing. Blocking new signals on them stalls
+        # the book on ideas price never reached -- for a full day, since a
+        # signal stays valid for 24 hours.
         journal = Journal()
         for _ in range(2):
             journal.new_signal(direction="long", setup_type="bos_continuation", conviction=0.6,
                                entry=2400.0, stop=2390.0, target=2420.0)
-        self.assertIn("MAX_OPEN_POSITIONS", codes(assess(journal=journal)))
+        self.assertNotIn("MAX_LIVE_POSITIONS", codes(assess(journal=journal)))
+
+    def test_live_positions_do_block_a_new_one(self):
+        journal = Journal()
+        for _ in range(2):
+            record = journal.new_signal(
+                direction="long", setup_type="bos_continuation", conviction=0.6,
+                entry=2400.0, stop=2390.0, target=2420.0)
+            journal.update_outcome(record, filled_at=NOW.isoformat())
+        self.assertIn("MAX_LIVE_POSITIONS", codes(assess(journal=journal)))
+
+    def test_enough_resting_orders_still_hit_the_working_cap(self):
+        # Unlimited resting orders would be a limit in name only: each one can
+        # fill, so the book will not stack more than it can manage.
+        journal = Journal()
+        for _ in range(4):
+            journal.new_signal(direction="long", setup_type="bos_continuation", conviction=0.6,
+                               entry=2400.0, stop=2390.0, target=2420.0)
+        self.assertIn("MAX_WORKING_ORDERS", codes(assess(journal=journal)))
 
     def test_the_daily_signal_budget_is_enforced(self):
         journal = Journal()
-        limits = TradingLimits(max_open_positions=99)
+        limits = TradingLimits(max_live_positions=99, max_working_orders=99)
         for _ in range(4):
             journal.new_signal(
                 direction="long", setup_type="bos_continuation", conviction=0.6,
@@ -166,3 +187,61 @@ class LearnedGates(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheTwoCapsBoundTheBookTogether(unittest.TestCase):
+    """Splitting one cap into two is only safe if the live one holds at fill.
+
+    The risk engine checks caps when a signal is *written*. That is not enough
+    once resting orders exist: several can fill before any of them resolves. A
+    limit of two live positions with four working orders would otherwise allow
+    all four to fill and leave 4R at risk under a limit that says 2 -- a limit
+    raised without anyone deciding to raise it.
+    """
+
+    def test_a_fill_beyond_the_live_cap_is_cancelled_not_taken(self):
+        journal, series = self._two_live_and_one_resting()
+        resolve_all(journal, series, max_live=2)
+        third = journal.records[-1]
+        self.assertEqual(third.status, "cancelled")
+        self.assertEqual(third.resolution, "live_cap_reached")
+
+    def test_the_cancelled_order_never_became_a_position(self):
+        journal, series = self._two_live_and_one_resting()
+        resolve_all(journal, series, max_live=2)
+        self.assertEqual(len(journal.live()), 2)
+
+    def test_it_stays_out_of_the_track_record(self):
+        # It was never a trade. Counting it as a flat outcome would dilute the
+        # sample with events that say nothing about whether the setup works.
+        journal, series = self._two_live_and_one_resting()
+        resolve_all(journal, series, max_live=2)
+        self.assertEqual(len(journal.closed()), 0)
+
+    def test_without_the_cap_the_third_would_have_filled(self):
+        # States the defect the fill-time check prevents, so the protection
+        # cannot be removed silently.
+        journal, series = self._two_live_and_one_resting()
+        resolve_all(journal, series, max_live=None)
+        self.assertEqual(len(journal.live()), 3)
+
+    def test_under_the_cap_a_fill_proceeds_normally(self):
+        journal, series = self._two_live_and_one_resting()
+        resolve_all(journal, series, max_live=9)
+        self.assertEqual(len(journal.live()), 3)
+
+    def _two_live_and_one_resting(self):
+        from gold_trader.feed import Candle, Series
+
+        journal = Journal()
+        for _ in range(2):
+            record = journal.new_signal(
+                direction="long", setup_type="bos_continuation", conviction=0.6,
+                entry=2400.0, stop=2390.0, target=2420.0, ts=NOW.isoformat())
+            journal.update_outcome(record, filled_at=NOW.isoformat())
+        journal.new_signal(
+            direction="long", setup_type="bos_continuation", conviction=0.6,
+            entry=2400.0, stop=2390.0, target=2420.0, ts=NOW.isoformat())
+        # A bar spanning the entry, so the third would fill if nothing stopped it.
+        bar = Candle(NOW + timedelta(hours=1), 2400.0, 2405.0, 2395.0, 2402.0)
+        return journal, Series(timeframe="m15", candles=[bar])

@@ -52,8 +52,13 @@ def coherence_problems(limits: Optional[TradingLimits] = None) -> List[str]:
         problems.append(f"risk_per_trade_pct ({limits.risk_per_trade_pct}) is outside (0, 100]")
     if limits.max_daily_loss_r <= 0:
         problems.append("max_daily_loss_r must be positive")
-    if limits.max_open_positions < 1:
-        problems.append("max_open_positions must allow at least one trade")
+    if limits.max_live_positions < 1:
+        problems.append("max_live_positions must allow at least one trade")
+    if limits.max_working_orders < limits.max_live_positions:
+        problems.append(
+            "max_working_orders must be at least max_live_positions, or the "
+            "book could not rest enough orders to reach its own exposure limit"
+        )
     if limits.max_signals_per_day < 1:
         problems.append("max_signals_per_day must allow at least one signal")
     if limits.min_reward_risk <= 0:

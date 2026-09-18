@@ -199,7 +199,7 @@ class LearningRunsFirst(unittest.TestCase):
 
         journal = journal_with("range_fade", 80, -1.0)
         client = make_client(read=chart_read(setup_type="range_fade"))
-        config = GoldConfig(limits=TradingLimits(max_open_positions=99, max_signals_per_day=99))
+        config = GoldConfig(limits=TradingLimits(max_live_positions=99, max_working_orders=99, max_signals_per_day=99))
         result, _ = run(client, config=config, journal=journal)
         self.assertFalse(result.actionable)
         self.assertIn("SETUP_BLOCKED_BY_RECORD", {b.code for b in result.decision.breaches})

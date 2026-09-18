@@ -295,7 +295,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     if series is None:
         print(f"No {config.resolution_timeframe} series to resolve against.", file=sys.stderr)
         return 2
-    resolved = resolve_all(journal, series)
+    resolved = resolve_all(journal, series, config.limits.max_live_positions)
     resting, live = journal.resting(), journal.live()
     if not resolved:
         print(f"Nothing to resolve. {len(live)} position(s) live, "
@@ -348,6 +348,19 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"Realised today: {realised_r_today(journal, now):+.2f}R "
           f"(daily stop -{config.limits.max_daily_loss_r:.1f}R)")
     print(f"Signals today: {signals_today(journal, now)} / {config.limits.max_signals_per_day}")
+    live, resting = journal.live(), journal.resting()
+    at_risk = sum(r.risk_usd for r in live)
+    print(f"Live positions: {len(live)} / {limits.max_live_positions}"
+          f"   (${at_risk:,.2f} at risk)")
+    print(f"Working orders: {len(live) + len(resting)} / {limits.max_working_orders}"
+          f"   ({len(resting)} resting, nothing at risk in those)")
+    # Stated rather than left to be worked out. Every resting order can fill,
+    # so the working cap -- not the live cap -- is what bounds the book on a
+    # day when everything goes in at once. Naming that number is the whole
+    # point of splitting the caps in the open rather than quietly.
+    print(f"  Worst case if every working order fills: "
+          f"{min(len(live) + len(resting), limits.max_live_positions)}R at risk "
+          f"(fills beyond {limits.max_live_positions} are cancelled, not taken)")
     for record in journal.open_signals():
         # RESTING and LIVE are not cosmetic. A resting order has no money at
         # risk; a live one has the full 1R. Printing both as OPEN leaves the

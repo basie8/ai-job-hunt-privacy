@@ -151,6 +151,12 @@ def collect_phase(repo: str) -> Section:
 def collect_trading(repo: str) -> Section:
     from .journal import Journal
     from .learning import calibration_of, learn, setup_stats
+    from .risk import TradingLimits
+
+    # The caps are read here rather than passed in, because the panel that
+    # reports how many positions are live is the one that must also say what
+    # the ceiling is. A count with no ceiling beside it cannot be read.
+    limits = TradingLimits()
 
     path = os.path.join(repo, "gold_trader/state/journal.jsonl")
     journal = Journal(path if os.path.exists(path) else None)
@@ -212,6 +218,8 @@ def collect_trading(repo: str) -> Section:
             ],
             "live_n": len(journal.live()),
             "resting_n": len(journal.resting()),
+            "max_live_positions": limits.max_live_positions,
+            "max_working_orders": limits.max_working_orders,
             "risk_at_work_usd": round(sum(r.risk_usd for r in journal.live()), 2),
             "equity_curve": equity,
             "max_drawdown_r": round(max_drawdown, 3),
@@ -401,7 +409,8 @@ def collect_config(repo: str) -> Section:
             "risk_per_trade_pct": limits.risk_per_trade_pct,
             "base_risk_usd": limits.base_risk_usd,
             "min_reward_risk": limits.min_reward_risk,
-            "max_open_positions": limits.max_open_positions,
+            "max_live_positions": limits.max_live_positions,
+            "max_working_orders": limits.max_working_orders,
             "max_signals_per_day": limits.max_signals_per_day,
             "max_daily_loss_r": limits.max_daily_loss_r,
             "stages": {
