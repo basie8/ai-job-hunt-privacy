@@ -35,7 +35,7 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 | DAT-03 | market-data branch sync | done | `file:gold_trader/sync.py` | Round-trip tested over real git repos |
 | DAT-08 | Terminal link state reported and judged | done | `file:gold_trader/bridge_status.py` | Bridge writes `data/bridge.json`; disconnection only a fault while the market is open |
 | DAT-07 | GBPUSD sourced from MT5 | done | `file:gold_trader/fx.py` | Bridge writes `data/fx.json`; a missing or absurd rate falls back loudly |
-| DAT-04 | Bridge running on Pieter's machine | done | `data:180` | Confirmed 2026-09-17: market-data branch live, newest bar minutes old |
+| DAT-04 | Bridge running on Pieter's machine | done | `data:180` | Phase 1 milestone cleared 2026-09-17 (first live candle received). This row re-verifies live freshness on every audit, so it will read STALE CLAIM whenever the bridge itself is currently down or asleep — that is the check doing its job, not doc drift; `gold_trader progress` is the source of truth for current freshness, not this note |
 | OPS-08 | Anthropic API key in the cloud environment | outstanding | `manual` | **Needs you.** Must be `AURUM_ANTHROPIC_API_KEY` — the obvious name is reserved and silently dropped |
 | DAT-05 | Live vendor feed (egress + key) | outstanding | `manual` | Optional. Only if you want runs independent of your PC being on. |
 
@@ -46,7 +46,7 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 | SMC-01 | CHoCH / BOS / OB / FVG / sweeps | done | `file:gold_trader/smc.py` | One documented interpretation, computed identically each run |
 | SMC-05 | Market hours enforced, not advised | done | `file:gold_trader/sessions.py` | Weekend + daily rollover are a hard MARKET_CLOSED breach; DST-correct via New York |
 | SMC-02 | Sessions, killzones, session ranges | done | `file:gold_trader/sessions.py` | DST-correct via zoneinfo |
-| SMC-03 | Detectors validated against real gold data | done | `data:180` | Run against real XAUUSD 2026-09-17; findings in LEARNING_LOG |
+| SMC-03 | Detectors validated against real gold data | done | `data:180` | Validated against real XAUUSD 2026-09-17; findings in LEARNING_LOG. Shares DAT-04's live predicate, so it goes STALE CLAIM in step with the bridge, not on its own |
 | SMC-04 | Significance filter for structure events | outstanding | `manual` | 183 BOS/CHoCH per 500 H1 bars is too frequent to mean much |
 | MAC-01 | Event calendar with blackout windows | done | `file:gold_trader/macro.py` | NFP/claims derived; FOMC/CPI/PCE from file |
 | MAC-02 | Calendar file filled through year-end | outstanding | `file:gold_trader/state/calendar.json` | **Needs you.** CPI/PCE dates from BLS/BEA. |
