@@ -361,3 +361,102 @@ class TheBridgeMustLeaveATraceOnThePC(unittest.TestCase):
     def _log(self):
         with open(os.path.join(self.repo, mt5_export.RUN_LOG_FILENAME), encoding="utf-8") as fh:
             return fh.read()
+
+
+class GitMustBeFoundNotAssumed(unittest.TestCase):
+    """Git Bash working is not the same as git being on PATH.
+
+    The Git for Windows installer offers "Use Git from Git Bash only", which
+    deliberately keeps git off the system PATH. Git Bash then works perfectly
+    and every other launcher -- cmd, a .bat, Task Scheduler -- cannot find git
+    at all. A bridge run started by hand from Git Bash succeeds; the identical
+    run started by Windows fails at the push and nowhere else, which is the
+    hardest kind of fault to see.
+    """
+
+    def setUp(self):
+        mt5_export._GIT_EXE = None
+        self.addCleanup(setattr, mt5_export, "_GIT_EXE", None)
+
+    def test_path_is_used_when_git_is_on_it(self):
+        self.assertTrue(mt5_export.git_exe().endswith("git"))
+
+    def test_a_standard_install_location_is_tried_when_path_fails(self):
+        from unittest import mock
+
+        fake = os.path.join(self.__class__.__name__, "git.exe")
+        with mock.patch.object(mt5_export.shutil, "which", return_value=None), \
+             mock.patch.object(mt5_export, "GIT_FALLBACK_PATHS", (fake,)), \
+             mock.patch.object(mt5_export.os.path, "exists",
+                               side_effect=lambda p: p == fake):
+            self.assertEqual(mt5_export.git_exe(), fake)
+
+    def test_not_finding_git_names_the_installer_option(self):
+        # "git not found" sends someone to install git they already have. The
+        # actual remedy is one specific radio button in the installer.
+        from unittest import mock
+
+        with mock.patch.object(mt5_export.shutil, "which", return_value=None), \
+             mock.patch.object(mt5_export, "GIT_FALLBACK_PATHS", ()), \
+             mock.patch.object(mt5_export.os.path, "exists", return_value=False):
+            with self.assertRaises(RuntimeError) as caught:
+                mt5_export.git_exe()
+        message = str(caught.exception)
+        self.assertIn("Git Bash", message)
+        self.assertIn("3rd-party software", message)
+
+    def test_the_resolved_git_is_what_actually_runs(self):
+        # Resolving it and then still shelling out to bare "git" would fix
+        # nothing at all.
+        import inspect
+
+        source = inspect.getsource(mt5_export.git)
+        self.assertIn("git_exe()", source)
+        self.assertNotIn('["git", "-C"', source)
+
+
+class ThePreflightReportsTheSchedulersEnvironment(unittest.TestCase):
+    """Every difference between "works by hand" and "fails on a schedule" is an
+    environment difference, and none of them were visible from outside."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo = self.tmp.name
+
+    def test_it_reports_the_facts_that_differ_between_accounts(self):
+        out = self._run()
+        for field in ("user", "python", "git", "repo", "remote reachable"):
+            self.assertIn(field, out)
+
+    def test_a_missing_git_is_reported_rather_than_raising(self):
+        # The preflight's whole job is to report; dying on the first problem
+        # would hide every problem after it.
+        from unittest import mock
+
+        with mock.patch.object(mt5_export, "git_exe",
+                               side_effect=RuntimeError("no git here")):
+            out = self._run()
+        self.assertIn("NOT FOUND", out)
+        self.assertIn("no git here", out)
+
+    def test_it_writes_to_the_run_log_too(self):
+        # A scheduled run has no console, so printing alone tells nobody.
+        self._run()
+        with open(os.path.join(self.repo, mt5_export.RUN_LOG_FILENAME),
+                  encoding="utf-8") as fh:
+            self.assertIn("python", fh.read())
+
+    def test_it_does_not_require_a_git_repository(self):
+        # A misconfigured repo must be something the check reports, not the
+        # thing that stops the check.
+        self.assertEqual(mt5_export.main(["--repo", self.repo, "--check"]), 0)
+
+    def _run(self):
+        import contextlib
+        import io
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            mt5_export.main(["--repo", self.repo, "--check"])
+        return buf.getvalue()

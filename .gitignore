@@ -15,3 +15,4 @@ AURUM-bridge.zip
 # that is broken is the push, a pushed log cannot report it.
 bridge-run.log
 bridge-run.log.1
+bridge-console.log

@@ -130,6 +130,28 @@ cannot disturb whatever you're working on.
 
 ### 1.7 Schedule it
 
+**Run `INSTALL-TASK.bat`.** `SETUP.bat` now calls it as its last step, so if
+you ran setup the task already exists. It registers "AURUM bridge" to run every
+15 minutes and then prints back what Windows actually stored, so you can see
+the schedule took rather than assume it did.
+
+Two lines in that output are the ones that matter:
+
+- **Next Run Time** — should be within the next 15 minutes. Blank means the
+  schedule did not take.
+- **Status** — should be **Ready**. **Running** means a previous run is wedged,
+  and by default Windows will not start another while one is running, so every
+  run behind it is blocked indefinitely.
+
+Building this by hand is what failed on 2026-09-18: the bridge ran perfectly
+when launched manually and Windows never started it on its own, for seven
+hours, on an open market. Setup checked Python, checked Git, installed the
+package, prepared the repository and did a dry run — everything except the one
+step that makes it run. Use the script.
+
+<details>
+<summary>The hand-built equivalent, if you ever need it</summary>
+
 Task Scheduler → **Create Task** (not "Create Basic Task"):
 
 - **General**: name it `AURUM bridge`. Select *Run whether user is logged on or
@@ -145,8 +167,24 @@ Task Scheduler → **Create Task** (not "Create Basic Task"):
 - **Settings**: tick *Run task as soon as possible after a scheduled start is
   missed*.
 
+</details>
+
 Identical candles produce no commit, so a 15-minute cadence does not fill the
 branch with noise.
+
+### 1.7b What environment is the task actually running in?
+
+`CHECK-BRIDGE.bat` reports it: the account, the Python that resolved, where git
+was found, whether the remote is reachable. Run it by hand, then let the
+scheduled task run the same thing. **The difference between the two outputs is
+the fault** — almost always a different account with a different PATH, or git
+credentials the scheduled user cannot see.
+
+The usual one: Git for Windows offers *"Use Git from Git Bash only"*, which
+keeps git off the system PATH deliberately. Git Bash then works perfectly and
+Task Scheduler cannot find git at all, so the read succeeds and only the push
+fails. The bridge now looks in the standard install locations before giving up,
+and says exactly this if it still cannot find one.
 
 ### 1.7a When it runs by hand but not on schedule
 

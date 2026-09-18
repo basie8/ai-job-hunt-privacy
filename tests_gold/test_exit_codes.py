@@ -119,11 +119,42 @@ class ProgressExitsNonZeroOnAStaleClaim(unittest.TestCase):
     the repo cannot verify is the roadmap lying, and the exit code is how the
     prompt learns of it."""
 
+    def test_a_stale_claim_exits_one(self):
+        code, _ = self._progress(stale=["DAT-04"])
+        self.assertEqual(code, 1)
+
     def test_a_truthful_roadmap_exits_zero(self):
-        args = argparse.Namespace(repo=".", json_out=True,
-                                  roadmap="docs/ROADMAP.md")
-        code, _ = _capture(cli.cmd_progress, args)
+        # Driven through a result rather than the live roadmap. Asserting on
+        # the real repo made this fail whenever the MT5 feed went stale, since
+        # a dead bridge turns several verified rows into stale claims -- the
+        # test would go red for something entirely outside the code, at exactly
+        # the moment everything else was already noisy.
+        code, _ = self._progress(stale=[])
         self.assertEqual(code, 0)
+
+    def test_an_unparseable_roadmap_exits_two(self):
+        # Distinct from a stale claim: nothing was checked at all, which is a
+        # different problem with a different remedy.
+        code, _ = self._progress(stale=[], tasks=[])
+        self.assertEqual(code, 2)
+
+    def _progress(self, stale, tasks=("a-row",)):
+        from unittest import mock
+
+        class _Result:
+            def __init__(self):
+                self.tasks, self.stale = list(tasks), list(stale)
+
+            def summary(self):
+                return {"stale": len(self.stale)}
+
+            def render(self):
+                return "rendered"
+
+        args = argparse.Namespace(repo=".", json_out=False,
+                                  roadmap="docs/ROADMAP.md")
+        with mock.patch.object(cli, "audit", return_value=_Result()):
+            return _capture(cli.cmd_progress, args)
 
 
 class TheCodesAreDistinct(unittest.TestCase):

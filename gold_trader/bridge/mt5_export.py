@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -253,6 +254,56 @@ def write_fx(directory: str, pair: str, rate: float, as_of: str, source: str) ->
     return path
 
 
+#: Where Git for Windows puts itself when it is not on PATH.
+#:
+#: The installer offers "Use Git from Git Bash only", which deliberately keeps
+#: git off the system PATH. Git Bash then works perfectly and every other
+#: launcher -- cmd, a .bat, Task Scheduler -- cannot find git at all. A bridge
+#: run started by hand from Git Bash succeeds; the identical run started by
+#: Windows fails at the push and nowhere else.
+GIT_FALLBACK_PATHS = (
+    r"C:\Program Files\Git\cmd\git.exe",
+    r"C:\Program Files (x86)\Git\cmd\git.exe",
+    r"C:\Program Files\Git\bin\git.exe",
+)
+
+_GIT_EXE: Optional[str] = None
+
+
+def git_exe() -> str:
+    """The git to run, found explicitly rather than trusted to PATH.
+
+    Task Scheduler gives a task a different environment from an interactive
+    shell -- often a different account's PATH, sometimes almost none. Resolving
+    git here means the bridge works the same however it was started, and says
+    something useful when it genuinely cannot find it.
+    """
+    global _GIT_EXE
+    if _GIT_EXE:
+        return _GIT_EXE
+    found = shutil.which("git")
+    if not found:
+        for candidate in GIT_FALLBACK_PATHS:
+            expanded = os.path.expandvars(candidate)
+            if os.path.exists(expanded):
+                found = expanded
+                break
+    if not found:
+        local = os.path.expandvars(r"%LOCALAPPDATA%\Programs\Git\cmd\git.exe")
+        if os.path.exists(local):
+            found = local
+    if not found:
+        raise RuntimeError(
+            "git was not found on PATH or in any standard install location. "
+            "If Git for Windows was installed with 'Use Git from Git Bash only', "
+            "git works inside Git Bash and nowhere else -- including Task "
+            "Scheduler. Re-run the Git installer and choose 'Git from the "
+            "command line and also from 3rd-party software'."
+        )
+    _GIT_EXE = found
+    return found
+
+
 def git(repo: str, *args: str, stdin: Optional[str] = None, check: bool = True) -> subprocess.CompletedProcess:
     """Run git. stdin is sent as raw bytes, deliberately.
 
@@ -263,7 +314,7 @@ def git(repo: str, *args: str, stdin: Optional[str] = None, check: bool = True) 
     breaks every reader. Encoding here bypasses the translation entirely.
     """
     payload = stdin.encode("utf-8") if stdin is not None else None
-    result = subprocess.run(["git", "-C", repo, *args], capture_output=True, input=payload)
+    result = subprocess.run([git_exe(), "-C", repo, *args], capture_output=True, input=payload)
     stdout = result.stdout.decode("utf-8", "replace")
     stderr = result.stderr.decode("utf-8", "replace")
     if check and result.returncode != 0:
@@ -347,12 +398,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument("--push", action="store_true", help="Commit and push to the data branch.")
     parser.add_argument(
+        "--check", action="store_true",
+        help="Report the environment this process runs in and stop. Touches nothing.",
+    )
+    parser.add_argument(
         "--from-dir", default=None,
         help="Skip MT5 and push an existing directory of CSVs (non-Windows path).",
     )
     args = parser.parse_args(argv)
 
     repo = os.path.abspath(args.repo)
+    if args.check:
+        # Before the repo check, so a misconfigured repo is reported rather
+        # than being the thing that stops the report.
+        return preflight(repo)
     if not os.path.isdir(os.path.join(repo, ".git")):
         sys.exit(f"{repo} is not a git repository.")
     data_dir = args.from_dir or os.path.join(repo, "data")
@@ -431,6 +490,65 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.push:
         stamp = datetime.now(timezone.utc).isoformat(timespec="minutes")
         push_data_branch(repo, data_dir, f"XAUUSD candles @ {stamp}")
+    return 0
+
+
+def preflight(repo: str) -> int:
+    """Report the environment this process is actually running in.
+
+    The point is that it runs *as the scheduled task*, not as you. Every
+    difference between a run that works by hand and a run that fails under Task
+    Scheduler is somewhere in this output: a different account, a different
+    PATH, a python that resolves elsewhere, a git that cannot be found, a
+    credential helper that is not there.
+
+    Written to the run log as well as printed, so a scheduled run leaves the
+    answer behind even though nobody was watching the console.
+    """
+    lines = ["AURUM bridge preflight"]
+
+    def say(label: str, value: object) -> None:
+        lines.append(f"  {label:<16} {value}")
+
+    say("user", os.environ.get("USERNAME") or os.environ.get("USER") or "?")
+    say("python", sys.executable)
+    say("version", sys.version.split()[0])
+    say("cwd", os.getcwd())
+    say("repo", repo)
+    say("repo is git", os.path.isdir(os.path.join(repo, ".git")))
+
+    try:
+        exe = git_exe()
+        version = subprocess.run([exe, "--version"], capture_output=True, text=True)
+        say("git", f"{exe}  ({version.stdout.strip()})")
+    except RuntimeError as exc:
+        say("git", f"NOT FOUND -- {exc}")
+
+    try:
+        import MetaTrader5  # noqa: F401
+
+        say("MetaTrader5 pkg", "importable")
+    except Exception as exc:  # noqa: BLE001 - reporting, not failing
+        say("MetaTrader5 pkg", f"NOT importable -- {type(exc).__name__}: {exc}")
+
+    # The push is the step most likely to work by hand and fail on a schedule,
+    # because credentials are per-account and a scheduled task may run as
+    # someone else. Asking the remote is the only honest way to know.
+    try:
+        probe = subprocess.run(
+            [git_exe(), "-C", repo, "ls-remote", "--exit-code", "origin", "HEAD"],
+            capture_output=True, text=True, timeout=60,
+        )
+        say("remote reachable",
+            "yes" if probe.returncode == 0
+            else f"NO -- {(probe.stderr or probe.stdout).strip()[:200]}")
+    except Exception as exc:  # noqa: BLE001
+        say("remote reachable", f"NO -- {type(exc).__name__}: {exc}")
+
+    report = "\n".join(lines)
+    print(report)
+    for line in lines[1:]:
+        log_run(repo, "check", line.strip())
     return 0
 
 

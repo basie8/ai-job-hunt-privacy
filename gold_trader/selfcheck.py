@@ -532,6 +532,63 @@ def check_market_data_is_not_tracked_here(report: Report, repo: str) -> None:
     run(_untracked)
 
 
+def check_setup_installs_the_schedule(report: Report, repo: str) -> None:
+    """Setup must create the scheduled task, not describe it.
+
+    SETUP.bat checked Python, checked Git, installed the package, prepared the
+    repository and did a dry run -- everything except the one step that makes
+    the bridge run on its own. The task was left to be hand-built in the Task
+    Scheduler GUI from a description in INSTALL.md.
+
+    That is exactly where it failed on 2026-09-18: the bridge ran perfectly
+    when launched by hand and Windows never started it, for seven hours, on an
+    open market. Every candidate cause -- an unsaved repetition, a wedged
+    instance, credentials the task could not see -- was reachable only because
+    a human was assembling the schedule by hand.
+    """
+    import os
+
+    kit = os.path.join(repo, "gold_trader", "bridge", "windows_kit")
+    run = _guard(report, "bridge", "setup installs the schedule, not just describes it")
+    def _installs():
+        installer = os.path.join(kit, "INSTALL-TASK.bat")
+        assert os.path.exists(installer), (
+            "INSTALL-TASK.bat is missing: nothing in the kit creates the "
+            "scheduled task, so the bridge only ever runs when someone "
+            "launches it"
+        )
+        with open(installer, encoding="utf-8", errors="replace") as fh:
+            body = fh.read()
+        for needle, why in (
+            ("schtasks", "it must actually register a task"),
+            ("/MO 15", "the 15 minute cadence must be set by the script"),
+            ("/Query", "it must show what Windows stored, not assume it worked"),
+        ):
+            assert needle in body, f"INSTALL-TASK.bat lacks {needle!r}: {why}"
+
+        setup = os.path.join(kit, "SETUP.bat")
+        with open(setup, encoding="utf-8", errors="replace") as fh:
+            setup_body = fh.read()
+        assert "INSTALL-TASK.bat" in setup_body, (
+            "SETUP.bat does not call INSTALL-TASK.bat, so installing the "
+            "schedule is optional again"
+        )
+        return "setup registers the 15 minute task"
+    run(_installs)
+
+    run2 = _guard(report, "bridge", "a scheduled run leaves a trace on the PC")
+    def _logs():
+        launcher = os.path.join(kit, "RUN-BRIDGE.bat")
+        with open(launcher, encoding="utf-8", errors="replace") as fh:
+            body = fh.read()
+        assert ">>" in body and "bridge-console.log" in body, (
+            "RUN-BRIDGE.bat does not capture output. Under Task Scheduler "
+            "there is no console, so a failed run would say nothing anywhere."
+        )
+        return "the launcher captures stdout and stderr"
+    run2(_logs)
+
+
 def check_credentials_path(report: Report) -> None:
     """A run without an API key must say so, not raise from library internals.
 
@@ -865,6 +922,7 @@ def run_all(repo: str = ".") -> Report:
     check_run_health(report, repo)
     check_state_is_committable(report, repo)
     check_market_data_is_not_tracked_here(report, repo)
+    check_setup_installs_the_schedule(report, repo)
     check_credentials_path(report)
     check_market_hours(report)
     check_bridge_link(report)
