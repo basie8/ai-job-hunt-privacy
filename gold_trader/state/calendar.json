@@ -1,0 +1,19 @@
+{
+  "covers_through": "2026-12-31T23:59:59+00:00",
+  "events": [
+    {"name": "PCE Price Index (Aug 2026 data)", "kind": "PCE", "when": "2026-09-30T08:30:00-04:00", "impact": "high"},
+    {"name": "CPI (Sep 2026 data)", "kind": "CPI", "when": "2026-10-14T08:30:00-04:00", "impact": "high"},
+    {"name": "PPI (Sep 2026 data)", "kind": "PPI", "when": "2026-10-15T08:30:00-04:00", "impact": "medium"},
+    {"name": "FOMC Rate Decision (Oct 2026)", "kind": "FOMC", "when": "2026-10-28T14:00:00-04:00", "impact": "high"},
+    {"name": "PCE Price Index (Sep 2026 data)", "kind": "PCE", "when": "2026-10-29T08:30:00-04:00", "impact": "high"},
+    {"name": "CPI (Oct 2026 data)", "kind": "CPI", "when": "2026-11-10T08:30:00-05:00", "impact": "high"},
+    {"name": "PPI (Oct 2026 data)", "kind": "PPI", "when": "2026-11-13T08:30:00-05:00", "impact": "medium"},
+    {"name": "PCE Price Index (Oct 2026 data)", "kind": "PCE", "when": "2026-11-25T08:30:00-05:00", "impact": "high"},
+    {"name": "CPI (Nov 2026 data)", "kind": "CPI", "when": "2026-12-10T08:30:00-05:00", "impact": "high"},
+    {"name": "FOMC Rate Decision (Dec 2026)", "kind": "FOMC", "when": "2026-12-09T14:00:00-05:00", "impact": "high"},
+    {"name": "PPI (Nov 2026 data)", "kind": "PPI", "when": "2026-12-15T08:30:00-05:00", "impact": "medium"},
+    {"name": "PCE Price Index (Nov 2026 data)", "kind": "PCE", "when": "2026-12-23T08:30:00-05:00", "impact": "high"}
+  ],
+  "readings": [],
+  "notes": "FOMC Oct 28 / Dec 9 2026 dates confirmed on federalreserve.gov; 14:00 ET is the standard convention, not yet published per-meeting as of 2026-09-18 -- recheck closer to each meeting. CPI/PPI (BLS) and PCE (BEA) dates/times from official 2026 schedules. No DXY/real-yield/VIX readings supplied yet (MAC-03, separate)."
+}
