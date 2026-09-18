@@ -428,8 +428,9 @@ def cmd_pull_data(args: argparse.Namespace) -> int:
     # $0.18 reasoning about candles an hour and a half stale. The risk manager
     # caught it and stood aside -- the last line of defence doing the job of
     # the first.
+    cadence = "its own cadence" if len(behind) == 1 else "their own cadences"
     print(
-        f"\n{names} behind its own cadence while the market is open. The feed "
+        f"\n{names} behind {cadence} while the market is open. The feed "
         "is not being delivered: check the bridge on your machine (MetaTrader 5 "
         "open, Task Scheduler running). The pipeline should not signal on this.",
         file=sys.stderr,
