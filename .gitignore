@@ -10,3 +10,8 @@ audit/
 # could ever have accumulated across runs. Guarded now by a self-check.
 data/
 AURUM-bridge.zip
+
+# The bridge's local run log. Deliberately never committed: when the thing
+# that is broken is the push, a pushed log cannot report it.
+bridge-run.log
+bridge-run.log.1

@@ -148,6 +148,49 @@ Task Scheduler → **Create Task** (not "Create Basic Task"):
 Identical candles produce no commit, so a 15-minute cadence does not fill the
 branch with noise.
 
+### 1.7a When it runs by hand but not on schedule
+
+This happened on 2026-09-18 and it is the common failure, so it is worth
+knowing how to split it in two. Every run appends a line to `C:\aurum\bridge-run.log`
+whatever the outcome, and that file is never pushed — when the push is what
+is broken, a pushed log cannot report it. Open it first:
+
+- **No entries for the last hour** → Windows is not starting the task. The
+  script is fine; the trigger or the run context is not.
+- **Entries saying `error`** → the task *is* starting and something downstream
+  is failing. Read the message on the line.
+
+For the first case, in order of how often each one is the answer:
+
+1. **The repetition was not saved.** In Triggers → New, "Repeat task every: 15
+   minutes" lives under *Advanced settings*, and the *for a duration of* box
+   beside it defaults to something short. Set it to **Indefinitely**. Check
+   the task's **Next Run Time** column afterwards — if it is blank or a day
+   away, the trigger is not what you think it is.
+2. **A previous instance is still marked running.** Settings → *If the task is
+   already running* → "Do not start a new instance" is the default, so one
+   hung run blocks every run after it, forever, silently. The task list shows
+   Status **Running** rather than Ready. End it, then set *Stop the task if it
+   runs longer than* to 10 minutes so it can never wedge again.
+3. **"Run whether user is logged on or not" without usable credentials.**
+   Windows needs the account password, and a password change since the task
+   was created invalidates it. Last Run Result shows `0x4` or a permission
+   error. Re-enter it, or switch to *Run only when user is logged on* if the
+   PC stays signed in.
+4. **Conditions.** On a laptop, untick *Start the task only if the computer is
+   on AC power* and *Stop if the computer switches to battery power*.
+
+For the second case — the task runs but nothing arrives — the usual cause is
+**git credentials**. Your own session reads the Windows Credential Manager; a
+task running as another account or as SYSTEM may not see it, so the push fails
+with an authentication error while everything else works. Run the task under
+your own user account, or configure a credential helper that does not depend
+on the interactive session.
+
+The cloud side notices either way: `bridge.json` stops being rewritten, and
+the dashboard says the bridge is late after 20 minutes and dead after 45. But
+the log is what says *why*.
+
 ### 1.8 The paper book, as configured
 
 Both numbers are now set, so there is nothing to reply with:

@@ -434,5 +434,75 @@ def main(argv: Optional[List[str]] = None) -> int:
     return 0
 
 
+#: A local record of every invocation, whatever happened.
+#:
+#: Everything this script says goes to stdout, and under Task Scheduler stdout
+#: goes nowhere. So a scheduled run that failed left no trace on the PC and no
+#: trace in the repository -- indistinguishable from a task that never fired.
+#:
+#: The log is deliberately LOCAL and never pushed. When the thing that is
+#: broken is the push itself, a pushed log cannot report it.
+RUN_LOG_FILENAME = "bridge-run.log"
+
+#: Keep roughly a week of 15-minute runs, then start the file again. Small
+#: enough to open in Notepad, long enough to show a pattern.
+RUN_LOG_MAX_BYTES = 256 * 1024
+
+
+def log_run(repo: str, outcome: str, detail: str = "") -> None:
+    """Append one line for this run. Never raises: a logging failure must not
+    be the thing that stops a candle push."""
+    try:
+        path = os.path.join(repo, RUN_LOG_FILENAME)
+        if os.path.exists(path) and os.path.getsize(path) > RUN_LOG_MAX_BYTES:
+            os.replace(path, path + ".1")
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        line = f"{stamp}  {outcome:<7} {detail}".rstrip()
+        with open(path, "a", encoding="utf-8", errors="replace") as fh:
+            fh.write(line + "\n")
+    except Exception:  # noqa: BLE001 - see docstring
+        pass
+
+
+def _run_and_log(argv=None) -> int:
+    """Wrap main() so that every outcome reaches the log, including the ones
+    that produce nothing else.
+
+    A task that runs and dies and a task that never ran look identical from
+    outside. This is the line that tells them apart, and it is the whole point
+    of the file: if `bridge-run.log` has no entry for the last hour, Task
+    Scheduler is not starting the task. If it has entries and they say `error`,
+    the task is starting and something downstream is failing -- most often the
+    push, because a scheduled task may not see the Windows Credential Manager
+    that your own session uses.
+    """
+    repo = os.path.abspath(_repo_from(argv))
+    try:
+        code = main(argv)
+    except SystemExit as exc:
+        # argparse and the sys.exit() calls above both land here. A string
+        # argument is the message; an int is a status.
+        detail = "" if exc.code in (0, None) else str(exc.code)
+        log_run(repo, "ok" if exc.code in (0, None) else "error", detail)
+        raise
+    except Exception as exc:  # noqa: BLE001 - the log is the only witness
+        log_run(repo, "error", f"{type(exc).__name__}: {exc}")
+        raise
+    log_run(repo, "ok" if code == 0 else "error", "" if code == 0 else f"exit {code}")
+    return code
+
+
+def _repo_from(argv) -> str:
+    """Find --repo without running argparse, so the log works even when
+    argparse is what rejected the arguments."""
+    items = list(sys.argv[1:] if argv is None else argv)
+    for index, item in enumerate(items):
+        if item == "--repo" and index + 1 < len(items):
+            return items[index + 1]
+        if item.startswith("--repo="):
+            return item.split("=", 1)[1]
+    return "."
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(_run_and_log())

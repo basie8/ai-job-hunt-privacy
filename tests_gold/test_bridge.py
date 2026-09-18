@@ -298,3 +298,66 @@ class BridgeFxWriting(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheBridgeMustLeaveATraceOnThePC(unittest.TestCase):
+    """A task that ran and died looks exactly like a task that never fired.
+
+    Everything mt5_export prints goes to stdout, and under Task Scheduler
+    stdout goes nowhere. So on 2026-09-18, with the bridge silent for an hour
+    and the PC on the whole time, there was no way to tell whether Windows was
+    starting the task at all -- the same absence this project keeps finding,
+    this time on the machine rather than in the cloud.
+
+    The log is local and never pushed, because when the push is what is broken
+    a pushed log cannot report it.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo = self.tmp.name
+
+    def test_a_crash_is_recorded(self):
+        mt5_export.log_run(self.repo, "error", "RuntimeError: boom")
+        self.assertIn("RuntimeError: boom", self._log())
+
+    def test_a_success_is_recorded_too(self):
+        # A quiet run and a missing run must not look the same -- the same rule
+        # the cloud heartbeat follows.
+        mt5_export.log_run(self.repo, "ok")
+        self.assertIn("ok", self._log())
+
+    def test_every_line_is_timestamped(self):
+        # Without the time, the log answers "did it ever work" but not "is it
+        # running now", which is the actual question.
+        mt5_export.log_run(self.repo, "ok")
+        self.assertRegex(self._log(), r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
+
+    def test_logging_never_raises(self):
+        # A logging failure must not become the thing that stops a candle push.
+        mt5_export.log_run(os.path.join(self.repo, "no", "such", "dir"), "ok")
+
+    def test_the_log_is_rotated_not_grown_forever(self):
+        path = os.path.join(self.repo, mt5_export.RUN_LOG_FILENAME)
+        with open(path, "w") as fh:
+            fh.write("x" * (mt5_export.RUN_LOG_MAX_BYTES + 10))
+        mt5_export.log_run(self.repo, "ok")
+        self.assertTrue(os.path.exists(path + ".1"))
+        self.assertLess(os.path.getsize(path), 1000)
+
+    def test_the_repo_is_found_without_argparse(self):
+        # The log has to work even when argparse is what rejected the
+        # arguments, or a mistyped scheduled task stays invisible.
+        self.assertEqual(mt5_export._repo_from(["--repo", "C:/aurum", "--push"]), "C:/aurum")
+        self.assertEqual(mt5_export._repo_from(["--repo=C:/aurum"]), "C:/aurum")
+
+    def test_the_log_is_gitignored(self):
+        # It must never be pushed: it is the witness for a broken push.
+        root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        with open(os.path.join(root, ".gitignore"), encoding="utf-8") as fh:
+            self.assertIn(mt5_export.RUN_LOG_FILENAME, fh.read())
+
+    def _log(self):
+        with open(os.path.join(self.repo, mt5_export.RUN_LOG_FILENAME), encoding="utf-8") as fh:
+            return fh.read()
