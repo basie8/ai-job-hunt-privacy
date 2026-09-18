@@ -240,3 +240,110 @@ def run_stage(
         response_sha256=call.response_sha256,
     )
     return call.parsed
+
+
+#: What a credential check can conclude. Each is a different problem with a
+#: different remedy, and collapsing any two of them sends the reader to the
+#: wrong place -- which is exactly what cost an evening on 2026-09-17, when a
+#: key that was present but revoked was reported as "no credentials".
+ABSENT = "absent"        # no variable is set
+VALID = "valid"          # the API accepted it
+REFUSED = "refused"      # the API rejected the value (401)
+UNREACHABLE = "unreachable"  # the request never got an answer
+UNCHECKED = "unchecked"  # a key is set but nothing asked the API
+
+
+@dataclass(frozen=True)
+class CredentialCheck:
+    """The result of asking whether the pipeline can authenticate.
+
+    Deliberately carries the variable *name* and the key's *length*, never the
+    value. A diagnostic that echoes a secret turns a support question into a
+    rotation, and that has already happened once in this project.
+    """
+
+    status: str
+    source: str = ""
+    key_length: int = 0
+    detail: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return self.status == VALID
+
+    def render(self) -> str:
+        where = self.source or "(none set)"
+        head = f"credential: {where}"
+        if self.key_length:
+            head += f" ({self.key_length} characters)"
+        return f"{head}\nstatus: {self.status}\n{self.detail}".rstrip()
+
+
+def verify_key(client: Any = None, probe: bool = True) -> CredentialCheck:
+    """Ask the API whether the configured key works, without spending anything.
+
+    The check is ``models.list``: authenticated, free, and independent of which
+    models the account may call. A messages request would work too, but it
+    bills, and a diagnostic that costs money is a diagnostic people avoid
+    running.
+
+    ``probe=False`` reports only what is set locally, for when the network is
+    not available or not wanted.
+    """
+    import os
+
+    source = credential_source()
+    if not source:
+        return CredentialCheck(
+            status=ABSENT,
+            detail="No credential variable is set: " + "/".join(CREDENTIAL_ENV_VARS),
+        )
+    length = len((os.environ.get(source) or "").strip())
+
+    if not probe:
+        return CredentialCheck(
+            status=UNCHECKED, source=source, key_length=length,
+            detail="A key is set. Not verified against the API (probe disabled).",
+        )
+
+    if client is None:
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=resolve_api_key())
+
+    try:
+        client.models.list(limit=1)
+    except Exception as exc:  # noqa: BLE001 - the SDK's exception tree varies by version
+        text = str(exc)
+        if _looks_like_auth_failure(exc, text):
+            return CredentialCheck(
+                status=REFUSED, source=source, key_length=length,
+                detail=("The API refused the value (401). The variable is set and was "
+                        "sent, so this is not a missing-variable problem: the key "
+                        "itself is revoked, mistyped, or from another organisation."),
+            )
+        return CredentialCheck(
+            status=UNREACHABLE, source=source, key_length=length,
+            detail=f"The request did not get an answer, so the key is unjudged: {text}",
+        )
+
+    return CredentialCheck(
+        status=VALID, source=source, key_length=length,
+        detail="The API accepted the key. The four stages can authenticate.",
+    )
+
+
+def _looks_like_auth_failure(exc: Exception, text: str) -> bool:
+    """Is this a rejected key, or something else entirely?
+
+    Checked by status code first and prose second: the SDK's exception class
+    names have changed between versions, and a check that matches on the class
+    would start reporting a revoked key as a network fault after an upgrade.
+    """
+    status = getattr(exc, "status_code", None)
+    if status == 401:
+        return True
+    if status is not None:
+        return False
+    lowered = text.lower()
+    return "authentication_error" in lowered or "401" in lowered

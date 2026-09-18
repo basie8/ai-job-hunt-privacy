@@ -113,6 +113,33 @@ inside `_validate_headers` on the first request, so the failure arrives late and
 unexplained. `gold_trader signal` checks first, exits 3, and names the variable
 that works. See `docs/INSTALL.md` part 2.
 
+#### Checking the key without running anything
+
+```
+python -m gold_trader credentials
+```
+
+It reports which variable supplied the key, how many characters it is, and
+whether the API accepts it — never the value itself. The probe is `models.list`,
+which is authenticated and free, so this costs nothing and can be run as often
+as you like. `--no-probe` skips the network and reports only what is set.
+
+Exit codes match `signal`, so a Routine can branch on them without reading prose:
+
+| code | meaning | remedy |
+|------|---------|--------|
+| 0 | the API accepted the key | nothing to do |
+| 3 | no credential variable is set | set `AURUM_ANTHROPIC_API_KEY` |
+| 5 | set, sent, and refused (401) | the value is revoked, mistyped, or from another organisation — replace it |
+| 2 | the API could not be reached | the key is unjudged; try again |
+
+The distinction between 3 and 5 is the point. A revoked key reported as "no
+credentials" sends you hunting for a variable that is already set, which is
+exactly what happened on 2026-09-17. Before this command existed, the only way
+to learn what a scheduled container actually held was to fire a run and read the
+heartbeat it pushed — ten minutes and a commit to answer a question the
+container can answer in one second.
+
 ### When gold is actually open
 
 Gold trades nearly around the clock, but not quite, and the gaps matter:

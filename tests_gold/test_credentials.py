@@ -240,3 +240,159 @@ class KeyPresentButRefused(unittest.TestCase):
             cli.cmd_signal(args)
         self.assertNotIn("Traceback", buffer.getvalue())
         self.assertIn("401", buffer.getvalue())
+
+
+class VerifyingTheKeyWithoutAScheduledRun(unittest.TestCase):
+    """Finding out whether the key works used to cost a whole Routine run.
+
+    On 2026-09-18 the only way to learn what a Routine container held was to
+    fire one, have it push a heartbeat, and read the commit -- ten minutes to
+    answer a question the container could answer in one second. `credentials`
+    is that second.
+    """
+
+    def test_no_variable_set_is_reported_as_absent(self):
+        from investment_pipeline.llm import ABSENT, verify_key
+
+        with _no_credentials():
+            check = verify_key(client=_Models(None), probe=True)
+        self.assertEqual(check.status, ABSENT)
+        self.assertFalse(check.ok)
+
+    def test_an_accepted_key_is_valid(self):
+        from investment_pipeline.llm import VALID, verify_key
+
+        with _a_credential("sk-ant-test-value"):
+            check = verify_key(client=_Models(None), probe=True)
+        self.assertEqual(check.status, VALID)
+        self.assertTrue(check.ok)
+        self.assertEqual(check.source, "AURUM_ANTHROPIC_API_KEY")
+
+    def test_a_401_is_refused_not_absent(self):
+        # The whole point. A present-but-dead key reported as "no credentials"
+        # sends the reader hunting for a variable that is already set.
+        from investment_pipeline.llm import REFUSED, verify_key
+
+        with _a_credential("sk-ant-dead"):
+            check = verify_key(client=_Models(_Status(401)), probe=True)
+        self.assertEqual(check.status, REFUSED)
+        self.assertIn("not a missing-variable problem", check.detail)
+
+    def test_a_network_failure_is_not_reported_as_a_bad_key(self):
+        # An unreachable API says nothing about the key. Calling it refused
+        # would start a key rotation to fix a dropped connection.
+        from investment_pipeline.llm import UNREACHABLE, verify_key
+
+        with _a_credential("sk-ant-fine"):
+            check = verify_key(client=_Models(OSError("connection reset")), probe=True)
+        self.assertEqual(check.status, UNREACHABLE)
+        self.assertIn("unjudged", check.detail)
+
+    def test_a_403_is_not_an_authentication_failure(self):
+        from investment_pipeline.llm import UNREACHABLE, verify_key
+
+        with _a_credential("sk-ant-fine"):
+            check = verify_key(client=_Models(_Status(403)), probe=True)
+        self.assertEqual(check.status, UNREACHABLE)
+
+    def test_it_reports_the_length_and_never_the_value(self):
+        # A diagnostic that echoes a secret turns a support question into a
+        # rotation. That has already happened once in this project.
+        from investment_pipeline.llm import verify_key
+
+        secret = "sk-ant-this-must-never-appear"
+        with _a_credential(secret):
+            check = verify_key(client=_Models(None), probe=True)
+        rendered = check.render()
+        self.assertIn(str(len(secret)), rendered)
+        self.assertNotIn(secret, rendered)
+        self.assertNotIn(secret, repr(check))
+
+    def test_probing_can_be_switched_off(self):
+        from investment_pipeline.llm import UNCHECKED, verify_key
+
+        with _a_credential("sk-ant-x"):
+            check = verify_key(client=_Exploding(), probe=False)
+        self.assertEqual(check.status, UNCHECKED)
+
+    def test_the_check_is_free(self):
+        # models.list is authenticated and bills nothing. A messages request
+        # would work too and cost money, and a diagnostic that costs money is
+        # one people stop running.
+        from investment_pipeline.llm import verify_key
+
+        models = _Models(None)
+        with _a_credential("sk-ant-x"):
+            verify_key(client=models, probe=True)
+        self.assertEqual(models.calls, 1)
+
+
+class TheCredentialsCommand(unittest.TestCase):
+    def test_exit_codes_match_signal(self):
+        # 3 = nothing set, 5 = set but refused -- so a Routine can branch on
+        # the code without reading prose.
+        import argparse
+        from unittest import mock
+
+        from gold_trader import cli
+        from investment_pipeline.llm import ABSENT, CredentialCheck, REFUSED, VALID
+
+        args = argparse.Namespace(no_probe=False, json_out=True)
+        for status, expected in ((ABSENT, 3), (REFUSED, 5), (VALID, 0)):
+            with mock.patch("investment_pipeline.llm.verify_key",
+                            return_value=CredentialCheck(status=status, source="X")):
+                self.assertEqual(cli.cmd_credentials(args), expected, status)
+
+
+class _Models:
+    """A stand-in for the SDK client, exercising only what verify_key uses."""
+
+    def __init__(self, raises):
+        self._raises, self.calls = raises, 0
+        self.models = self
+
+    def list(self, limit=None):
+        self.calls += 1
+        if self._raises is not None:
+            raise self._raises
+        return []
+
+
+class _Exploding:
+    @property
+    def models(self):
+        raise AssertionError("verify_key must not touch the network when probe=False")
+
+
+class _Status(Exception):
+    def __init__(self, code):
+        super().__init__(f"HTTP {code}")
+        self.status_code = code
+
+
+class _no_credentials:
+    def __enter__(self):
+        from investment_pipeline.llm import CREDENTIAL_ENV_VARS
+
+        self._saved = {k: os.environ.pop(k, None) for k in CREDENTIAL_ENV_VARS}
+        return self
+
+    def __exit__(self, *exc):
+        for key, value in self._saved.items():
+            if value is not None:
+                os.environ[key] = value
+        return False
+
+
+class _a_credential(_no_credentials):
+    def __init__(self, value):
+        self._value = value
+
+    def __enter__(self):
+        super().__enter__()
+        os.environ["AURUM_ANTHROPIC_API_KEY"] = self._value
+        return self
+
+    def __exit__(self, *exc):
+        os.environ.pop("AURUM_ANTHROPIC_API_KEY", None)
+        return super().__exit__(*exc)

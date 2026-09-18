@@ -242,6 +242,49 @@ def cmd_signal(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_credentials(args: argparse.Namespace) -> int:
+    """Answer one question: can the pipeline authenticate, yes or no.
+
+    This exists because answering it used to require firing a whole scheduled
+    run and reading the heartbeat it pushed -- the only channel by which a
+    Routine container's state reached anyone. Ten minutes and a commit to learn
+    something the container knows instantly.
+
+    Exit codes match `signal` so a Routine can branch on them without parsing
+    prose: 0 usable, 3 nothing set, 5 set but refused.
+    """
+    from investment_pipeline.llm import (
+        ABSENT, REFUSED, UNREACHABLE, VALID, verify_key,
+    )
+
+    try:
+        check = verify_key(probe=not args.no_probe)
+    except ImportError as exc:
+        print(f"The anthropic SDK is not installed: {exc}\n"
+              "Install it with:  pip install anthropic", file=sys.stderr)
+        return 4
+
+    if args.json_out:
+        json.dump({"status": check.status, "source": check.source,
+                   "key_length": check.key_length, "detail": check.detail},
+                  sys.stdout, indent=2)
+        sys.stdout.write("\n")
+    else:
+        print(check.render())
+
+    if check.status == ABSENT:
+        if not args.json_out:
+            print(f"\n{CREDENTIALS_REMEDY}", file=sys.stderr)
+        return 3
+    if check.status == REFUSED:
+        if not args.json_out:
+            print(f"\n{REJECTED_REMEDY}", file=sys.stderr)
+        return 5
+    if check.status == UNREACHABLE:
+        return 2
+    return 0 if check.status == VALID else 0
+
+
 def cmd_resolve(args: argparse.Namespace) -> int:
     config = _config(args)
     journal = Journal(config.journal_path)
@@ -447,6 +490,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     _common(p, data=True)
     p.add_argument("--json-out", action="store_true")
     p.set_defaults(func=cmd_signal)
+
+    p = sub.add_parser("credentials",
+                       help="Check whether the API key works, free and instantly.")
+    p.add_argument("--no-probe", action="store_true",
+                   help="Report what is set without asking the API.")
+    p.add_argument("--json", dest="json_out", action="store_true")
+    p.set_defaults(func=cmd_credentials)
 
     p = sub.add_parser("resolve", help="Score open trades against new candles (no model calls).")
     _common(p, data=True)
