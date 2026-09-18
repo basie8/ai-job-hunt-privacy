@@ -276,3 +276,105 @@ class PerTimeframeFreshness(unittest.TestCase):
                 writer.writerow([(now - _td(minutes=age)).isoformat(),
                                  1, 2, 0.5, 1.5, 10])
         return describe_data_dir(tmp, now)
+
+
+class TheExitCodeMustNotWaitForTheSlowestSeries(unittest.TestCase):
+    """`pull-data` gates the whole scheduled run: the Routine stops at step 3
+    on a non-zero exit and never calls a model. It used to exit non-zero only
+    when EVERY series was behind, which sounds conservative and is the exact
+    opposite.
+
+    Each series is judged against its own cadence, so on a dead feed m15 goes
+    stale after 45 minutes, h1 after 90 and h4 after 270. Requiring all three
+    to agree means the gate can never fire sooner than the slowest one -- four
+    and a half hours after the bridge stopped.
+
+    It cost a run on 2026-09-18: m15 87 minutes old against a 45 minute
+    allowance, STALE printed, exit 0, and the pipeline spent $0.18 reasoning
+    about hour-and-a-half-old candles. The risk manager stood aside and caught
+    it, which is the last line of defence doing the first one's job.
+    """
+
+    OPEN = datetime(2026, 9, 17, 14, 0, tzinfo=timezone.utc)      # Thursday, London/NY
+    CLOSED = datetime(2026, 9, 19, 23, 0, tzinfo=timezone.utc)    # Friday night
+
+    def test_one_stale_series_fails_the_gate(self):
+        code, err = self._pull({"m15": 90, "h1": 30, "h4": 60}, now=self.OPEN)
+        self.assertEqual(code, 3)
+        self.assertIn("m15", err)
+
+    def test_the_fresh_series_are_not_reported_as_the_problem(self):
+        # The per-row listing names every series; the diagnosis must name only
+        # the ones actually behind, or the reader cannot tell what to chase.
+        _, text = self._pull({"m15": 90, "h1": 30, "h4": 60}, now=self.OPEN)
+        diagnosis = text.split("behind its own cadence")[0].rsplit("\n", 1)[-1]
+        self.assertEqual(diagnosis.strip(), "m15")
+
+    def test_all_series_fresh_passes(self):
+        code, _ = self._pull({"m15": 10, "h1": 30, "h4": 120}, now=self.OPEN)
+        self.assertEqual(code, 0)
+
+    def test_every_series_stale_still_fails(self):
+        # The old condition was not wrong, only far too narrow.
+        code, _ = self._pull({"m15": 300, "h1": 300, "h4": 400}, now=self.OPEN)
+        self.assertEqual(code, 3)
+
+    def test_staleness_while_the_market_is_shut_is_not_a_failure(self):
+        # Gold stops printing bars at the close. Failing here would stop a run
+        # every weekday evening and all weekend, and an alarm that fires
+        # nightly is one nobody reads by Friday.
+        code, out = self._pull({"m15": 300, "h1": 300, "h4": 400}, now=self.CLOSED)
+        self.assertEqual(code, 0)
+        self.assertIn("market is closed", out)
+
+    def test_the_closed_message_says_which_series_and_why(self):
+        _, out = self._pull({"m15": 300}, now=self.CLOSED)
+        self.assertIn("m15", out)
+        self.assertIn("expected", out)
+
+    def test_the_open_message_points_at_the_bridge_not_the_market(self):
+        # The remedy is on the Windows PC. Saying "stale data" without saying
+        # where to look is the report that wastes the evening.
+        _, err = self._pull({"m15": 90}, now=self.OPEN)
+        self.assertIn("bridge", err)
+        self.assertIn("MetaTrader", err)
+
+    def _pull(self, ages_min, now):
+        """Drive cmd_pull_data over a real data directory, capturing both streams."""
+        import argparse
+        import io
+        import contextlib
+        from unittest import mock
+
+        from gold_trader import cli
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        data_dir = os.path.join(tmp.name, "data")
+        os.makedirs(data_dir)
+        step = {"m15": 15, "h1": 60, "h4": 240}
+        for timeframe, age in ages_min.items():
+            last = now - timedelta(minutes=age)
+            mt5_export.write_csv(bars(5, last, step_min=step[timeframe]),
+                                 os.path.join(data_dir, f"XAUUSD_{timeframe}.csv"))
+
+        args = argparse.Namespace(repo=".", branch=DATA_BRANCH, data_dir=data_dir,
+                                  max_age_min=None)
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(cli, "pull_data_branch", return_value=False), \
+             mock.patch.object(cli, "describe_data_dir",
+                               side_effect=lambda d, **kw: describe_data_dir(d, now=now)), \
+             mock.patch.object(cli, "datetime", _FrozenClock(now)), \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = cli.cmd_pull_data(args)
+        return code, out.getvalue() + err.getvalue()
+
+
+class _FrozenClock:
+    """Only what cmd_pull_data asks of datetime: now(tz)."""
+
+    def __init__(self, moment):
+        self._moment = moment
+
+    def now(self, tz=None):
+        return self._moment

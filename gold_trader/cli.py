@@ -27,6 +27,7 @@ from .risk import (
     TradingLimits, equity_usd, realised_pnl_usd, realised_r_today, signals_today,
 )
 from .sync import DATA_BRANCH, pull_data_branch, describe_data_dir
+from .sessions import market_closed
 from .progress import audit
 from .selfcheck import run_all
 from .dashboard import build as build_dashboard
@@ -376,14 +377,38 @@ def cmd_pull_data(args: argparse.Namespace) -> int:
         )
     behind = [r for r in rows
               if r["age_min"] > (args.max_age_min or r["expected_max_min"])]
-    if len(behind) == len(rows):
-        print(
-            "\nEvery series is behind its own cadence. The pipeline will refuse "
-            "to signal on this. Check the bridge on your machine.",
-            file=sys.stderr,
-        )
-        return 3
-    return 0
+    if not behind:
+        return 0
+
+    names = ", ".join(r["timeframe"] for r in behind)
+
+    # Staleness while gold is shut is not a fault, it is the close. Exiting
+    # non-zero here would stop a run every single evening and twice a weekend,
+    # and an alarm that cries wolf nightly is one nobody reads by Friday.
+    closed = market_closed(datetime.now(timezone.utc))
+    if closed:
+        print(f"\n{names} behind, which is expected: the market is closed "
+              f"({closed.replace('_', ' ')}). New bars resume at the reopen.")
+        return 0
+
+    # Any stale series is a stale feed. This used to require *every* series to
+    # be behind, which sounds conservative and is the opposite: each series is
+    # judged against its own cadence, so h4 does not notice a dead bridge for
+    # four hours and h1 for ninety minutes. Waiting for the slowest one to
+    # agree means the exit code is always as late as the slowest one.
+    #
+    # It cost a run on 2026-09-18: m15 was 87 minutes old with a 45 minute
+    # allowance, pull-data printed STALE and exited 0, and the pipeline spent
+    # $0.18 reasoning about candles an hour and a half stale. The risk manager
+    # caught it and stood aside -- the last line of defence doing the job of
+    # the first.
+    print(
+        f"\n{names} behind its own cadence while the market is open. The feed "
+        "is not being delivered: check the bridge on your machine (MetaTrader 5 "
+        "open, Task Scheduler running). The pipeline should not signal on this.",
+        file=sys.stderr,
+    )
+    return 3
 
 
 def cmd_progress(args: argparse.Namespace) -> int:
