@@ -8,3 +8,4 @@
 {"detail": "Resolved ob_retest long -1.00R (stop_hit); new signal rejected by risk manager (RISK_MANAGER_REJECT: 9pt stop below 0.6x ATR floor, honest R:R 0.94-1.03 below 1.50 min)", "outcome": "resolved", "routine": "signal", "ts": "2026-09-18T09:26:44+00:00"}
 {"detail": "Risk engine hard-blocked: STOP_TOO_TIGHT (0.52x ATR stop inside 0.6x noise floor); analyst proposed long FVG retest at 4373.6, risk manager cut conviction 0.58->0.4, stop rejected before sizing.", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-18T11:27:49+00:00"}
 {"detail": "Analyst flat: range-bound 4334-4400, no stop within reach, waiting for 4323 tap or 4399.74 sweep", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-18T13:26:57+00:00"}
+{"detail": "Analyst returned flat: structural conflict between 4334.26 protected low and 4399.74 Asian high, no spot entry meets 1.5R minimum", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-18T15:26:13+00:00"}
