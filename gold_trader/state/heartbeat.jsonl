@@ -4,3 +4,4 @@
 {"detail": "Risk manager reject: stale price feed (81min old) and conflicting H4/H1 bias; no entry approved", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-18T00:25:08+00:00"}
 {"detail": "BUY XAUUSD limit 4353.00, stop 4339.50, target 4374.00, R:R 1.56, conviction 0.30 (cold start clamp)", "outcome": "signal", "routine": "signal", "ts": "2026-09-18T00:38:01+00:00"}
 {"detail": "selfcheck 40/40 pass; runs 5/5 no gaps; 3 stale claims (DAT-04/SMC-03/TST-01) all trace to bridge silent since 00:33 UTC (6h13m, market open); dashboard republished; clarified roadmap notes", "outcome": "no_trade", "routine": "audit", "ts": "2026-09-18T06:47:15+00:00"}
+{"detail": "pull-data exit 3: m15 last bar 2026-09-18T00:30:00+00:00 is 414min old (45min allowed); h1 444min old (90 allowed); h4 624min old (270 allowed) - MT5 bridge not delivering", "outcome": "stale_data", "routine": "signal", "ts": "2026-09-18T07:23:49+00:00"}
