@@ -23,6 +23,19 @@ each, were committed, and showed on the dashboard as two real pipeline runs.
 The original file is kept as `audit.contaminated-by-local-tests.jsonl` rather
 than deleted, because erasing a record is worse than labelling it.
 
+It happened a second time the same evening, through a different door. The
+credential test shells out to `gold_trader signal` as a subprocess, with
+`cwd` set to the repository and no `--state-dir`. While it stripped only some
+credential names, a valid key survived into the child and the test made real
+API calls -- six of them, two completing all four stages -- all written to the
+production audit log and committed. The dashboard then showed six pipeline
+runs and a risk-manager approval that no operator had ever triggered.
+
+The lesson is not "be careful". It is that **the production state directory
+must never be the default for anything a test can reach**, because a test that
+accidentally becomes a real run is indistinguishable from a real run after the
+fact. Both cleanups kept the file, renamed, rather than deleting it.
+
 Use a scratch directory instead:
 
     python -m gold_trader signal --csv-dir data/ --state-dir /tmp/aurum-test
