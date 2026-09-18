@@ -180,6 +180,10 @@ def resolve_against(
     """Walk candles after entry and decide the outcome.
 
     Returns the outcome changes, or ``None`` if the trade is still open.
+
+    A signal is only live once price has traded at its entry. Until then it is
+    a resting order, and nothing about it can win or lose.
+
     A candle spanning both stop and target resolves as a loss: bar data cannot
     order intrabar touches, so the unfavourable branch is assumed.
     """
@@ -199,8 +203,31 @@ def resolve_against(
     long = record.direction == "long"
     mae_r = 0.0
     mfe_r = 0.0
+    filled = False
 
     for candle in forward:
+        # Nothing happens until price actually trades at the entry.
+        #
+        # Without this the book scored every signal as if it were filled the
+        # instant it was written, and the error is one-sided: a stop always
+        # sits beyond the entry, so price must pass through the entry to reach
+        # it and a loss is always genuinely filled -- but a target can be
+        # reached without price ever coming back to the entry at all. So the
+        # omission manufactures wins and never manufactures losses.
+        #
+        # The first signal this system ever produced, on 2026-09-18, was a
+        # limit at 4353.00 with spot at 4358.81 and a target at 4374.00. Gold
+        # rising straight from 4358 to 4374 would have booked +1.56R on a trade
+        # nobody was ever in. An optimistic bias in the very first data point,
+        # compounding into every clamp the learning loop later derives from it.
+        if not filled:
+            if not (candle.low <= record.entry <= candle.high):
+                continue
+            filled = True
+            # Fall through: the bar that fills can also stop out, and the
+            # unfavourable branch is assumed for the same reason as below --
+            # bar data cannot order intrabar touches.
+
         adverse = candle.low if long else candle.high
         favourable = candle.high if long else candle.low
         mae_r = min(mae_r, record.r_of(adverse) or 0.0)
@@ -238,6 +265,21 @@ def resolve_against(
         if expiry.tzinfo is None:
             expiry = expiry.replace(tzinfo=timezone.utc)
         last = forward[-1]
+        if last.ts >= expiry and not filled:
+            # An idea price never reached is not a trade, and must not be
+            # counted as one. CANCELLED is outside CLOSED_STATES, so it stays
+            # out of the win rate, the expectancy and every per-setup sample --
+            # a run of unfilled limits should shrink the sample, not pad it
+            # with zeroes that drag expectancy toward nothing.
+            return {
+                "status": CANCELLED,
+                "exit_price": None,
+                "exit_ts": last.ts.isoformat(),
+                "r_multiple": None,
+                "mae_r": 0.0,
+                "mfe_r": 0.0,
+                "resolution": "expired_unfilled",
+            }
         if last.ts >= expiry:
             r = record.r_of(last.close) or 0.0
             return {

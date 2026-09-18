@@ -42,7 +42,10 @@ class OutcomeResolution(unittest.TestCase):
 
     def test_short_trades_score_with_the_sign_flipped(self):
         short = long_signal(direction="short", entry=2400.0, stop=2410.0, target=2380.0)
-        out = resolve_against(short, [bar(1, 2375, 2395)])
+        # The bar must span the entry, or the order never fills: it used to
+        # read (2375, 2395), which reaches the target without ever trading at
+        # 2400 -- a win on a position nobody held.
+        out = resolve_against(short, [bar(1, 2375, 2405)])
         self.assertEqual(out["status"], "won")
         self.assertAlmostEqual(out["r_multiple"], 2.0)
 
@@ -216,3 +219,77 @@ class LearningGuarantees(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AnUnfilledOrderIsNotATrade(unittest.TestCase):
+    """A signal only becomes a position when price trades at its entry.
+
+    Scoring from the moment the signal is written is not a neutral
+    simplification, it is a one-sided one. A stop always sits beyond the entry,
+    so price must pass through the entry to reach it and a loss is always
+    genuinely filled. A target does not: price can run straight to it from
+    wherever spot was. So the omission manufactures wins and never manufactures
+    losses, and every clamp the learning loop later derives inherits the bias.
+
+    The first signal this system ever produced was exactly this shape: a limit
+    at 4353.00 with spot at 4358.81 and a target at 4374.00.
+    """
+
+    def test_a_target_reached_without_a_fill_is_not_a_win(self):
+        # Price runs up from above the entry and never comes back. The old code
+        # booked +2R here.
+        out = resolve_against(long_signal(), [bar(1, 2402, 2425)])
+        self.assertIsNone(out)
+
+    def test_the_same_move_after_a_fill_is_a_win(self):
+        out = resolve_against(long_signal(), [bar(1, 2395, 2425)])
+        self.assertEqual(out["status"], "won")
+
+    def test_a_stop_cannot_be_hit_without_a_fill(self):
+        # Not a rule, a consequence: for a long, stop < entry, so any bar low
+        # that reaches the stop has already crossed the entry. Stated as a test
+        # because it is the asymmetry that makes the bias one-directional.
+        out = resolve_against(long_signal(), [bar(1, 2385, 2405)])
+        self.assertEqual(out["status"], "lost")
+
+    def test_a_fill_and_a_stop_on_the_same_bar_is_a_loss(self):
+        # The bar that fills can also stop out, and bar data cannot order
+        # intrabar touches, so the unfavourable branch is assumed -- the same
+        # rule already used when one bar spans stop and target.
+        out = resolve_against(long_signal(), [bar(1, 2385, 2401)])
+        self.assertEqual(out["status"], "lost")
+
+    def test_a_fill_on_a_later_bar_still_scores(self):
+        out = resolve_against(long_signal(), [bar(1, 2402, 2408), bar(2, 2395, 2425)])
+        self.assertEqual(out["status"], "won")
+
+    def test_excursions_are_measured_from_the_fill_not_the_signal(self):
+        # MAE/MFE before a fill describe a position that did not exist.
+        out = resolve_against(long_signal(),
+                              [bar(1, 2403, 2420), bar(2, 2385, 2405)])
+        self.assertEqual(out["status"], "lost")
+        self.assertAlmostEqual(out["mfe_r"], 0.5)   # 2405 on the filling bar
+        self.assertNotAlmostEqual(out["mfe_r"], 2.0)  # not 2420, before the fill
+
+    def test_an_order_that_expires_unfilled_is_cancelled_not_expired(self):
+        signal = long_signal()
+        signal.valid_until = (START + timedelta(hours=3)).isoformat()
+        out = resolve_against(signal, [bar(1, 2402, 2408), bar(4, 2402, 2408)])
+        self.assertEqual(out["status"], "cancelled")
+        self.assertEqual(out["resolution"], "expired_unfilled")
+        self.assertIsNone(out["r_multiple"])
+
+    def test_a_cancelled_order_stays_out_of_the_track_record(self):
+        # It must shrink the sample, not pad it with a zero that drags
+        # expectancy toward nothing. CANCELLED is outside CLOSED_STATES.
+        from gold_trader.journal import CANCELLED, CLOSED_STATES
+
+        self.assertNotIn(CANCELLED, CLOSED_STATES)
+
+    def test_a_filled_order_that_expires_is_still_scored_at_the_close(self):
+        # The existing behaviour, which the fill gate must not disturb.
+        signal = long_signal()
+        signal.valid_until = (START + timedelta(hours=3)).isoformat()
+        out = resolve_against(signal, [bar(1, 2395, 2405), bar(4, 2398, 2406)])
+        self.assertEqual(out["status"], "expired")
+        self.assertIsNotNone(out["r_multiple"])
