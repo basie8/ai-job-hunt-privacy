@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-19T08:01:02+00:00",
+  "as_of": "2026-09-19T08:16:02+00:00",
   "connected": true,
-  "ping_ms": 14.1,
+  "ping_ms": 16.8,
   "server": "PepperstoneUK-Live",
   "symbol": "XAUUSD",
   "terminal_build": 6184,
