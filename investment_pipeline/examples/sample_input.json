@@ -1,0 +1,51 @@
+{
+  "as_of": "2026-09-17",
+  "mandate": "Long/short global equity and macro book, 6-week to 9-month horizon, USD base.",
+  "portfolio": {
+    "nav_usd": 240000000,
+    "cash_pct": 11.5,
+    "drawdown_pct": 3.2,
+    "positions": [
+      {"symbol": "MSFT", "asset_class": "equity", "sector": "technology", "weight_pct": 4.1},
+      {"symbol": "TSM",  "asset_class": "equity", "sector": "technology", "weight_pct": 3.4},
+      {"symbol": "XOM",  "asset_class": "equity", "sector": "energy", "weight_pct": 2.6},
+      {"symbol": "UNH",  "asset_class": "equity", "sector": "healthcare", "weight_pct": 2.2},
+      {"symbol": "IWM",  "asset_class": "etf", "sector": "broad_equity", "weight_pct": -3.0},
+      {"symbol": "TLT",  "asset_class": "rates", "sector": "rates", "weight_pct": 5.5}
+    ]
+  },
+  "signals": [
+    {
+      "source": "earnings",
+      "symbol": "TSM",
+      "headline": "Q3 revenue guided 8% above consensus on advanced packaging demand.",
+      "detail": "Management raised full-year capex; utilisation at N3 above 90%.",
+      "observed_at": "2026-09-16T13:00:00Z"
+    },
+    {
+      "source": "macro",
+      "headline": "US core CPI printed 0.18% m/m, third consecutive downside surprise.",
+      "detail": "Front-end rates rallied 14bp; market now prices two cuts by year-end.",
+      "observed_at": "2026-09-16T12:30:00Z"
+    },
+    {
+      "source": "positioning",
+      "headline": "CTA models flipped short small-cap equity over the last five sessions.",
+      "detail": "Estimated $18bn of notional sold; positioning now in the 12th percentile.",
+      "observed_at": "2026-09-15T21:00:00Z"
+    },
+    {
+      "source": "credit",
+      "headline": "US HY spreads widened 22bp week-on-week on energy issuers.",
+      "detail": "Concentrated in CCC energy; IG largely unchanged.",
+      "observed_at": "2026-09-16T20:00:00Z"
+    },
+    {
+      "source": "flows",
+      "symbol": "UNH",
+      "headline": "Managed care under renewed regulatory review in two states.",
+      "detail": "No federal action announced; sector ETF saw outflows for six sessions.",
+      "observed_at": "2026-09-17T09:00:00Z"
+    }
+  ]
+}
