@@ -9,6 +9,7 @@ import os
 import tempfile
 import unittest
 from datetime import datetime, timezone
+from unittest import mock
 
 from gold_trader.journal import Journal
 from gold_trader.learning import learn
@@ -185,6 +186,27 @@ class SelfCheckPasses(unittest.TestCase):
         report = Report()
         check_stubs(report, os.path.join(os.path.dirname(__file__), ".."))
         self.assertEqual(report.failures, [])
+
+    def test_the_money_check_is_stable_across_the_weekend(self):
+        # Regression: check_money used to build its sizing scenario off
+        # datetime.now(timezone.utc). On a Saturday/Sunday that lands inside
+        # gold's weekend closure, so evaluate() rejects the trade with
+        # MARKET_CLOSED and zeroes risk_usd on both sides of the "risk
+        # shrinks after a loss" assertion -- failing the self-check for a
+        # reason that has nothing to do with sizing, every weekend it runs.
+        import datetime as dt_module
+
+        from gold_trader.selfcheck import Report, check_money
+
+        class FrozenSaturday(dt_module.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return dt_module.datetime(2026, 9, 19, 12, 0, tzinfo=tz)
+
+        with mock.patch("gold_trader.selfcheck.datetime", FrozenSaturday):
+            report = Report()
+            check_money(report)
+        self.assertEqual(report.failures, [], "money check depends on wall-clock day again")
 
 
 class ConfigCoherence(unittest.TestCase):

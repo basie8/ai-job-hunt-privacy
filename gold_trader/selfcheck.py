@@ -320,7 +320,12 @@ def check_money(report: Report) -> None:
     from .macro import MacroCalendar
     from .risk import TradingLimits, equity_usd, evaluate
 
-    now = datetime.now(timezone.utc)
+    # Fixed to a known-open weekday session, not datetime.now(): gold is closed
+    # Friday 17:00 to Sunday 18:00 New York, and a wall-clock "now" that lands
+    # in that window makes evaluate() reject every trade with MARKET_CLOSED,
+    # zeroing risk_usd on both sides of the compounding check and failing it
+    # for a reason that has nothing to do with sizing.
+    now = datetime(2026, 9, 17, 10, 0, tzinfo=timezone.utc)
 
     def assess(journal, limits):
         return evaluate(
