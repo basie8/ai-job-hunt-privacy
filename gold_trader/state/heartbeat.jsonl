@@ -22,3 +22,4 @@
 {"detail": "Analyst flat: conflicting H1 BOS/sweep signals at 4359.05, range-bound, no tradeable geometry (NO_SETUP hard block)", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-21T11:26:30+00:00"}
 {"detail": "BUY XAUUSD 4357 limit, bos_continuation, conviction 0.50 (cut from 0.62 by risk manager), R:R 2.19", "outcome": "signal", "routine": "signal", "ts": "2026-09-21T13:27:18+00:00"}
 {"detail": "bos_continuation position closed -1.00R (stop_hit); analyst flat this run (NO_SETUP), price pinned between 4339.94 support and 4360.61 resistance", "outcome": "resolved", "routine": "signal", "ts": "2026-09-21T15:26:06+00:00"}
+{"detail": "Analyst flat: H4 bullish BOS vs H1 CHoCH vs M15 bearish BOS timeframe conflict at 4344.46; NO_SETUP hard block", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-21T17:26:11+00:00"}
