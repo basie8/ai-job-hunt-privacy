@@ -594,6 +594,11 @@ def check_setup_installs_the_schedule(report: Report, repo: str) -> None:
              "and the duration must be read back: the interval was verified "
              "while the duration went unchecked, and the duration is what "
              "expired"),
+            ("Ceiling($now.Minute / 15.0)",
+             "the trigger must anchor to the candle clock, not the install "
+             "minute: a repetition counts from its start boundary, so "
+             "-At (Get-Date) locks the cadence to whenever setup was run and "
+             "every fetch trails the m15 close by however long that was"),
             ("Get-ScheduledTaskInfo",
              "it must read back what Windows stored, not assume it worked"),
             ("MultipleInstancesPolicy",

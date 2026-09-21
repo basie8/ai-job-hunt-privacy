@@ -52,7 +52,22 @@ $action = New-ScheduledTaskAction -Execute $launcher -WorkingDirectory $Folder
 # "Indefinitely" is not a big number in this schema. It is the ABSENCE of a
 # <Duration> element inside <Repetition>, which the cmdlet cannot express at
 # all. So the duration is stripped from the XML below, where it can be.
-$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+# Anchored to the candle clock, not to whenever this happened to be run.
+#
+# A repetition counts from its start boundary, so -At (Get-Date) locks the
+# cadence to the install minute -- register at 10:20 and every run lands at
+# :05/:20/:35/:50, fetching a candle that closed five minutes earlier and
+# leaving the newest data around seven minutes stale on average.
+#
+# One minute past each quarter hour instead: the m15 bar closes at :00, :15,
+# :30, :45, and the bridge reads it about a minute later. The hand-built task
+# this replaced ran at :01/:16/:31/:46 and was right to.
+$now = Get-Date
+$quarter = [math]::Ceiling($now.Minute / 15.0) * 15
+$start = $now.Date.AddHours($now.Hour).AddMinutes($quarter + 1)
+if ($start -le $now) { $start = $start.AddMinutes(15) }
+
+$trigger = New-ScheduledTaskTrigger -Once -At $start `
     -RepetitionInterval (New-TimeSpan -Minutes 15)
 
 $settings = New-ScheduledTaskSettingsSet `
@@ -138,6 +153,7 @@ if ($duration) {
     Write-Output '  Repeats until  indefinitely'
 }
 Write-Output "  Next run       $($info.NextRunTime)"
+Write-Output "  Aligned to     :01, :16, :31, :46 -- a minute after each m15 close"
 Write-Output "  Time limit     $($task.Settings.ExecutionTimeLimit)"
 if (-not $policy) {
     # Unknown is not the same as fine. Saying nothing reassuring here is the
