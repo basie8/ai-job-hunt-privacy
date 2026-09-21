@@ -172,6 +172,31 @@ Task Scheduler → **Create Task** (not "Create Basic Task"):
 Identical candles produce no commit, so a 15-minute cadence does not fill the
 branch with noise.
 
+### 1.7a After the PC restarts
+
+**Nothing to re-run.** The scheduled task is stored by Windows and comes back
+on its own; `SETUP.bat` and `INSTALL-TASK.bat` are one-time. Two things do not
+come back by themselves:
+
+1. **A Windows login.** The task is registered interactive, so it runs as you
+   and sees the same git credentials your shell does — which also means it does
+   not run while the machine sits at the lock screen. Log in.
+2. **MetaTrader 5.** It is an ordinary desktop program and stays closed until
+   somebody opens it. Run `MT5-AUTOSTART.bat` once and it opens at login
+   instead; tick *Save account and password* in the terminal's login dialog, or
+   it opens to a login box and the bridge still finds nothing.
+
+With both of those, a restart costs at most one 15-minute cycle: the next
+scheduled run picks up by itself. To confirm rather than assume, run
+`AFTER-RESTART.bat` — it reports the task's status, whether MT5 and GitHub are
+reachable, and the last few runs as the bridge recorded them. It changes
+nothing.
+
+An unattended restart — Windows Update at 03:00, say — leaves the bridge down
+until someone logs in. The dashboard warns at 20 minutes and calls it dead at
+45, so it will not pass unnoticed, but it is the one failure this setup cannot
+fix by itself.
+
 ### 1.7b What environment is the task actually running in?
 
 `CHECK-BRIDGE.bat` reports it: the account, the Python that resolved, where git
