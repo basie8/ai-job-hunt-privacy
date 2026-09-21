@@ -13,6 +13,7 @@ mkdir -p "$STAGE"
 
 cp "$ROOT/gold_trader/bridge/mt5_export.py"            "$STAGE/"
 cp "$ROOT/gold_trader/bridge/windows_kit/"*.bat        "$STAGE/"
+cp "$ROOT/gold_trader/bridge/windows_kit/"*.ps1        "$STAGE/"
 cp "$ROOT/gold_trader/bridge/windows_kit/README.txt"   "$STAGE/"
 cp "$ROOT/docs/INSTALL.md"                             "$STAGE/"
 cp "$ROOT/gold_trader/examples/calendar.example.json"  "$STAGE/"

@@ -5,61 +5,41 @@ cd /d "%~dp0"
 
 REM ===============================================================
 REM   Creates the Task Scheduler entry that runs the bridge every
-REM   15 minutes. This step used to be written out in INSTALL.md and
-REM   built by hand in the Task Scheduler GUI, which is where the
-REM   schedule failed on 2026-09-18: the bridge ran perfectly when
-REM   launched by hand and Windows never started it on its own.
+REM   15 minutes, and verifies Windows actually stored it.
 REM
-REM   Every setting below is one that is easy to get wrong by hand:
-REM     /RI 15 /DU 9999:59   repeat every 15 min, effectively forever
-REM                          (the GUI's duration box defaults short,
-REM                          so the repetition quietly stops)
-REM     /ET + /Z             end and clean up, so a wedged run cannot
-REM                          block every run behind it for good
-REM     /RL LIMITED /IT      run as you, interactively, so it sees the
-REM                          same git credentials your shell does
+REM   The work is in install-task.ps1, because the two settings
+REM   that matter -- what happens to a wedged run, and how long a
+REM   run may take -- cannot be set from the schtasks command line.
+REM   An earlier version of this file described both in comments
+REM   and set neither, and a wedged run duly stopped the bridge
+REM   dead on 2026-09-21 with nothing else wrong.
 REM ===============================================================
 
-set TASKNAME=AURUM bridge
-
 echo.
-echo Removing any previous "%TASKNAME%" task...
-schtasks /Delete /TN "%TASKNAME%" /F >nul 2>&1
+echo Registering the scheduled task...
 
-echo Creating "%TASKNAME%" to run every 15 minutes...
-schtasks /Create ^
-  /TN "%TASKNAME%" ^
-  /TR "\"%~dp0RUN-BRIDGE.bat\"" ^
-  /SC MINUTE ^
-  /MO 15 ^
-  /RL LIMITED ^
-  /IT ^
-  /F
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-task.ps1" -Folder "%~dp0."
+
 if errorlevel 1 (
   echo.
-  echo   Could not create the task. Try running this file as
-  echo   Administrator: right-click INSTALL-TASK.bat, Run as administrator.
+  echo   The schedule was NOT installed correctly. Nothing is running
+  echo   on a timer. If it refused for permissions, right-click this
+  echo   file and choose Run as administrator.
   echo.
   pause
   exit /b 1
 )
 
-echo.
-echo Done. Confirming what Windows actually stored:
-echo.
-schtasks /Query /TN "%TASKNAME%" /FO LIST
-echo.
 echo ===============================================================
-echo   Check the two lines above that matter:
-echo     Next Run Time   should be within the next 15 minutes
-echo     Status          should be Ready, not Running
+echo   Installed and verified.
 echo.
-echo   A Status of Running means a previous run is wedged and every
-echo   run behind it is blocked. A blank Next Run Time means the
-echo   schedule did not take.
+echo   State should be Ready. Running means a job is in progress;
+echo   that is now self-healing -- a stuck run is replaced at the
+echo   next tick rather than blocking everything behind it, and no
+echo   run may take more than 10 minutes.
 echo.
-echo   Then wait 15 minutes and open  bridge-run.log  in this folder.
-echo   A line will be there whatever happened, success or failure.
+echo   Wait 15 minutes, then open bridge-run.log in this folder.
+echo   A line lands there whatever happens, success or failure.
 echo ===============================================================
 echo.
 pause

@@ -46,6 +46,13 @@ for %%F in (gold_trader\bridge\windows_kit\*.bat) do (
 )
 copy /Y gold_trader\bridge\windows_kit\UPDATE.bat UPDATE.bat.new >nul
 
+REM The installer's real work lives in a .ps1, so copying only .bat files
+REM would deliver a launcher without the script it calls.
+for %%F in (gold_trader\bridge\windows_kit\*.ps1) do (
+  copy /Y "%%F" "%%~nxF" >nul
+  echo       %%~nxF
+)
+
 REM Tidy the checkout back out of the way.
 rmdir /S /Q gold_trader >nul 2>&1
 

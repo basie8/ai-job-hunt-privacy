@@ -564,12 +564,29 @@ def check_setup_installs_the_schedule(report: Report, repo: str) -> None:
         )
         with open(installer, encoding="utf-8", errors="replace") as fh:
             body = fh.read()
+        script = os.path.join(kit, "install-task.ps1")
+        assert os.path.exists(script), (
+            "install-task.ps1 is missing: INSTALL-TASK.bat delegates the real "
+            "work to it"
+        )
+        with open(script, encoding="utf-8", errors="replace") as fh:
+            body += fh.read()
+
+        # Named properties rather than CLI flags, because the flags changed
+        # once already and the old check passed while the protections it
+        # described were absent. These are what must be true of the task.
         for needle, why in (
-            ("schtasks", "it must actually register a task"),
-            ("/MO 15", "the 15 minute cadence must be set by the script"),
-            ("/Query", "it must show what Windows stored, not assume it worked"),
+            ("Register-ScheduledTask", "it must actually register a task"),
+            ("Minutes 15", "the 15 minute cadence must be set by the script"),
+            ("MultipleInstances StopExisting",
+             "a wedged run must be replaced, not block every run behind it -- "
+             "this is what stopped the bridge on 2026-09-21"),
+            ("ExecutionTimeLimit", "a hung run must be killed, or it wedges"),
+            ("StartWhenAvailable", "a missed run must be caught up after sleep"),
+            ("Get-ScheduledTaskInfo",
+             "it must read back what Windows stored, not assume it worked"),
         ):
-            assert needle in body, f"INSTALL-TASK.bat lacks {needle!r}: {why}"
+            assert needle in body, f"the installer lacks {needle!r}: {why}"
 
         setup = os.path.join(kit, "SETUP.bat")
         with open(setup, encoding="utf-8", errors="replace") as fh:
@@ -622,10 +639,20 @@ def check_batch_quoting(report: Report, repo: str) -> None:
                     stripped = line.strip().lower()
                     if not stripped.startswith("powershell"):
                         continue
-                    if line.count('"') != 2:
+                    # The hazard is specific: a quote nested INSIDE a
+                    # -Command string ends cmd's argument early. Quoting
+                    # separate arguments -- `-File "x" -Folder "y"` -- is
+                    # normal and safe, and an earlier version of this check
+                    # flagged it, which would have pushed the fix toward the
+                    # unsafe form to keep the check quiet.
+                    if "-command" not in stripped:
+                        continue
+                    after = line[line.lower().index("-command") + len("-command"):]
+                    if after.count('"') != 2:
                         offenders.append(
                             f"{os.path.basename(path)}:{number} has "
-                            f"{line.count(chr(34))} double quotes, expected 2"
+                            f"{after.count(chr(34))} double quotes after -Command, "
+                            "expected exactly 2 (use single quotes inside)"
                         )
         assert not offenders, (
             "cmd ends the argument at the first inner double quote: "
