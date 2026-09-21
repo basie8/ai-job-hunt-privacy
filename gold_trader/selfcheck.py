@@ -578,15 +578,35 @@ def check_setup_installs_the_schedule(report: Report, repo: str) -> None:
         for needle, why in (
             ("Register-ScheduledTask", "it must actually register a task"),
             ("Minutes 15", "the 15 minute cadence must be set by the script"),
-            ("MultipleInstances StopExisting",
-             "a wedged run must be replaced, not block every run behind it -- "
-             "this is what stopped the bridge on 2026-09-21"),
+            ("MultipleInstances",
+             "a wedged run must not block every run behind it -- that is what "
+             "stopped the bridge on 2026-09-21"),
             ("ExecutionTimeLimit", "a hung run must be killed, or it wedges"),
             ("StartWhenAvailable", "a missed run must be caught up after sleep"),
             ("Get-ScheduledTaskInfo",
              "it must read back what Windows stored, not assume it worked"),
         ):
             assert needle in body, f"the installer lacks {needle!r}: {why}"
+
+        # New-ScheduledTaskSettingsSet's enum accepts only these three.
+        # StopExisting is what the Task Scheduler XML calls the ideal policy,
+        # and passing it to the cmdlet fails at argument binding -- which is
+        # exactly what happened on 2026-09-21, after the installer had already
+        # been sent to the machine. The value is only reachable by editing the
+        # exported XML, so the cmdlet call must use a real enumerator.
+        import re
+
+        valid = {"Parallel", "Queue", "IgnoreNew"}
+        for value in re.findall(r"-MultipleInstances\s+(\w+)", body):
+            assert value in valid, (
+                f"-MultipleInstances {value!r} is not a value the cmdlet "
+                f"accepts; it takes one of {sorted(valid)}. StopExisting is "
+                "reachable only through the task XML."
+            )
+            assert value != "IgnoreNew", (
+                "IgnoreNew is the Windows default that caused the outage: one "
+                "stuck run blocks every run behind it"
+            )
 
         setup = os.path.join(kit, "SETUP.bat")
         with open(setup, encoding="utf-8", errors="replace") as fh:
