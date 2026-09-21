@@ -650,6 +650,30 @@ def check_batch_quoting(report: Report, repo: str) -> None:
     run2(_verifies)
 
 
+def check_audit_chain_is_intact(report: Report, repo: str) -> None:
+    """The audit log's hash chain must actually verify.
+
+    It is the only evidence that nothing rewrote a past run, and nothing ever
+    checked it outside its own unit tests. The file holds one chain per run,
+    so it is verified per run -- verifying the file as a single chain reported
+    the second run as corruption, which is a tamper check that cries wolf.
+    """
+    import os
+
+    from investment_pipeline.audit import verify_runs
+
+    run = _guard(report, "audit", "every run's hash chain verifies")
+    def _intact():
+        path = os.path.join(repo, "gold_trader", "state", "audit.jsonl")
+        if not os.path.exists(path):
+            return "no audit log yet; nothing to verify"
+        verdicts = verify_runs(path)
+        broken = {run_id: problem for run_id, (ok, problem) in verdicts.items() if not ok}
+        assert not broken, f"the audit log has been altered: {broken}"
+        return f"{len(verdicts)} run chains verify"
+    run(_intact)
+
+
 def check_credentials_path(report: Report) -> None:
     """A run without an API key must say so, not raise from library internals.
 
@@ -985,6 +1009,7 @@ def run_all(repo: str = ".") -> Report:
     check_market_data_is_not_tracked_here(report, repo)
     check_setup_installs_the_schedule(report, repo)
     check_batch_quoting(report, repo)
+    check_audit_chain_is_intact(report, repo)
     check_credentials_path(report)
     check_market_hours(report)
     check_bridge_link(report)

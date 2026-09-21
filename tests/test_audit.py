@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import tempfile
 import unittest
 
@@ -119,3 +120,77 @@ class CostAccounting(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AFileHoldsOneChainPerRun(unittest.TestCase):
+    """The audit file accumulates a chain per run, not one chain overall.
+
+    Each run builds from GENESIS_HASH with its own sequence starting at zero,
+    so walking the whole file as a single chain reports the second run as
+    corruption. On 2026-09-21 it said "seq 0 out of order (expected 4)" about a
+    log whose ten chains all verified.
+
+    A tamper check that cries wolf is worse than none. It is the one tool whose
+    entire value is that you believe it when it fires.
+    """
+
+    def test_two_clean_runs_verify(self):
+        path = self._log(runs=2)
+        ok, problem = verify_log(path)
+        self.assertTrue(ok, problem)
+
+    def test_a_single_run_still_verifies(self):
+        ok, problem = verify_log(self._log(runs=1))
+        self.assertTrue(ok, problem)
+
+    def test_tampering_inside_one_run_is_still_caught(self):
+        # The protection this exists for must survive being made per-run.
+        path = self._log(runs=2)
+        with open(path) as fh:
+            lines = fh.read().splitlines()
+        blob = json.loads(lines[-1])
+        blob["payload"] = {"cost_usd": 999999}
+        lines[-1] = json.dumps(blob)
+        with open(path, "w") as fh:
+            fh.write("\n".join(lines) + "\n")
+        ok, problem = verify_log(path)
+        self.assertFalse(ok)
+        self.assertIn("modified after it was written", problem)
+
+    def test_the_failure_names_the_run(self):
+        path = self._log(runs=2)
+        with open(path) as fh:
+            lines = fh.read().splitlines()
+        blob = json.loads(lines[-1])
+        run_id = blob["run_id"]
+        blob["payload"] = {"tampered": True}
+        lines[-1] = json.dumps(blob)
+        with open(path, "w") as fh:
+            fh.write("\n".join(lines) + "\n")
+        _, problem = verify_log(path)
+        self.assertIn(run_id, problem)
+
+    def test_per_run_verdicts_isolate_the_damage(self):
+        # One bad run must not make every other run unreadable.
+        from investment_pipeline.audit import verify_runs
+
+        path = self._log(runs=3)
+        with open(path) as fh:
+            lines = fh.read().splitlines()
+        blob = json.loads(lines[-1])
+        blob["payload"] = {"tampered": True}
+        lines[-1] = json.dumps(blob)
+        with open(path, "w") as fh:
+            fh.write("\n".join(lines) + "\n")
+        verdicts = verify_runs(path)
+        self.assertEqual(sum(1 for ok, _ in verdicts.values() if ok), 2)
+
+    def _log(self, runs):
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, True)
+        path = os.path.join(directory, "audit.jsonl")
+        for _ in range(runs):
+            log = AuditLog(path=path)
+            log.record("risk_engine", "state", {"equity": 10_000})
+            log.record("risk_engine", "decision", {"approved": False})
+        return path

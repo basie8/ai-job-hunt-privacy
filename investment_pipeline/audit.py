@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import OrderedDict
 import os
 import time
 import uuid
@@ -192,7 +193,34 @@ def verify_records(records: Iterable[Dict[str, Any]]) -> Tuple[bool, Optional[st
 
 
 def verify_log(path: str) -> Tuple[bool, Optional[str]]:
-    return verify_records(iter_log(path))
+    """Verify a whole audit file, which holds one chain per run.
+
+    Each run builds its own chain from GENESIS_HASH with its own sequence
+    starting at zero, and the file accumulates them. Walking the file as a
+    single chain therefore reports the second run as corruption -- it says
+    "seq 0 out of order (expected 4)" against a log that is perfectly intact,
+    which is what it did on 2026-09-21 with all ten chains verifying.
+
+    A tamper check that cries wolf is worse than none: it is the one tool
+    whose entire value is that you believe it when it fires.
+    """
+    runs: "OrderedDict[str, List[Dict[str, Any]]]" = OrderedDict()
+    for record in iter_log(path):
+        runs.setdefault(str(record.get("run_id", "")), []).append(record)
+    for run_id, records in runs.items():
+        ok, problem = verify_records(records)
+        if not ok:
+            return False, f"run {run_id}: {problem}"
+    return True, None
+
+
+def verify_runs(path: str) -> Dict[str, Tuple[bool, Optional[str]]]:
+    """Per-run verdicts, so a damaged run names itself rather than hiding
+    behind the first failure."""
+    runs: "OrderedDict[str, List[Dict[str, Any]]]" = OrderedDict()
+    for record in iter_log(path):
+        runs.setdefault(str(record.get("run_id", "")), []).append(record)
+    return {run_id: verify_records(records) for run_id, records in runs.items()}
 
 
 class Timer:
