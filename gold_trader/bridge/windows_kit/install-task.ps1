@@ -42,31 +42,18 @@ $action = New-ScheduledTaskAction -Execute $launcher -WorkingDirectory $Folder
 
 # Repeat forever from now.
 #
-# -RepetitionDuration was omitted here on the assumption that omitting it
-# means indefinitely. It does not reliably: the task ran three times -- 08:46,
-# 09:05, 09:21 -- and then stopped, with the repetition simply expired. That
-# is the exact failure this file's own comments warned about for the GUI ("the
-# duration box defaults short, so the repetition quietly stops"), reproduced
-# in the script written to avoid it.
+# Note what is NOT here: -RepetitionDuration. Two attempts at it both failed.
+# Omitting it was supposed to mean indefinitely and did not -- the task ran
+# three times and the repetition expired. Then TimeSpan::MaxValue rendered as
+# P99999999DT23H59M59S, which Task Scheduler rejects outright as out of range,
+# and the fallback never fired because it caught failures from building the
+# trigger while the value is only refused at registration.
 #
-# TimeSpan::MaxValue is how the cmdlet spells "indefinitely". Some builds
-# reject it, so a decade is the fallback -- long enough that it is not the
-# thing that breaks, short enough to be a legal value everywhere.
-$trigger = $null
-foreach ($duration in @([TimeSpan]::MaxValue, (New-TimeSpan -Days 3650))) {
-    try {
-        $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
-            -RepetitionInterval (New-TimeSpan -Minutes 15) `
-            -RepetitionDuration $duration
-        break
-    } catch {
-        $trigger = $null
-    }
-}
-if (-not $trigger) {
-    Write-Output 'Could not build a repeating trigger.'
-    exit 1
-}
+# "Indefinitely" is not a big number in this schema. It is the ABSENCE of a
+# <Duration> element inside <Repetition>, which the cmdlet cannot express at
+# all. So the duration is stripped from the XML below, where it can be.
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+    -RepetitionInterval (New-TimeSpan -Minutes 15)
 
 $settings = New-ScheduledTaskSettingsSet `
     -MultipleInstances Parallel `
@@ -86,18 +73,31 @@ $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
     -Settings $settings -Principal $principal -Force | Out-Null
 
-# Best-effort upgrade to StopExisting. The task above already works and
-# already cannot wedge, so a failure here is not fatal and must not be
-# treated as one.
+# Two things the cmdlets cannot express, both done in the task XML.
+#
+#   MultipleInstancesPolicy  StopExisting is absent from the cmdlet's enum.
+#   Repetition/Duration      its absence is what "indefinitely" means, and
+#                            the cmdlet always writes something.
+#
+# Failure here is not fatal: the task registered above already runs and
+# already cannot wedge. What it would lose is the guarantee against expiry,
+# and the verification below refuses to call that a success.
 try {
     $xml = Export-ScheduledTask -TaskName $TaskName
-    if ($xml -match '<MultipleInstancesPolicy>') {
-        $upgraded = $xml -replace '<MultipleInstancesPolicy>[A-Za-z]+</MultipleInstancesPolicy>', '<MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy>'
-        Register-ScheduledTask -TaskName $TaskName -Xml $upgraded `
-            -User "$env:USERDOMAIN\$env:USERNAME" -Force | Out-Null
-    }
+    $upgraded = $xml -replace '<MultipleInstancesPolicy>[A-Za-z]+</MultipleInstancesPolicy>', '<MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy>'
+
+    # Scoped to the Repetition block on purpose: IdleSettings carries a
+    # <Duration> of its own, and stripping that one would change something
+    # entirely unrelated.
+    $upgraded = [regex]::Replace(
+        $upgraded,
+        '(?s)<Repetition>.*?</Repetition>',
+        { param($m) ($m.Value -replace '\s*<Duration>[^<]*</Duration>', '') })
+
+    Register-ScheduledTask -TaskName $TaskName -Xml $upgraded `
+        -User "$env:USERDOMAIN\$env:USERNAME" -Force | Out-Null
 } catch {
-    Write-Output "  (kept Parallel; the StopExisting upgrade did not apply: $($_.Exception.Message))"
+    Write-Output "  (XML upgrade did not apply: $($_.Exception.Message))"
 }
 
 # Verify rather than assume. Register-ScheduledTask can succeed and still
@@ -165,9 +165,11 @@ if ($repeat -ne 'PT15M') {
     Write-Output '  WARNING: the repetition interval is not 15 minutes.'
     exit 1
 }
-# A duration measured in hours or days means the bridge stops on its own at
-# some point with nothing wrong. Checked because it was not: the interval was
-# verified and the duration ignored, and the duration is what expired.
+# An absent duration is the goal: it means the repetition never expires. A
+# present one means it stops on its own at some point with nothing wrong,
+# which is what happened at 09:21 today. Checked because it was not -- the
+# interval was verified and the duration ignored, and the duration is what
+# ran out.
 if ($duration) {
     try {
         $span = [System.Xml.XmlConvert]::ToTimeSpan($duration)

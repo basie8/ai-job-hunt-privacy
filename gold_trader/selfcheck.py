@@ -583,10 +583,13 @@ def check_setup_installs_the_schedule(report: Report, repo: str) -> None:
              "stopped the bridge on 2026-09-21"),
             ("ExecutionTimeLimit", "a hung run must be killed, or it wedges"),
             ("StartWhenAvailable", "a missed run must be caught up after sleep"),
-            ("RepetitionDuration",
-             "the repetition must be told not to expire -- omitting it does "
-             "not reliably mean indefinitely, and on 2026-09-21 the task ran "
-             "three times and stopped"),
+            ("(?s)<Repetition>",
+             "the repetition must be stopped from expiring, and the only way "
+             "to say 'indefinitely' is to strip <Duration> from the Repetition "
+             "block in the XML -- omitting -RepetitionDuration did not do it, "
+             "and TimeSpan::MaxValue is rejected as out of range. An earlier "
+             "version of this check looked for the literal 'RepetitionDuration' "
+             "and would now pass on a comment mentioning it"),
             ("Repetition.Duration",
              "and the duration must be read back: the interval was verified "
              "while the duration went unchecked, and the duration is what "
