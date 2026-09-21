@@ -40,11 +40,33 @@ if (-not (Test-Path $launcher)) {
 
 $action = New-ScheduledTaskAction -Execute $launcher -WorkingDirectory $Folder
 
-# Repeat forever from now. -RepetitionDuration is omitted deliberately: on
-# current Windows that means indefinitely, whereas the GUI's duration box
-# defaults to something short and quietly stops repeating.
-$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
-    -RepetitionInterval (New-TimeSpan -Minutes 15)
+# Repeat forever from now.
+#
+# -RepetitionDuration was omitted here on the assumption that omitting it
+# means indefinitely. It does not reliably: the task ran three times -- 08:46,
+# 09:05, 09:21 -- and then stopped, with the repetition simply expired. That
+# is the exact failure this file's own comments warned about for the GUI ("the
+# duration box defaults short, so the repetition quietly stops"), reproduced
+# in the script written to avoid it.
+#
+# TimeSpan::MaxValue is how the cmdlet spells "indefinitely". Some builds
+# reject it, so a decade is the fallback -- long enough that it is not the
+# thing that breaks, short enough to be a legal value everywhere.
+$trigger = $null
+foreach ($duration in @([TimeSpan]::MaxValue, (New-TimeSpan -Days 3650))) {
+    try {
+        $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+            -RepetitionInterval (New-TimeSpan -Minutes 15) `
+            -RepetitionDuration $duration
+        break
+    } catch {
+        $trigger = $null
+    }
+}
+if (-not $trigger) {
+    Write-Output 'Could not build a repeating trigger.'
+    exit 1
+}
 
 $settings = New-ScheduledTaskSettingsSet `
     -MultipleInstances Parallel `
@@ -89,6 +111,7 @@ if (-not $task) {
 
 $info = Get-ScheduledTaskInfo -TaskName $TaskName
 $repeat = $task.Triggers[0].Repetition.Interval
+$duration = $task.Triggers[0].Repetition.Duration
 
 # Read the policy from the task XML, not from the cmdlet object.
 #
@@ -109,6 +132,11 @@ Write-Output "  Task           $TaskName"
 Write-Output "  Runs           $launcher"
 Write-Output "  State          $($task.State)"
 Write-Output "  Repeats every  $repeat"
+if ($duration) {
+    Write-Output "  Repeats until  $duration after the start"
+} else {
+    Write-Output '  Repeats until  indefinitely'
+}
 Write-Output "  Next run       $($info.NextRunTime)"
 Write-Output "  Time limit     $($task.Settings.ExecutionTimeLimit)"
 if (-not $policy) {
@@ -136,6 +164,21 @@ Write-Output ''
 if ($repeat -ne 'PT15M') {
     Write-Output '  WARNING: the repetition interval is not 15 minutes.'
     exit 1
+}
+# A duration measured in hours or days means the bridge stops on its own at
+# some point with nothing wrong. Checked because it was not: the interval was
+# verified and the duration ignored, and the duration is what expired.
+if ($duration) {
+    try {
+        $span = [System.Xml.XmlConvert]::ToTimeSpan($duration)
+        if ($span.TotalDays -lt 365) {
+            Write-Output "  WARNING: the repetition stops after $duration. It must not expire."
+            exit 1
+        }
+    } catch {
+        Write-Output "  WARNING: could not read the repetition duration ($duration)."
+        exit 1
+    }
 }
 if (-not $info.NextRunTime) {
     Write-Output '  WARNING: no next run time, so the schedule did not take.'

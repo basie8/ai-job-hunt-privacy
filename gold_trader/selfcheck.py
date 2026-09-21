@@ -583,6 +583,14 @@ def check_setup_installs_the_schedule(report: Report, repo: str) -> None:
              "stopped the bridge on 2026-09-21"),
             ("ExecutionTimeLimit", "a hung run must be killed, or it wedges"),
             ("StartWhenAvailable", "a missed run must be caught up after sleep"),
+            ("RepetitionDuration",
+             "the repetition must be told not to expire -- omitting it does "
+             "not reliably mean indefinitely, and on 2026-09-21 the task ran "
+             "three times and stopped"),
+            ("Repetition.Duration",
+             "and the duration must be read back: the interval was verified "
+             "while the duration went unchecked, and the duration is what "
+             "expired"),
             ("Get-ScheduledTaskInfo",
              "it must read back what Windows stored, not assume it worked"),
             ("MultipleInstancesPolicy",
