@@ -244,3 +244,49 @@ class NoPanelMayQuietlyDie(unittest.TestCase):
         for key in ("live_n", "resting_n", "max_live_positions",
                     "max_working_orders", "risk_at_work_usd"):
             self.assertIn(key, data)
+
+
+class TheOpenPositionMustBeOnThePage(unittest.TestCase):
+    """"1 closed trades" alone cannot be reconciled with two signals seen.
+
+    live_n, resting_n and risk_at_work_usd were added to the payload and never
+    rendered, so the page stated the learning sample and stayed silent about
+    the trade currently running. A reader who has watched two signals go out
+    sees "1" and reasonably concludes the system lost one.
+    """
+
+    def test_the_page_names_the_live_count(self):
+        html = _render()
+        self.assertIn("Live now", html)
+
+    def test_the_page_names_the_resting_count(self):
+        self.assertIn("Resting", _render())
+
+    def test_the_live_tile_states_the_money_at_risk(self):
+        # A count of positions without the exposure beside it is half the
+        # answer, and the half that matters less.
+        html = _render()
+        self.assertRegex(html, r"at risk|nothing at risk")
+
+    def test_closed_trades_is_still_shown(self):
+        # The sample size drives every clamp; it must not be displaced.
+        self.assertIn("Closed trades", _render())
+
+
+class CountsReadAsEnglish(unittest.TestCase):
+    def test_one_is_singular(self):
+        from gold_trader.progress import _plural
+
+        self.assertEqual(_plural(1, "closed trade"), "1 closed trade")
+
+    def test_zero_and_many_are_plural(self):
+        from gold_trader.progress import _plural
+
+        self.assertEqual(_plural(0, "closed trade"), "0 closed trades")
+        self.assertEqual(_plural(20, "test"), "20 tests")
+
+
+def _render():
+    from gold_trader.dashboard_html import render
+
+    return render(dashboard_payload())

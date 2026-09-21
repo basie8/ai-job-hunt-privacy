@@ -40,6 +40,16 @@ VERDICT_UNVERIFIED = "UNVERIFIED"
 VERDICT_PENDING = "PENDING"
 
 
+def _plural(count: int, noun: str) -> str:
+    """Say "1 closed trade", not "1 closed trades".
+
+    The line a reader meets while trying to reconcile what they have seen with
+    what the system counts should not also make them wonder whether it can
+    count. It is the sample-size line on the dashboard and the roadmap, read
+    more often than almost anything else here.
+    """
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
 @dataclass
 class Task:
     id: str
@@ -167,12 +177,12 @@ def verify(task: Task, repo: str = ".", run_tests: bool = True) -> Task:
             return task
         if count < 0:
             return settle(False, f"{-count} tests ran, suite FAILED")
-        return settle(count >= int(minimum), f"{count} tests pass (need {minimum})")
+        return settle(count >= int(minimum), f"{_plural(count, 'test')} pass (need {minimum})")
 
     if predicate.startswith("journal:"):
         minimum = int(predicate.split(":", 1)[1])
         count = _closed_trades(repo)
-        return settle(count >= minimum, f"{count} closed trades (need {minimum})")
+        return settle(count >= minimum, f"{_plural(count, 'closed trade')} (need {minimum})")
 
     if predicate.startswith("data:"):
         max_age = float(predicate.split(":", 1)[1])
@@ -213,7 +223,7 @@ def verify(task: Task, repo: str = ".", run_tests: bool = True) -> Task:
 
     if predicate == "learning:active":
         count = _closed_trades(repo)
-        return settle(count >= 20, f"{count} closed trades (need 20 to leave warm-up)")
+        return settle(count >= 20, f"{_plural(count, 'closed trade')} (need 20 to leave warm-up)")
 
     return settle(False, f"unknown predicate {predicate!r}")
 

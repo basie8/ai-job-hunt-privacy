@@ -385,7 +385,17 @@ def _trading_panel(section: Dict[str, Any]) -> str:
     data = section["data"]
     summary = data["summary"]
     cal = data["calibration"]
+    # Open positions come first, because "1 closed trades" with nothing beside
+    # it cannot be reconciled with having watched two signals go out. The
+    # counts were added to the payload and never rendered, so the page showed
+    # the sample size and stayed silent about the trade currently running.
+    live_n, resting_n = data.get("live_n", 0), data.get("resting_n", 0)
+    at_risk = data.get("risk_at_work_usd", 0.0)
     tiles = [
+        ("Live now", str(live_n),
+         f"${at_risk:,.0f} at risk" if live_n else "nothing at risk"),
+        ("Resting", str(resting_n),
+         "orders price has not reached" if resting_n else "no working orders"),
         ("Closed trades", str(data["closed_n"]), data["learning_status"].replace("_", " ")),
         ("Win rate", f"{summary['win_rate']:.0%}" if summary["win_rate"] is not None else "—",
          f"{summary['wins']} of {summary['closed']}"),
