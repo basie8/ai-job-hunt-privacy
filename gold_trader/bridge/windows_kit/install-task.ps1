@@ -89,7 +89,20 @@ if (-not $task) {
 
 $info = Get-ScheduledTaskInfo -TaskName $TaskName
 $repeat = $task.Triggers[0].Repetition.Interval
-$policy = $task.Settings.MultipleInstances
+
+# Read the policy from the task XML, not from the cmdlet object.
+#
+# The cmdlet's enum has no StopExisting, so a task that actually holds it
+# reads back as an empty value -- and on 2026-09-21 this script printed a
+# blank policy followed by "a stuck run cannot block the runs behind it",
+# asserting the very protection it had failed to read. The XML is the
+# authoritative source and knows all four values.
+$policy = ''
+try {
+    $policy = ([xml](Export-ScheduledTask -TaskName $TaskName)).Task.Settings.MultipleInstancesPolicy
+} catch {
+    $policy = ''
+}
 
 Write-Output ''
 Write-Output "  Task           $TaskName"
@@ -98,10 +111,17 @@ Write-Output "  State          $($task.State)"
 Write-Output "  Repeats every  $repeat"
 Write-Output "  Next run       $($info.NextRunTime)"
 Write-Output "  Time limit     $($task.Settings.ExecutionTimeLimit)"
-Write-Output "  If wedged      $policy"
-if ($policy -eq 'IgnoreNew') {
+if (-not $policy) {
+    # Unknown is not the same as fine. Saying nothing reassuring here is the
+    # whole point: an unread value must never be reported as a good one.
+    Write-Output '  If wedged      COULD NOT READ -- unverified'
+    Write-Output '                 check it yourself with:'
+    Write-Output "                 ([xml](Export-ScheduledTask -TaskName '$TaskName')).Task.Settings.MultipleInstancesPolicy"
+} elseif ($policy -eq 'IgnoreNew') {
+    Write-Output "  If wedged      $policy"
     Write-Output '                 ^ BAD: a stuck run would block every run behind it.'
 } else {
+    Write-Output "  If wedged      $policy"
     Write-Output '                 a stuck run cannot block the runs behind it.'
 }
 Write-Output ''

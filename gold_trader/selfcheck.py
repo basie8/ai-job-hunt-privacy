@@ -585,6 +585,13 @@ def check_setup_installs_the_schedule(report: Report, repo: str) -> None:
             ("StartWhenAvailable", "a missed run must be caught up after sleep"),
             ("Get-ScheduledTaskInfo",
              "it must read back what Windows stored, not assume it worked"),
+            ("MultipleInstancesPolicy",
+             "the instance policy must be read from the task XML: the cmdlet's "
+             "enum has no StopExisting, so a task that holds it reads back "
+             "blank, and a blank was once printed as if it were confirmation"),
+            ("COULD NOT READ",
+             "an unread policy must say so rather than borrow the reassuring "
+             "message meant for a value that was actually read"),
         ):
             assert needle in body, f"the installer lacks {needle!r}: {why}"
 
