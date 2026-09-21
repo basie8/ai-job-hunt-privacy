@@ -18,3 +18,4 @@
 {"detail": "selfcheck 42/42, progress 30/43 done 0 stale after pull-data, no run gaps, bridge delivering (h1 73min/h4 253min/m15 28min old), 1 closed trade unchanged", "outcome": "no_trade", "routine": "audit", "ts": "2026-09-20T18:43:43+00:00"}
 {"detail": "selfcheck 42/42, 0 stale claims, 0 run gaps, bridge fresh (13-43min), 1/20 closed trades, phase 2 cold start", "outcome": "no_trade", "routine": "audit", "ts": "2026-09-21T06:45:06+00:00"}
 {"detail": "SELL XAUUSD 4355.50 stop 4364.50 target 4340.00, 14.7oz, $132 risk, 1.72R, ob_retest, conviction clamped 0.57->0.38 by risk review", "outcome": "signal", "routine": "signal", "ts": "2026-09-21T07:28:16+00:00"}
+{"detail": "Analyst flat: H4 bullish vs H1 bearish BOS timeframe conflict unresolved, no macro catalyst; risk engine hard-blocked NO_SETUP", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-21T09:26:28+00:00"}
