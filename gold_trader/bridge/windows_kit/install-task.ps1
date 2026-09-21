@@ -115,8 +115,15 @@ if (-not $policy) {
     # Unknown is not the same as fine. Saying nothing reassuring here is the
     # whole point: an unread value must never be reported as a good one.
     Write-Output '  If wedged      COULD NOT READ -- unverified'
-    Write-Output '                 check it yourself with:'
-    Write-Output "                 ([xml](Export-ScheduledTask -TaskName '$TaskName')).Task.Settings.MultipleInstancesPolicy"
+    Write-Output ''
+    Write-Output '  Check it by pasting THIS ONE LINE, on its own, into PowerShell:'
+    Write-Output ''
+    # Printed flush left and alone. Indented under a label, it reads as part
+    # of a block, and pasting the block made PowerShell parse the label "If
+    # wedged" as an if statement -- a parse error where a one-word answer was
+    # wanted. A command someone is meant to run has to look like a command.
+    Write-Output "([xml](Export-ScheduledTask -TaskName '$TaskName')).Task.Settings.MultipleInstancesPolicy"
+    Write-Output ''
 } elseif ($policy -eq 'IgnoreNew') {
     Write-Output "  If wedged      $policy"
     Write-Output '                 ^ BAD: a stuck run would block every run behind it.'
