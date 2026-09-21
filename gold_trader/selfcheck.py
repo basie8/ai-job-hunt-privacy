@@ -594,6 +594,62 @@ def check_setup_installs_the_schedule(report: Report, repo: str) -> None:
     run2(_logs)
 
 
+def check_batch_quoting(report: Report, repo: str) -> None:
+    """A PowerShell command inside a .bat must not nest double quotes.
+
+    cmd ends the argument at the first inner double quote, so PowerShell
+    receives a truncated command and treats the remainder as a command name.
+    On 2026-09-21 MT5-AUTOSTART.bat did this with a Program Files path and
+    reported: "The term 'C:\Program' is not recognized as the name of a
+    cmdlet". Use single quotes inside; they need no escaping either way.
+
+    Checked here rather than remembered, because the failure only appears on
+    Windows, only when a path contains a space, and this repository's tests
+    do not run on Windows at all.
+    """
+    import glob
+    import os
+
+    run = _guard(report, "bridge", "no .bat nests quotes inside a powershell command")
+    def _quoting():
+        pattern = os.path.join(repo, "gold_trader", "bridge", "windows_kit", "*.bat")
+        offenders = []
+        for path in sorted(glob.glob(pattern)):
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                for number, line in enumerate(fh, 1):
+                    # Only lines that actually invoke it. A REM explaining the
+                    # rule, or an echo mentioning it, is not a violation of it.
+                    stripped = line.strip().lower()
+                    if not stripped.startswith("powershell"):
+                        continue
+                    if line.count('"') != 2:
+                        offenders.append(
+                            f"{os.path.basename(path)}:{number} has "
+                            f"{line.count(chr(34))} double quotes, expected 2"
+                        )
+        assert not offenders, (
+            "cmd ends the argument at the first inner double quote: "
+            + "; ".join(offenders)
+        )
+        return "powershell invocations quote cleanly"
+    run(_quoting)
+
+    run2 = _guard(report, "bridge", "scripts verify their work instead of assuming it")
+    def _verifies():
+        path = os.path.join(repo, "gold_trader", "bridge", "windows_kit",
+                            "MT5-AUTOSTART.bat")
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            body = fh.read()
+        # PowerShell can throw and still exit 0, so errorlevel alone proves
+        # nothing. The first version printed "Done" over a total failure.
+        assert "Test-Path" in body, (
+            "MT5-AUTOSTART.bat does not check that the shortcut exists, so it "
+            "can report success over a failure"
+        )
+        return "the shortcut is verified, not assumed"
+    run2(_verifies)
+
+
 def check_credentials_path(report: Report) -> None:
     """A run without an API key must say so, not raise from library internals.
 
@@ -928,6 +984,7 @@ def run_all(repo: str = ".") -> Report:
     check_state_is_committable(report, repo)
     check_market_data_is_not_tracked_here(report, repo)
     check_setup_installs_the_schedule(report, repo)
+    check_batch_quoting(report, repo)
     check_credentials_path(report)
     check_market_hours(report)
     check_bridge_link(report)
