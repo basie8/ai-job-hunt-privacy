@@ -31,3 +31,4 @@
 {"detail": "Analyst flat: H1 range-bound 4308.95-4344.02, NO_SETUP hard block", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-22T15:25:59+00:00"}
 {"detail": "Analyst flat: XAUUSD pinned 4314-4344, waiting on H1 close outside zone", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-22T17:26:54+00:00"}
 {"detail": "selfcheck 45/45, progress 0 stale claims after pull-data (2 transient stale before sync, as documented), 1 new run gap (signal 11:23 UTC 2026-09-22, list_triggers unavailable so no reason), 3 closed trades unchanged since 06:44 audit, bridge live (h1/h4 25min, m15 10min old), dashboard republished", "outcome": "no_trade", "routine": "audit", "ts": "2026-09-22T18:43:50+00:00"}
+{"detail": "2 open positions resolved (both -1.00R, stop_hit); daily loss limit -2.0R hit, risk engine hard-blocked new long setup", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-22T19:27:25+00:00"}
