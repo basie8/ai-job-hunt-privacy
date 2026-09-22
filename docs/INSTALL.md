@@ -360,7 +360,7 @@ The design rule is that nothing fails silently, so the failure usually finds you
 
 | What you'll see | What it means | What to do |
 |---|---|---|
-| Dashboard ribbon red, "data stale" | No fresh candles for 26h+ | Check the PC is on, MT5 is logged in, the task ran |
+| Dashboard ribbon red, "data stale" | The page has not been republished for 48h+ | Check the PC is on, MT5 is logged in, the task ran |
 | Amber `bridge` warning | Bridge hasn't pushed yet, or is behind | Run 1.5 by hand and read the output |
 | Push alert about a failing check | A component regressed | It's already being fixed by the audit run; read its report |
 | Push alert about a stale claim | The roadmap claims something untrue | Same — the audit fixes or corrects it |

@@ -120,6 +120,17 @@ class Rendering(unittest.TestCase):
         self.assertIn("data stale", html)
         self.assertIn("STALE_MIN", html)
 
+    def test_the_staleness_gate_clears_a_weekend_on_the_daily_audit(self):
+        # The gate was pinned by name only, so its value could drift silently.
+        # At the weekend the daily audit is the sole republisher, so the gate
+        # must clear a 24h gap with room to spare or a late run reads as an
+        # outage. It must also stay finite -- a gate that never fires would
+        # let the page show yesterday's numbers as current, which is the one
+        # failure this whole system exists to refuse.
+        html = render(dashboard_payload())
+        self.assertIn("var STALE_MIN = 48 * 60;", html)
+        self.assertGreater(48 * 60, 24 * 60)
+
     def test_a_json_parse_failure_in_the_page_is_handled(self):
         # The embedded script must not leave a blank page if its own data is bad.
         html = render(dashboard_payload())
