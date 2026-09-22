@@ -15,10 +15,11 @@ Rules for entries:
 
 ## Current state
 
-**Closed trades: 0.** Phase 2 of `DEVELOPMENT_PLAN.md` — the bridge is live as
-of 2026-09-17 and signals are now accumulating. The learning loop is at cold start. Every statement below
-is a hypothesis carried in from design, not a measured finding. Nothing here has
-earned its place yet.
+**Closed trades: 3** (need 20 to exit Phase 2, 40+ for any setup-level rule
+change). Phase 2 of `DEVELOPMENT_PLAN.md` — the bridge is live as of
+2026-09-17 and signals are now accumulating. The learning loop is at cold
+start; no clamp has engaged. Every statement below is a hypothesis carried in
+from design, not a measured finding. Nothing here has earned its place yet.
 
 ---
 
@@ -501,6 +502,46 @@ just configured to move.
 **Hypotheses affected:** none confirmed or contradicted. Sample is 1;
 the floor for any read is 20 (H1-H6) or 40-60 (setup-level, hillclimb). Noted
 here only because "first closed trade" is itself the milestone.
+
+---
+
+## 2026-09-21 — Second and third closed trades
+
+**Evidence:** 3 closed trades (paper) total.
+
+- Trade 2: short `ob_retest`, entry 4355.50, stop 4364.50, target 4340.00
+  (R:R 1.72), conviction 0.38. Filled 08:15 UTC, target hit 09:30 UTC.
+  Result **+1.72R**. MFE +1.73R, MAE -0.26R — a clean run with almost no
+  drawdown against the position.
+- Trade 3: long `bos_continuation`, entry 4357.00, stop 4346.50, target
+  4380.00 (R:R 2.19), conviction 0.50. Filled 13:30 UTC, stopped out 13:45
+  UTC — 15 minutes later. Result **-1.00R**. MFE +0.74R, MAE -1.04R.
+
+This is a paper book. No order was placed for either trade; both the fill
+and the exit are simulated against the candles that followed the signal, so
+these are simulated outcomes, not real ones.
+
+**Observation:** by setup, `ob_retest` is now 2 trades, 1 win, expectancy
++0.36R; `bos_continuation` is 1 trade, 0 wins, expectancy -1.00R. Overall
+calibration across all 3 trades: mean stated conviction 0.39 vs realized win
+rate 0.33 (Brier 0.241) — nominally overconfident by 0.06, in the direction
+H5 predicts. None of this is a finding. n=2 and n=1 per setup, and n=3
+overall, are far below the 20-trade floor for any general read and the
+40-trade floor for a setup-level one; `gold_trader learn` says as much on
+every run and no clamp has moved off 1.00.
+
+Trade 3's speed is worth a note, not a conclusion: 15 minutes from fill to
+stop is a fast invalidation on a `bos_continuation` setup, and one data
+point cannot say whether that is normal variance or a sign the setup enters
+before the continuation is confirmed.
+
+**Change:** none. Sample is below every threshold that licenses a change.
+LRN-03 (first 20 closed trades) is now 3/20.
+
+**Hypotheses affected:** none confirmed or contradicted. Recorded because
+`gold_trader learn` computes these numbers regardless of sample size, and
+the discipline is to log the evidence as it arrives rather than wait for it
+to be large enough to be interesting.
 
 ---
 
