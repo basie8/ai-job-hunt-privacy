@@ -29,3 +29,4 @@
 {"detail": "Analyst flat: range-bound 4299-4376, conflicted EMA/SMC alignment, no macro direction. NO_SETUP hard block.", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-22T13:07:03+00:00"}
 {"detail": "Long setup at 4339.0 (0.42 conviction, bullish FVG retest) approved by risk manager but hard-blocked by MAX_LIVE_POSITIONS cap (2/2 live)", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-22T13:27:36+00:00"}
 {"detail": "Analyst flat: H1 range-bound 4308.95-4344.02, NO_SETUP hard block", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-22T15:25:59+00:00"}
+{"detail": "Analyst flat: XAUUSD pinned 4314-4344, waiting on H1 close outside zone", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-22T17:26:54+00:00"}
