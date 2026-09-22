@@ -470,13 +470,25 @@ def build(repo: str = ".") -> Dict[str, Any]:
     runs = sections["runs"]
     if runs.status == OK:
         for routine in runs.data["routines"]:
-            for moment in routine["missed"]:
+            for moment in routine["unresolved_missed"]:
                 problems.append({
                     "severity": "critical", "source": "runs",
                     "message": (f"The {routine['routine']} run scheduled for "
                                 f"{moment[:16].replace('T', ' ')} UTC never happened — it left "
                                 "no trace, so it died before reaching the pipeline "
-                                "(account usage limit, provisioning failure, or an outage)."),
+                                "(account usage limit, provisioning failure, or an outage). "
+                                "Nothing has run since, so the schedule is down now."),
+                })
+            # A gap later runs have superseded is a past incident, not a live
+            # outage. Still reported -- losing it would hide a pattern of gaps
+            # at the same hour -- but not as a standing critical.
+            for moment in routine["recovered_missed"]:
+                problems.append({
+                    "severity": "warning", "source": "runs",
+                    "message": (f"The {routine['routine']} run scheduled for "
+                                f"{moment[:16].replace('T', ' ')} UTC never happened, most often "
+                                "an account usage limit. Later runs have fired since, so the "
+                                "schedule has recovered; it cost that one run."),
                 })
             for beat in routine["unresolved_errors"]:
                 problems.append({

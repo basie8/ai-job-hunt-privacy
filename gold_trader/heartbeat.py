@@ -194,9 +194,37 @@ class RunReport:
                 out.append(beat)
         return out
 
+    @property
+    def unresolved_missed(self) -> List[datetime]:
+        """Gaps the schedule has not since recovered from.
+
+        A run that was missed and then followed by runs that did happen is a
+        past incident, not a live outage. Left as a standing critical it sits
+        on the dashboard for the whole 26-hour window, shouting about a
+        scheduler that has been firing correctly for hours -- which is how a
+        reader learns to scroll past the red.
+
+        The same distinction already existed for errors and not for gaps, so
+        on 2026-09-22 two runs missed the previous evening still read critical
+        after four successful runs had followed them.
+
+        Any recorded beat afterwards counts, including an error: the question
+        here is whether the scheduler fired at all, not whether the run
+        succeeded once it did.
+        """
+        stamps = [when for when in (b.when() for b in self.recorded) if when]
+        return [moment for moment in self.missed
+                if not any(when > moment for when in stamps)]
+
+    @property
+    def recovered_missed(self) -> List[datetime]:
+        """Gaps that later runs have superseded. Reported, never alarmed."""
+        unresolved = set(self.unresolved_missed)
+        return [m for m in self.missed if m not in unresolved]
+
     def healthy(self) -> bool:
         """Unarmed is not healthy and not a failure: it is 'cannot say yet'."""
-        return not self.missed and not self.unresolved_errors
+        return not self.unresolved_missed and not self.unresolved_errors
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -209,6 +237,8 @@ class RunReport:
             "expected": self.expected,
             "recorded": len(self.recorded),
             "missed": [m.isoformat() for m in self.missed],
+            "unresolved_missed": [m.isoformat() for m in self.unresolved_missed],
+            "recovered_missed": [m.isoformat() for m in self.recovered_missed],
             "errors": [b.to_dict() for b in self.errors],
             "unresolved_errors": [b.to_dict() for b in self.unresolved_errors],
             "outcomes": _tally(self.recorded),
@@ -227,9 +257,14 @@ class RunReport:
         lines.append(f"  {len(self.recorded)} of {self.expected} scheduled runs recorded")
         for outcome, count in sorted(_tally(self.recorded).items()):
             lines.append(f"    {outcome:<11} {count}")
+        unresolved_gaps = set(self.unresolved_missed)
         for moment in self.missed:
-            lines.append(f"  MISSED  {moment:%Y-%m-%d %H:%M} UTC - "
-                         "the run left no trace, so it died before reaching the pipeline")
+            if moment in unresolved_gaps:
+                lines.append(f"  MISSED  {moment:%Y-%m-%d %H:%M} UTC - "
+                             "the run left no trace, so it died before reaching the pipeline")
+            else:
+                lines.append(f"  was-gap {moment:%Y-%m-%d %H:%M} UTC - "
+                             "left no trace, but later runs have fired since")
         unresolved = {b.ts for b in self.unresolved_errors}
         for beat in self.errors:
             mark = "ERROR  " if beat.ts in unresolved else "was-err"
@@ -237,7 +272,9 @@ class RunReport:
             lines.append(
                 f"  {mark} {beat.ts} - {beat.detail or '(no detail recorded)'}{suffix}")
         if self.healthy():
-            lines.append("  no gaps")
+            # "no gaps" under a list of gaps reads as a contradiction. The
+            # claim being made is about now, so it should say so.
+            lines.append("  no open gaps" if self.missed or self.errors else "  no gaps")
         return "\n".join(lines)
 
 

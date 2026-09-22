@@ -139,8 +139,39 @@ class GapDetection(unittest.TestCase):
             self._beat(at(17, hour, 25))
         report = audit_runs(self.path, "signal", now=NOW)
         self.assertEqual([m.hour for m in report.missed], [15])
+
+    def test_a_gap_later_runs_superseded_is_history_not_a_fault(self):
+        # 17:23 ran after the 15:23 gap, so the scheduler is demonstrably
+        # working. Left critical it would sit on the dashboard for the whole
+        # 26-hour window shouting about something already over, which is how a
+        # reader learns to scroll past the red. The same distinction already
+        # existed for errors and not for gaps.
+        for hour in (7, 9, 11, 13, 17):
+            self._beat(at(17, hour, 25))
+        report = audit_runs(self.path, "signal", now=NOW)
+        self.assertEqual(report.unresolved_missed, [])
+        self.assertEqual([m.hour for m in report.recovered_missed], [15])
+        self.assertTrue(report.healthy())
+        self.assertIn("was-gap", report.render())
+
+    def test_a_gap_nothing_has_run_since_is_a_live_outage(self):
+        # The distinction that matters: the schedule is down right now.
+        for hour in (7, 9, 11):           # 13:23, 15:23, 17:23 never ran
+            self._beat(at(17, hour, 25))
+        report = audit_runs(self.path, "signal", now=NOW)
+        self.assertEqual([m.hour for m in report.unresolved_missed], [13, 15, 17])
+        self.assertEqual(report.recovered_missed, [])
         self.assertFalse(report.healthy())
         self.assertIn("MISSED", report.render())
+
+    def test_a_later_error_still_proves_the_scheduler_fired(self):
+        # Whether the run succeeded is a different question from whether it
+        # happened, and only the second one decides if a gap is still open.
+        for hour in (7, 9, 11, 13):
+            self._beat(at(17, hour, 25))
+        self._beat(at(17, 17, 25), outcome="error")
+        report = audit_runs(self.path, "signal", now=NOW)
+        self.assertEqual(report.unresolved_missed, [])
 
     def test_the_usage_limit_case_is_exactly_this(self):
         # The defect that prompted the whole module: a run rejected for hitting
