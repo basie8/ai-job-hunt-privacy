@@ -397,6 +397,28 @@ def check_money(report: Report) -> None:
     run(_cli_config)
 
 
+def _cron_hours(field: str) -> List[int]:
+    """Expand a cron hours field into the hours it fires on.
+
+    Covers the forms the two Routines actually use -- "6", "6,18", "7-19/2" --
+    and refuses anything else rather than silently returning a wrong set that
+    would make the coherence check pass on a schedule nobody verified.
+    """
+    hours: List[int] = []
+    for part in field.split(","):
+        step = 1
+        if "/" in part:
+            part, _, raw_step = part.partition("/")
+            step = int(raw_step)
+        if "-" in part:
+            low, _, high = part.partition("-")
+            hours.extend(range(int(low), int(high) + 1, step))
+        else:
+            assert step == 1, f"unsupported cron hours field {field!r}"
+            hours.append(int(part))
+    return sorted(hours)
+
+
 def check_run_health(report: Report, repo: str) -> None:
     """The detector for runs that never happened. It only ever runs when
     something has already gone wrong, so it gets exercised here on every audit."""
@@ -458,12 +480,17 @@ def check_run_health(report: Report, repo: str) -> None:
         # RUNTIME.md is the reference both sides are checked against.
         with open(os.path.join(repo, "docs/RUNTIME.md"), encoding="utf-8") as fh:
             runtime = fh.read()
-        expected = {"signal": "23 7-19/2 * * 1-5", "audit": "41 6,18 * * *"}
+        expected = {"signal": "23 7-19/2 * * 1-5", "audit": "41 6 * * *"}
         for name, cron in expected.items():
             assert cron in runtime, f"{name} cron {cron!r} is not documented in RUNTIME.md"
             minute, hours, _, _, _ = cron.split()
             schedule = SCHEDULES[name]
             assert schedule.minute == int(minute), f"{name} minute drifted from {cron!r}"
+            # The hours went unchecked until 2026-09-22, when the audit dropped
+            # its 18:41 firing. A cadence change is exactly the drift this
+            # check exists to catch, and the minute alone would not have seen it.
+            assert sorted(schedule.hours) == _cron_hours(hours), (
+                f"{name} hours drifted from {cron!r}")
         assert GRACE_MIN > 0
         return f"{len(SCHEDULES)} schedules pinned to RUNTIME.md"
     run(_cron)

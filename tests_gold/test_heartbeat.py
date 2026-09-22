@@ -29,8 +29,11 @@ class ScheduleExpansion(unittest.TestCase):
         self.assertEqual(tuple(SIGNAL_SCHEDULE.weekdays), (0, 1, 2, 3, 4))
 
     def test_the_audit_cadence_matches_the_routine(self):
-        # cron: 41 6,18 * * *
-        self.assertEqual(list(AUDIT_SCHEDULE.hours), [6, 18])
+        # cron: 41 6 * * *. The 18:41 slot was dropped on 2026-09-22 -- the
+        # audit went to once a day, so a second firing would now report a gap
+        # for a run the Routine no longer makes.
+        self.assertEqual(list(AUDIT_SCHEDULE.hours), [6])
+        self.assertEqual(AUDIT_SCHEDULE.minute, 41)
         self.assertEqual(len(AUDIT_SCHEDULE.weekdays), 7)
 
     def test_a_full_weekday_expands_to_every_slot(self):
@@ -42,7 +45,13 @@ class ScheduleExpansion(unittest.TestCase):
         self.assertEqual(SIGNAL_SCHEDULE.expected_between(at(19, 0, 0), at(20, 23, 59)), [])
 
     def test_the_audit_runs_at_the_weekend(self):
-        self.assertEqual(len(AUDIT_SCHEDULE.expected_between(at(19, 0, 0), at(19, 23, 59))), 2)
+        self.assertEqual(len(AUDIT_SCHEDULE.expected_between(at(19, 0, 0), at(19, 23, 59))), 1)
+
+    def test_a_day_expects_exactly_one_audit(self):
+        # The window the audit itself checks is 26 hours, which straddles two
+        # daily slots. Both must be expected, or a healthy pair reads as a gap.
+        moments = AUDIT_SCHEDULE.expected_between(at(17, 4, 30), at(18, 6, 45))
+        self.assertEqual([(m.day, m.hour) for m in moments], [(17, 6), (18, 6)])
 
     def test_the_window_is_half_open_so_a_boundary_is_not_double_counted(self):
         exact = at(17, 9)
@@ -192,15 +201,20 @@ class GapDetection(unittest.TestCase):
 
     def test_the_two_routines_are_audited_independently(self):
         self._beat(at(17, 15, 25), routine="signal")
-        # 19:20, so the audit routine's 18:41 slot is past its grace period.
-        later = datetime(2026, 9, 17, 19, 20, tzinfo=timezone.utc)
+        # The next morning at 07:30: the audit's single 06:41 slot is past its
+        # grace period, and so are the signal slots either side of the night.
+        later = datetime(2026, 9, 18, 7, 30, tzinfo=timezone.utc)
         reports = {r.routine: r for r in audit_all(self.path, now=later)}
         self.assertEqual(sorted(reports), ["audit", "signal"])
         # The audit routine has recorded nothing of its own, but the file is
-        # armed, so its 18:41 slot is genuinely missing.
-        self.assertEqual([m.hour for m in reports["audit"].missed], [18])
-        # The signal routine's 17:23 is missing too, and they are reported apart.
-        self.assertEqual([m.hour for m in reports["signal"].missed], [17])
+        # armed, so its 06:41 slot is genuinely missing.
+        self.assertEqual([(m.day, m.hour) for m in reports["audit"].missed], [(18, 6)])
+        # The signal routine's own slots are missing too, reported apart.
+        # 07:23 is absent from the list: at 07:30 it is still inside its grace
+        # period, and a run is not late until the grace period has passed.
+        self.assertEqual(
+            [(m.day, m.hour) for m in reports["signal"].missed],
+            [(17, 17), (17, 19)])
 
     def test_the_report_serialises_for_the_dashboard(self):
         self._beat(at(17, 15, 25))
@@ -217,7 +231,18 @@ class CoherenceWithTheRoutines(unittest.TestCase):
         with open(os.path.join(os.path.dirname(__file__), "..", "docs", "RUNTIME.md")) as fh:
             runtime = fh.read()
         self.assertIn("23 7-19/2 * * 1-5", runtime)
-        self.assertIn("41 6,18 * * *", runtime)
+        self.assertIn("41 6 * * *", runtime)
+
+    def test_the_documented_hours_are_checked_not_just_the_minute(self):
+        # The coherence check compared minutes only until 2026-09-22, so a
+        # cadence change -- the drift most likely to happen -- went unseen.
+        from gold_trader.selfcheck import _cron_hours
+
+        self.assertEqual(_cron_hours("6"), [6])
+        self.assertEqual(_cron_hours("6,18"), [6, 18])
+        self.assertEqual(_cron_hours("7-19/2"), [7, 9, 11, 13, 15, 17, 19])
+        self.assertEqual(sorted(AUDIT_SCHEDULE.hours), _cron_hours("6"))
+        self.assertEqual(sorted(SIGNAL_SCHEDULE.hours), _cron_hours("7-19/2"))
 
     def test_a_schedule_describes_itself_readably(self):
         described = Schedule(minute=5, hours=(9,)).describe()

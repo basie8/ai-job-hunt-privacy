@@ -19,7 +19,7 @@ because the failure modes differ per box.
   │  env_01YVG1nS92a8...    │◀─pull──│    │   journal.jsonl     │
   │                         │        │    │   audit.jsonl       │
   │  Routine: signal  /2h   │──push─▶│    └ docs/               │
-  │  Routine: audit   /12h  │        │                          │
+  │  Routine: audit   /24h  │        │                          │
   │                         │        │  ⚠ THE ONLY DURABLE STORE│
   │  fresh container each   │        └──────────────────────────┘
   │  fire, then destroyed   │
@@ -63,7 +63,7 @@ link or the market had simply been quiet. Both produce a bridge that runs, finds
 nothing new, and pushes nothing.
 
 **When it stops:** nothing breaks loudly. The scheduled runs pull stale data, the
-staleness gate refuses to signal, and the 12-hourly audit notices and tells you
+staleness gate refuses to signal, and the daily audit notices and tells you
 — once a day, not every two hours.
 
 ## 2. Anthropic cloud — the scheduled runs
@@ -73,7 +73,7 @@ staleness gate refuses to signal, and the 12-hourly audit notices and tells you
 | Routine | ID | Schedule (UTC) |
 |---|---|---|
 | XAUUSD signal run | `trig_01D5MB5sgfneCfBgVGrjACfb` | `23 7-19/2 * * 1-5` |
-| AURUM progress audit | `trig_01E3UHbtVvSfi1DyFiUQdpZs` | `41 6,18 * * *` |
+| AURUM progress audit | `trig_01E3UHbtVvSfi1DyFiUQdpZs` | `41 6 * * *` |
 
 Each firing spins up a **fresh, ephemeral container**, clones the repo, does its
 work, pushes, notifies if warranted, and is destroyed. Nothing persists on that
@@ -245,7 +245,7 @@ whether the runs themselves happened, which separates "nothing to report" from
 
 | If this stops | Symptom | Who notices |
 |---|---|---|
-| Your PC / MT5 | Candles go stale | 12-hourly audit, then you, once a day |
+| Your PC / MT5 | Candles go stale | daily audit, then you, once a day |
 | A Routine | No signals, no audits | `gold_trader runs` — every run records a heartbeat, so a run that never happened is visible as a gap |
 | Account usage limit | A run is rejected in seconds and does nothing | Same — this is the case the heartbeat was built for |
 | GitHub push | Journal silently loses a signal | The next audit sees a gap between audit log and journal |

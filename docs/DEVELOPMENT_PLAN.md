@@ -83,7 +83,7 @@ data collection, and it should feel uneventful.
   level. See `LEARNING_LOG.md`.
 - ✅ Found a scheduled run that failed silently (account usage limit) and built
   the detector for it: every run records a heartbeat, `gold_trader runs` finds
-  the gaps, and the 12-hourly audit now notifies on one (OPS-07).
+  the gaps, and the daily audit now notifies on one (OPS-07).
 
 **Yours:** the weekly review, every week, from the first one. Especially the
 loss post-mortems — thesis / level / variance.
@@ -148,7 +148,7 @@ Runs from Phase 2 onward, every week, regardless of phase.
 
 | Step | Who | What |
 |---|---|---|
-| 1 | Automatic | `selfcheck` + `progress` in the 12-hourly audit |
+| 1 | Automatic | `selfcheck` + `progress` in the daily audit |
 | 2 | You | Fill `docs/WEEKLY_REVIEW.md` and paste it in |
 | 3 | Me | Flag signals you would have skipped; look for the pattern behind them |
 | 4 | Me | Apply improvements: bugs, rule changes with evidence, doc drift |

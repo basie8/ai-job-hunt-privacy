@@ -67,7 +67,7 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 | ID | Task | Status | Verify | Notes |
 |----|------|--------|--------|-------|
 | OPS-01 | Signal Routine (2-hourly, weekdays) | done | `routine` | trig_01D5MB5sgfneCfBgVGrjACfb |
-| OPS-02 | Progress Routine (12-hourly) | done | `routine` | Reports this audit |
+| OPS-02 | Progress Routine (daily) | done | `routine` | Reports this audit; 06:41 UTC, halved from twice daily 2026-09-22 |
 | OPS-03 | Weekly review cadence running | outstanding | `manual` | **Needs you.** Template: docs/WEEKLY_REVIEW.md |
 | OPS-04 | Risk limits tuned to the account | done | `file:gold_trader/risk.py` | GBP 10,000 @ 1% of **current equity**, 60% ruin floor |
 
