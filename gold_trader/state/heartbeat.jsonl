@@ -27,3 +27,4 @@
 {"detail": "SELL XAUUSD 4330.5 limit (bos_continuation), stop 4348.5, target 4303.0, R:R 1.53, conviction 0.47 cut from 0.62 by risk manager (thin stop vs current volatility); size 7.4oz, risk $133", "outcome": "signal", "routine": "signal", "ts": "2026-09-22T07:28:41+00:00"}
 {"detail": "SHORT XAUUSD entry 4333.0 stop 4347.9 target 4308.0, bos_continuation, 8.94oz $133 risk, conviction clamped 0.6->0.42", "outcome": "signal", "routine": "signal", "ts": "2026-09-22T09:28:01+00:00"}
 {"detail": "Analyst flat: range-bound 4299-4376, conflicted EMA/SMC alignment, no macro direction. NO_SETUP hard block.", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-22T13:07:03+00:00"}
+{"detail": "Long setup at 4339.0 (0.42 conviction, bullish FVG retest) approved by risk manager but hard-blocked by MAX_LIVE_POSITIONS cap (2/2 live)", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-22T13:27:36+00:00"}
