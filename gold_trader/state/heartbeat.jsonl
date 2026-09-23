@@ -40,3 +40,4 @@
 {"detail": "SELL XAUUSD ob_retest entry 4300 stop 4312.8 target 4280.4, conviction clamped 0.58->0.40; 1 position resolved +1.57R", "outcome": "signal", "routine": "signal", "ts": "2026-09-23T15:27:33+00:00"}
 {"detail": "Valid short setup (H1 BOS, entry 4286.0) found but blocked by SIGNAL_BUDGET hard limit (4/4 issued today).", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-23T17:27:39+00:00"}
 {"detail": "6 closed trades (bos_continuation broke 0-for-3 with a win, now 1/4); selfcheck 45/45, no gaps in last 26h, dashboard republished", "outcome": "no_trade", "routine": "audit", "ts": "2026-09-23T18:46:39+00:00"}
+{"detail": "Risk engine hard-blocked: SIGNAL_BUDGET exhausted (4 signals already issued today). Setup was live (bearish BOS, entry 4299.50) but quota filled before this run.", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-23T19:27:36+00:00"}
