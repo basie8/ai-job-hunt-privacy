@@ -15,7 +15,7 @@ Rules for entries:
 
 ## Current state
 
-**Closed trades: 3** (need 20 to exit Phase 2, 40+ for any setup-level rule
+**Closed trades: 5** (need 20 to exit Phase 2, 40+ for any setup-level rule
 change). Phase 2 of `DEVELOPMENT_PLAN.md` — the bridge is live as of
 2026-09-17 and signals are now accumulating. The learning loop is at cold
 start; no clamp has engaged. Every statement below is a hypothesis carried in
@@ -542,6 +542,44 @@ LRN-03 (first 20 closed trades) is now 3/20.
 `gold_trader learn` computes these numbers regardless of sample size, and
 the discipline is to log the evidence as it arrives rather than wait for it
 to be large enough to be interesting.
+
+---
+
+## 2026-09-22 — Fourth and fifth closed trades: bos_continuation now 0-for-3
+
+**Evidence:** 5 closed trades (paper) total.
+
+- Trade 4: short `bos_continuation`, entry 4330.5, stop 4348.5, target 4303.0
+  (R:R 1.53), conviction 0.47. Filled 08:45 UTC, stopped out 17:45 UTC.
+  Result **-1.00R**.
+- Trade 5: short `bos_continuation`, entry 4333.0, stop 4347.9, target 4308.0
+  (R:R 1.66), conviction 0.42. Filled 09:45 UTC, stopped out 17:45 UTC.
+  Result **-1.00R**.
+
+Both resolved within the same daily-loss-limit event: the two losses together
+hit the -2.0R daily stop, which correctly hard-blocked a subsequent long
+setup the risk engine had otherwise approved that day (breach code
+`DAILY_LOSS_LIMIT`, recorded in `state/audit.jsonl`). This is a paper book —
+no order was placed for either trade; both fills and exits are simulated
+against the candles that followed the signal.
+
+**Observation:** `bos_continuation` is now 0 wins from 3 trades, expectancy
+-1.00R (every trade in this setup so far has been a full stop-out).
+`ob_retest` is unchanged at 2 trades, 1 win, +0.36R expectancy. Overall
+calibration across all 5 trades: mean stated conviction 0.41 vs realized win
+rate 0.20 (Brier 0.224) — overconfident by 0.21, wider than the 0.06 gap
+recorded at n=3. Both directions are consistent with H5 (overconfidence) but
+n=3 for the setup and n=5 overall are still far below the 40-trade floor for
+any setup-level rule change and the 20-trade floor for a general one. No
+clamp has moved off 1.00 and none should yet.
+
+**Change:** none. Recorded because the pattern (`bos_continuation` 0-for-3)
+is worth watching, not because it has earned a conclusion — three losses in
+the same setup can easily be noise at this sample size, and the daily-loss
+hard block worked exactly as designed.
+
+**Hypotheses affected:** none confirmed or contradicted. LRN-03 (first 20
+closed trades) is now 5/20.
 
 ---
 
