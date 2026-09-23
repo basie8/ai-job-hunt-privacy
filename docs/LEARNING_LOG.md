@@ -15,7 +15,7 @@ Rules for entries:
 
 ## Current state
 
-**Closed trades: 5** (need 20 to exit Phase 2, 40+ for any setup-level rule
+**Closed trades: 6** (need 20 to exit Phase 2, 40+ for any setup-level rule
 change). Phase 2 of `DEVELOPMENT_PLAN.md` — the bridge is live as of
 2026-09-17 and signals are now accumulating. The learning loop is at cold
 start; no clamp has engaged. Every statement below is a hypothesis carried in
@@ -580,6 +580,38 @@ hard block worked exactly as designed.
 
 **Hypotheses affected:** none confirmed or contradicted. LRN-03 (first 20
 closed trades) is now 5/20.
+
+---
+
+## 2026-09-23 — Sixth closed trade: bos_continuation's first win
+
+**Evidence:** 6 closed trades (paper) total.
+
+- Trade 6: short `bos_continuation`, entry 4313.0, stop 4324.6, target 4294.8
+  (R:R 1.60), conviction 0.28. Filled 13:30 UTC, target hit 13:30 UTC same
+  bar. Result **+1.569R** (mfe_r 2.306, mae_r -0.0552 — essentially no
+  drawdown before it ran). This is a paper book — no order was placed; the
+  fill and exit are both simulated against the candles that followed the
+  signal.
+
+**Observation:** breaks `bos_continuation`'s 0-for-3 losing streak noted on
+2026-09-22. The setup is now 1 win from 4 trades (25%), expectancy -0.36R —
+still net negative, since the one win (+1.569R) does not offset three full
+stop-outs (-1.00R each). `ob_retest` unchanged at 2 trades, 1 win, +0.36R
+expectancy. Overall calibration across 6 trades: mean stated conviction 0.39
+vs realized win rate 0.33 (Brier 0.273) — overconfident by 0.06, essentially
+unchanged from the n=3 reading.
+
+**Change:** none. n=4 for the setup and n=6 overall are both far below the
+40-trade floor for a setup-level change and the 20-trade floor for a general
+one. Recorded because a single win after three straight losses is exactly
+the kind of swing that invites premature rule changes — it does not, on its
+own, contradict the 2026-09-22 observation that `bos_continuation` may be
+weaker than `ob_retest`; one data point either way is noise at this sample
+size.
+
+**Hypotheses affected:** none confirmed or contradicted. LRN-03 (first 20
+closed trades) is now 6/20.
 
 ---
 
