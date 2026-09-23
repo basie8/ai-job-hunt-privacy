@@ -36,3 +36,4 @@
 {"detail": "SELL XAUUSD 4329.5 limit, stop 4338.6, target 4312.5, conviction 0.34 (downgraded from 0.57), 14.3 units, $130 risk", "outcome": "signal", "routine": "signal", "ts": "2026-09-23T07:27:24+00:00"}
 {"detail": "SELL XAUUSD 4329.00/stop 4338.60/target 4310.00, fvg_fill setup, conviction 0.35 (risk mgr reduced from 0.57), size 13.54oz, risk $130", "outcome": "signal", "routine": "signal", "ts": "2026-09-23T09:27:32+00:00"}
 {"detail": "m15 feed 70min old vs 45min cadence (h1 85min/90, h4 145min/270); pull-data exited 3", "outcome": "stale_data", "routine": "signal", "ts": "2026-09-23T11:25:37+00:00"}
+{"detail": "SHORT XAUUSD 4313.00 stop 4324.60 target 4294.80, bos_continuation, conviction clamped 0.56->0.28 by risk manager", "outcome": "signal", "routine": "signal", "ts": "2026-09-23T13:28:36+00:00"}
