@@ -192,6 +192,17 @@ class Journal:
         }
 
 
+def _expiry_of(record: SignalRecord) -> Optional[datetime]:
+    """The moment the level stops being tradeable, or None if it never does."""
+    if not record.valid_until:
+        return None
+    try:
+        expiry = datetime.fromisoformat(record.valid_until.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return expiry if expiry.tzinfo else expiry.replace(tzinfo=timezone.utc)
+
+
 def resolve_against(
     record: SignalRecord, candles: Sequence[Candle], now: Optional[datetime] = None
 ) -> Optional[Dict[str, object]]:
@@ -232,7 +243,22 @@ def resolve_against(
             fill_ts = fill_ts.replace(tzinfo=timezone.utc)
         forward = [c for c in forward if c.ts >= fill_ts]
 
-    for candle in forward:
+    # The walk stops at the deadline.
+    #
+    # It used to run over every candle after the signal with no bound, so an
+    # order could fill, stop out or hit target HOURS after its window closed
+    # and be recorded as a real outcome. A level the analyst declared dead at
+    # 12:24 could still book a win from a move at 16:00.
+    expiry = _expiry_of(record)
+    if expiry is not None:
+        in_window = [c for c in forward if c.ts <= expiry]
+        # Evidence that the window has actually elapsed, rather than simply
+        # having run out of candles: the feed may just be behind.
+        elapsed = bool(forward) and forward[-1].ts >= expiry
+    else:
+        in_window, elapsed = list(forward), False
+
+    for candle in in_window:
         # Nothing happens until price actually trades at the entry.
         #
         # Without this the book scored every signal as if it were filled the
@@ -290,12 +316,15 @@ def resolve_against(
                 "resolution": "target_hit",
             }
 
-    if record.valid_until:
-        expiry = datetime.fromisoformat(record.valid_until.replace("Z", "+00:00"))
-        if expiry.tzinfo is None:
-            expiry = expiry.replace(tzinfo=timezone.utc)
-        last = forward[-1]
-        if last.ts >= expiry and not filled:
+    if expiry is not None and elapsed:
+        # Priced at the last candle INSIDE the window, not the newest candle
+        # available. forward[-1] made the exit price depend on when `resolve`
+        # happened to run: a window closing at 12:24, scored at 16:15, booked
+        # four hours of drift the idea never claimed. On 2026-09-24 a PC outage
+        # froze the feed at 12:45 and hid this -- the price used was close to
+        # the deadline purely by accident.
+        last = in_window[-1] if in_window else None
+        if not filled or last is None:
             # An idea price never reached is not a trade, and must not be
             # counted as one. CANCELLED is outside CLOSED_STATES, so it stays
             # out of the win rate, the expectancy and every per-setup sample --
@@ -304,13 +333,13 @@ def resolve_against(
             return {
                 "status": CANCELLED,
                 "exit_price": None,
-                "exit_ts": last.ts.isoformat(),
+                "exit_ts": expiry.isoformat(),
                 "r_multiple": None,
                 "mae_r": 0.0,
                 "mfe_r": 0.0,
                 "resolution": "expired_unfilled",
             }
-        if last.ts >= expiry:
+        if True:
             r = record.r_of(last.close) or 0.0
             return {
                 "status": EXPIRED,

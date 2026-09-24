@@ -59,11 +59,16 @@ class OutcomeResolution(unittest.TestCase):
         early = Candle(START - timedelta(hours=2), 2400, 2430, 2380, 2400)
         self.assertIsNone(resolve_against(long_signal(), [early]))
 
-    def test_expiry_closes_at_the_last_close(self):
+    def test_expiry_closes_at_the_deadline_not_the_newest_candle(self):
+        # This asserted 0.3 -- the close of the +3h candle, an hour past a
+        # window that shut at +2h. That made the recorded result depend on
+        # when `resolve` happened to run: the same trade scored at 16:00
+        # instead of 12:30 books hours of drift the idea never claimed.
         record = long_signal(valid_until=(START + timedelta(hours=2)).isoformat())
-        out = resolve_against(record, [bar(1, 2398, 2404, close=2402), bar(3, 2399, 2405, close=2403)])
+        out = resolve_against(record, [bar(1, 2398, 2404, close=2402),
+                                       bar(3, 2399, 2405, close=2403)])
         self.assertEqual(out["status"], "expired")
-        self.assertAlmostEqual(out["r_multiple"], 0.3)
+        self.assertAlmostEqual(out["r_multiple"], 0.2)   # the +1h close, inside the window
 
     def test_mae_and_mfe_are_recorded(self):
         out = resolve_against(long_signal(), [bar(1, 2395, 2410), bar(2, 2385, 2425)])
@@ -381,3 +386,64 @@ class RestingIsNotTheSameAsLive(unittest.TestCase):
         from gold_trader.feed import Series
 
         return Series(timeframe="m15", candles=candles)
+
+
+
+class NothingHappensAfterTheDeadline(unittest.TestCase):
+    """The walk stops at valid_until.
+
+    It ran over every candle after the signal with no bound at all, so a level
+    the analyst declared dead could still fill, stop out or hit its target
+    hours later and be recorded as a real outcome. The expiry check only ran
+    if the loop finished without resolving -- which it rarely did, because a
+    long enough window of candles eventually touches something.
+
+    Found on 2026-09-24. A PC outage froze the feed at 12:45, twenty minutes
+    after three windows closed at 12:24, which is the only reason the recorded
+    prices were anywhere near right.
+    """
+
+    def _expiring(self, hours=2):
+        return long_signal(valid_until=(START + timedelta(hours=hours)).isoformat())
+
+    def test_a_target_hit_after_expiry_is_not_a_win(self):
+        out = resolve_against(self._expiring(),
+                              [bar(1, 2395, 2405), bar(4, 2400, 2430)])
+        self.assertEqual(out["status"], "expired")
+        self.assertNotEqual(out["resolution"], "target_hit")
+
+    def test_a_stop_hit_after_expiry_is_not_a_loss(self):
+        out = resolve_against(self._expiring(),
+                              [bar(1, 2395, 2405), bar(4, 2380, 2405)])
+        self.assertEqual(out["status"], "expired")
+
+    def test_a_fill_after_expiry_never_becomes_a_position(self):
+        # The worst of the three: an order reached after its window closed was
+        # booked as live, and then scored.
+        out = resolve_against(self._expiring(),
+                              [bar(1, 2402, 2408), bar(4, 2395, 2405)])
+        self.assertEqual(out["status"], "cancelled")
+        self.assertEqual(out["resolution"], "expired_unfilled")
+
+    def test_inside_the_window_everything_still_resolves(self):
+        out = resolve_against(self._expiring(hours=6),
+                              [bar(1, 2395, 2405), bar(3, 2400, 2430)])
+        self.assertEqual(out["status"], "won")
+
+    def test_a_feed_that_is_merely_behind_does_not_expire_anything(self):
+        # No candle at or past the deadline means the window may still be
+        # open; the feed is just late. Expiring here would close live trades
+        # every time the bridge stalls.
+        out = resolve_against(self._expiring(hours=6), [bar(1, 2395, 2405)])
+        self.assertIsNone(out.get("status"))
+
+    def test_an_order_with_no_deadline_is_unbounded(self):
+        out = resolve_against(long_signal(), [bar(1, 2395, 2405), bar(9, 2400, 2430)])
+        self.assertEqual(out["status"], "won")
+
+    def test_the_cancelled_exit_is_stamped_at_the_deadline(self):
+        # Not at whichever candle happened to be last, which said the order
+        # died whenever resolve next ran.
+        record = self._expiring()
+        out = resolve_against(record, [bar(1, 2402, 2408), bar(4, 2402, 2408)])
+        self.assertEqual(out["exit_ts"], record.valid_until)
