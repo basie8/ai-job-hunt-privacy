@@ -15,7 +15,7 @@ Rules for entries:
 
 ## Current state
 
-**Closed trades: 6** (need 20 to exit Phase 2, 40+ for any setup-level rule
+**Closed trades: 9** (need 20 to exit Phase 2, 40+ for any setup-level rule
 change). Phase 2 of `DEVELOPMENT_PLAN.md` — the bridge is live as of
 2026-09-17 and signals are now accumulating. The learning loop is at cold
 start; no clamp has engaged. Every statement below is a hypothesis carried in
@@ -612,6 +612,66 @@ size.
 
 **Hypotheses affected:** none confirmed or contradicted. LRN-03 (first 20
 closed trades) is now 6/20.
+
+---
+
+## 2026-09-24 — Resolver defect found and fixed; trades 7-9, `fvg_fill` debuts
+
+**Evidence:** 9 closed trades (paper) total. A PC outage froze the MT5 feed
+at 12:45 UTC on 2026-09-24, twenty minutes after three signal windows had
+already closed at 12:24. That timing accident is the only reason the first
+scored prices were anywhere near right, and it exposed two defects in the
+outcome resolver:
+
+1. The forward walk had no deadline — it kept checking fill/stop/target over
+   every candle after the signal, past `valid_until`, and only fell back to
+   an expiry check if the walk ran off the end of the feed. A setup declared
+   dead at 12:24 could still fill, run to target, and book a win hours later.
+2. When a trade did expire, it was priced at `forward[-1]` — whatever candle
+   happened to be newest when `resolve` ran — not the last candle at or
+   before the deadline. The same trade could score differently depending on
+   what time of day the resolver happened to execute.
+
+Both are fixed: the walk is now bounded by `valid_until`, and expiry prices
+at the last candle at or before the deadline (a feed that is merely behind
+expires nothing). A `gold_trader rescore` command was added to re-run the
+resolver over closed trades after a fix — dry by default, `--apply` writes a
+`correction` record ahead of the new outcome rather than silently overwriting
+the original, so the journal keeps both verdicts and the reason for the
+change.
+
+Applied to the two trades the old resolver had mispriced:
+- `3dceb5ac0d43` (`fvg_fill`): -0.39R → **-0.16R**
+- `fdc6e55311ff` (`fvg_fill`): -0.38R → **-0.19R**
+
+Both were originally priced off the 12:45 candle (the last one the feed
+delivered before the outage) instead of the 12:15 candle actually inside
+their windows. A third trade, `42fedd4fe995`, was checked by hand and
+correctly stayed `cancelled` — its window's highest high (4287.76) never
+reached its entry (4294.50); an earlier hand calculation that called it a
+missed win had made exactly the fill-gate error the gate exists to prevent.
+
+New trades since the sixth:
+- Trade 7: `ob_retest`, **+1.531R**. `ob_retest` is now 3 trades, 2 wins
+  (67%), expectancy +0.75R — the strongest setup so far, though n=3 is far
+  below any floor.
+- Trades 8 and 9: the corrected `fvg_fill` pair above, both losses. `fvg_fill`
+  debuts at 0-for-2, expectancy -0.17R. First data for this setup type;
+  meaningless at n=2.
+
+Updated overall picture at n=9: 3 wins (33%), total +0.47R, expectancy
++0.05R. Calibration: mean stated conviction 0.399 vs realized win rate 0.333
+(Brier 0.262) — overconfident by 0.07, essentially unchanged from n=6.
+
+**Change:** resolver code fixed (deadline-bound walk, deadline-bound expiry
+price); regression tests added (`test_expiry_closes_at_the_last_close` now
+asserts the correct behavior instead of the bug). No learning-rule or
+risk-limit change — all setup and overall samples remain far below the
+20/40-trade floors, and a resolver bug is a code defect, not evidence about
+the strategy.
+
+**Hypotheses affected:** none confirmed or contradicted. LRN-03 (first 20
+closed trades) is now 9/20.
 
 ---
 

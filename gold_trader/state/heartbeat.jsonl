@@ -48,3 +48,4 @@
 {"detail": "SELL XAUUSD 4284.00 stop 4297.50 target 4249.00, bos_continuation setup, conviction clamped to 0.45", "outcome": "signal", "routine": "signal", "ts": "2026-09-24T13:28:18+00:00"}
 {"detail": "m15 freshest bar 159min old (limit 45min), h1 204min old (limit 90), h4 384min old (limit 270); bridge not delivering", "outcome": "stale_data", "routine": "signal", "ts": "2026-09-24T15:24:34+00:00"}
 {"detail": "SIGNAL_BUDGET hard-block: short setup at 4276.5 (stop 4291.5, target 4250.0, 1.77R) identified but daily budget of 4 signals already issued", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-24T17:27:06+00:00"}
+{"detail": "45/45 selfcheck pass, no run gaps, 0 stale claims after data refresh; logged resolver defect fix (unbounded walk + wrong expiry candle, found via PC outage) and trades 7-9 (fvg_fill debuts 0-for-2); 9/20 toward LRN-03; dashboard republished", "outcome": "no_trade", "routine": "audit", "ts": "2026-09-24T18:45:49+00:00"}

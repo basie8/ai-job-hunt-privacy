@@ -94,8 +94,8 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 ## The critical path
 
 **DAT-04 cleared 2026-09-17** — the bridge is delivering live candles and SMC-03
-is validated. Everything now blocked traces to **LRN-03**: the journal has 6
-closed trades (as of 2026-09-23) and needs 14 more before the 20-trade floor
+is validated. Everything now blocked traces to **LRN-03**: the journal has 9
+closed trades (as of 2026-09-24) and needs 11 more before the 20-trade floor
 unblocks LRN-04 and the learning clamps engage. That is accumulation, not a
 setup task — nothing to configure, just signals running and resolving over the
 next several weeks.
