@@ -42,3 +42,4 @@
 {"detail": "6 closed trades (bos_continuation broke 0-for-3 with a win, now 1/4); selfcheck 45/45, no gaps in last 26h, dashboard republished", "outcome": "no_trade", "routine": "audit", "ts": "2026-09-23T18:46:39+00:00"}
 {"detail": "Risk engine hard-blocked: SIGNAL_BUDGET exhausted (4 signals already issued today). Setup was live (bearish BOS, entry 4299.50) but quota filled before this run.", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-23T19:27:36+00:00"}
 {"detail": "selfcheck 45/45, progress 30/43 verified (0 stale claims after data pull), no run gaps in 26h, 6 closed trades (-0.71R total, 33% win), dashboard republished", "outcome": "no_trade", "routine": "audit", "ts": "2026-09-24T06:44:02+00:00"}
+{"detail": "SELL XAUUSD 4294.5 stop 4304.5 target 4278.5, box fade, risk $133.44; resting ob_retest position resolved +1.53R win", "outcome": "signal", "routine": "signal", "ts": "2026-09-24T07:28:22+00:00"}
