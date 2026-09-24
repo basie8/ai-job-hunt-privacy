@@ -158,6 +158,26 @@ class Journal:
         self._append("outcome", payload)
         return record
 
+    def correct(self, record: SignalRecord, reason: str = "", **changes) -> SignalRecord:
+        """Rewrite an outcome that the resolver got wrong, leaving a trail.
+
+        Appends the reason as its own record before the correction, so the file
+        says not just what changed but why. Nothing is deleted: the original
+        outcome line stays where it was written, and a reader walking the
+        journal sees the first verdict, the reason, and the second.
+
+        Used only by `gold_trader rescore`, after a resolver defect is fixed.
+        A closed trade is a fact about the track record, and facts do not get
+        quietly amended.
+        """
+        self._append("correction", {
+            "id": record.id,
+            "reason": reason,
+            "was": {"status": record.status, "r_multiple": record.r_multiple,
+                    "resolution": record.resolution, "exit_price": record.exit_price},
+        })
+        return self.update_outcome(record, **changes)
+
     # -- views -----------------------------------------------------------
     def open_signals(self) -> List[SignalRecord]:
         """Everything still unresolved: resting orders and live positions both."""

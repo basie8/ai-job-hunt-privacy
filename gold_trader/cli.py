@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from .feed import KNOWN_VENDORS, CsvFeed, Feed, FeedUnavailable, InlineFeed
-from .journal import Journal, resolve_all
+from .journal import Journal, resolve_against, resolve_all
 from .learning import learn
 from .macro import MacroCalendar
 from .pipeline import GoldConfig, run_signal
@@ -313,6 +313,84 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rescore(args: argparse.Namespace) -> int:
+    """Re-run the resolver over already-closed trades, after a resolver fix.
+
+    A closed outcome is a fact about the track record, so this never happens
+    implicitly and never happens quietly. It prints what would change and
+    writes nothing unless --apply is given, and every correction is appended
+    with its reason -- the journal is append-only, so the original outcome
+    stays in the file and in the history.
+
+    Built on 2026-09-24, when the walk was found to run past valid_until: one
+    order recorded as never filled had in fact filled and run to target inside
+    its window, so the book did not know it had a winning trade.
+    """
+    config = _config(args)
+    journal = Journal(config.journal_path)
+    feed = _feed(args)
+    series = feed.snapshot(config.timeframes).series.get(config.resolution_timeframe)
+    if series is None:
+        print(f"No {config.resolution_timeframe} series to re-score against.", file=sys.stderr)
+        return 2
+
+    wanted = {i.strip() for i in args.ids.split(",")} if args.ids else None
+    changes = []
+    for record in journal.records:
+        if wanted is not None and record.id not in wanted:
+            continue
+        if record.status == "open":
+            continue          # resolve handles these; rescore is for closed ones
+        fresh = _as_unresolved(record)
+        outcome = resolve_against(fresh, series.candles)
+        if outcome is None:
+            outcome = {"status": "open", "exit_price": None, "exit_ts": None,
+                       "r_multiple": None, "resolution": None}
+        if _same_outcome(record, outcome):
+            continue
+        changes.append((record, outcome))
+
+    if not changes:
+        print("Nothing to re-score: every closed trade already matches the resolver.")
+        return 0
+
+    for record, outcome in changes:
+        before = f"{record.status} {_r(record.r_multiple)}"
+        after = f"{outcome.get('status')} {_r(outcome.get('r_multiple'))}"
+        print(f"  {record.id}  {record.setup_type:<18} {before:<18} ->  {after}")
+
+    if not args.apply:
+        print(f"\n{len(changes)} would change. Nothing written. Re-run with --apply.")
+        return 0
+
+    for record, outcome in changes:
+        journal.correct(record, reason=args.reason, **outcome)
+    print(f"\n{len(changes)} re-scored and appended. Journal: "
+          f"{json.dumps(journal.summary())}")
+    return 0
+
+
+def _as_unresolved(record):
+    """A copy of the signal as it was before any outcome was written."""
+    import copy
+
+    fresh = copy.copy(record)
+    fresh.status, fresh.filled_at = "open", None
+    fresh.exit_price = fresh.exit_ts = fresh.r_multiple = None
+    fresh.mae_r = fresh.mfe_r = fresh.resolution = None
+    return fresh
+
+
+def _same_outcome(record, outcome) -> bool:
+    return (record.status == outcome.get("status")
+            and record.r_multiple == outcome.get("r_multiple")
+            and record.resolution == outcome.get("resolution"))
+
+
+def _r(value) -> str:
+    return f"{value:+.2f}R" if value is not None else "   --  "
+
+
 def cmd_learn(args: argparse.Namespace) -> int:
     config = _config(args)
     journal = Journal(config.journal_path)
@@ -553,6 +631,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     p = sub.add_parser("resolve", help="Score open trades against new candles (no model calls).")
     _common(p, data=True)
     p.set_defaults(func=cmd_resolve)
+
+    p = sub.add_parser("rescore",
+                       help="Re-run the resolver over closed trades after a resolver fix.")
+    p.add_argument("--ids", default=None, help="Comma-separated signal ids. Default: all closed.")
+    p.add_argument("--apply", action="store_true", help="Write the corrections. Off by default.")
+    p.add_argument("--reason", default="", help="Why, recorded alongside each correction.")
+    _common(p, data=True)
+    p.set_defaults(func=cmd_rescore)
 
     p = sub.add_parser("learn", help="Show the measured track record and active clamps.")
     _common(p)

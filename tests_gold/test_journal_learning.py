@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -447,3 +448,62 @@ class NothingHappensAfterTheDeadline(unittest.TestCase):
         record = self._expiring()
         out = resolve_against(record, [bar(1, 2402, 2408), bar(4, 2402, 2408)])
         self.assertEqual(out["exit_ts"], record.valid_until)
+
+
+class RescoringLeavesATrail(unittest.TestCase):
+    """A closed outcome is a fact about the track record, so correcting one is
+    deliberate, visible and reversible by inspection.
+
+    The journal is append-only: the original verdict stays where it was
+    written, a correction record says why, and the new verdict follows. A
+    reader walking the file sees all three.
+    """
+
+    def setUp(self):
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.path = os.path.join(self._tmp.name, "journal.jsonl")
+
+    def test_the_original_outcome_is_not_deleted(self):
+        journal = Journal(self.path)
+        record = journal.add(long_signal())
+        journal.update_outcome(record, status="lost", r_multiple=-1.0)
+        journal.correct(record, reason="resolver fix", status="expired", r_multiple=-0.2)
+
+        kinds = [json.loads(l)["kind"] for l in self._lines()]
+        self.assertEqual(kinds, ["signal", "outcome", "correction", "outcome"])
+
+    def test_the_correction_records_what_it_replaced(self):
+        journal = Journal(self.path)
+        record = journal.add(long_signal())
+        journal.update_outcome(record, status="lost", r_multiple=-1.0,
+                               resolution="stop_hit")
+        journal.correct(record, reason="walked past valid_until",
+                        status="expired", r_multiple=-0.2)
+
+        line = [json.loads(l) for l in self._lines()
+                if json.loads(l)["kind"] == "correction"][0]
+        self.assertEqual(line["payload"]["was"]["status"], "lost")
+        self.assertEqual(line["payload"]["was"]["r_multiple"], -1.0)
+        self.assertIn("valid_until", line["payload"]["reason"])
+
+    def test_a_reload_sees_the_corrected_value(self):
+        journal = Journal(self.path)
+        record = journal.add(long_signal())
+        journal.update_outcome(record, status="lost", r_multiple=-1.0)
+        journal.correct(record, reason="x", status="expired", r_multiple=-0.2)
+        self.assertAlmostEqual(Journal(self.path).records[0].r_multiple, -0.2)
+
+    def _lines(self):
+        with open(self.path, encoding="utf-8") as fh:
+            return [l for l in fh.read().splitlines() if l.strip()]
+
+    def test_an_unknown_record_kind_does_not_break_loading(self):
+        # The correction line is not a signal or an outcome; the loader must
+        # walk past it rather than choking on the file it wrote itself.
+        journal = Journal(self.path)
+        record = journal.add(long_signal())
+        journal.correct(record, reason="x", status="expired", r_multiple=-0.2)
+        self.assertEqual(len(Journal(self.path).records), 1)
