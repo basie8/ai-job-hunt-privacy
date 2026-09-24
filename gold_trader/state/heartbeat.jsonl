@@ -46,3 +46,4 @@
 {"detail": "SELL XAUUSD 4270 limit, stop 4279.5, target 4251, fvg_fill/bos_continuation retest, conviction 0.44 (cut from 0.62 by risk manager), 14.03oz, $133 risk", "outcome": "signal", "routine": "signal", "ts": "2026-09-24T09:28:38+00:00"}
 {"detail": "SELL XAUUSD 4269.50 limit, stop 4280.50, target 4247.50, 12.1oz, $133 risk; fvg_fill setup, conviction cut to 0.4 by risk manager (event timing)", "outcome": "signal", "routine": "signal", "ts": "2026-09-24T11:27:22+00:00"}
 {"detail": "SELL XAUUSD 4284.00 stop 4297.50 target 4249.00, bos_continuation setup, conviction clamped to 0.45", "outcome": "signal", "routine": "signal", "ts": "2026-09-24T13:28:18+00:00"}
+{"detail": "m15 freshest bar 159min old (limit 45min), h1 204min old (limit 90), h4 384min old (limit 270); bridge not delivering", "outcome": "stale_data", "routine": "signal", "ts": "2026-09-24T15:24:34+00:00"}
