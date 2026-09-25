@@ -56,3 +56,4 @@
 {"detail": "Risk manager rejected: stop-target geometry fails on bullish bias, stop above invalidation, target inside structure", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-25T11:26:51+00:00"}
 {"detail": "Risk engine hard-blocked: DAILY_LOSS_LIMIT, -2.0R realized vs -2.0R daily stop. Analyst proposed fade of Asian high (fvg_fill/bos setups) but no trade issued.", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-25T13:29:16+00:00"}
 {"detail": "Risk engine hard-blocked: DAILY_LOSS_LIMIT, -2.00R realised vs -2.0R daily stop; short setup at 4286.0 identified but blocked", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-25T15:27:38+00:00"}
+{"detail": "Analyst flat: conflicting BOS (bearish H4, bullish H1), all stops fail 1.5 R:R floor or sit in noise.", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-25T17:25:49+00:00"}
