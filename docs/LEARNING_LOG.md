@@ -15,7 +15,7 @@ Rules for entries:
 
 ## Current state
 
-**Closed trades: 9** (need 20 to exit Phase 2, 40+ for any setup-level rule
+**Closed trades: 11** (need 20 to exit Phase 2, 40+ for any setup-level rule
 change). Phase 2 of `DEVELOPMENT_PLAN.md` — the bridge is live as of
 2026-09-17 and signals are now accumulating. The learning loop is at cold
 start; no clamp has engaged. Every statement below is a hypothesis carried in
@@ -672,6 +672,46 @@ the strategy.
 
 **Hypotheses affected:** none confirmed or contradicted. LRN-03 (first 20
 closed trades) is now 9/20.
+
+---
+
+## 2026-09-25 — Trades 10-11, both losses; walk-forward split now visible in `learn`
+
+**Evidence:** 11 closed trades total.
+- Trade 10, `c97eb65ac0c4` (`bos_continuation`, short): stopped out -1.0R.
+  MFE before the reversal was **+2.06R** — price ran most of the way to
+  target, then fully round-tripped back through entry and the stop. Single
+  occurrence; not evidence of anything at n=1, but worth watching for a
+  pattern of giving back open profit, since the system currently has no
+  partial-exit or trail.
+- Trade 11, `c90402bfd6e6` (`fvg_fill`, short): stopped out -1.0R, MFE only
+  +0.28R — a clean invalidation, nothing unusual.
+
+Both losses landed in the same run (2026-09-25 08:45 UTC exit), which is why
+`status` shows -2.00R realized and the daily stop tripped that session.
+That's the daily-loss guard doing its job, not a defect.
+
+`bos_continuation` is now 5 closed trades overall (1 win, 20%), not the
+"4 trades, 25%" `learn` prints — that command's by-setup table is the
+**train** half of the walk-forward split (oldest 70%, currently 7 of 11
+trades), not the full journal; the newest 4 trades are held out and reported
+separately as the out-of-sample check. Confirmed by tracing `learning.py`
+(`walk_forward_split`, `train_frac=0.7`) — this is the intended design, not
+a bug, so no code change.
+
+That out-of-sample check is worth flagging on its own: the 4 most recent
+trades are 0-for-4 (0% realized), against an in-sample bos_continuation win
+rate of 25% and ob_retest of 67%. `learn` already surfaces this as "earlier
+lessons are not generalising" — at n=4 that's not actionable (both the
+20-trade and 40-trade floors are far off), but it's the first time the
+holdout has read meaningfully worse than train, and worth checking again
+once the holdout window grows.
+
+**Change:** none. Sample remains far below both floors; no rule, clamp, or
+risk-limit changed.
+
+**Hypotheses affected:** none confirmed or contradicted. LRN-03 (first 20
+closed trades) is now 11/20.
 
 ---
 
