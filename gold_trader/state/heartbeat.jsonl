@@ -58,3 +58,4 @@
 {"detail": "Risk engine hard-blocked: DAILY_LOSS_LIMIT, -2.00R realised vs -2.0R daily stop; short setup at 4286.0 identified but blocked", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-25T15:27:38+00:00"}
 {"detail": "Analyst flat: conflicting BOS (bearish H4, bullish H1), all stops fail 1.5 R:R floor or sit in noise.", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-25T17:25:49+00:00"}
 {"detail": "11 closed trades (2 new since last audit, both losses); selfcheck 45/45, no gaps in runs, 0 stale claims post-pull-data, dashboard republished", "outcome": "no_trade", "routine": "audit", "ts": "2026-09-25T18:46:04+00:00"}
+{"detail": "Analyst flat: conflicted H4 bearish/H1 bullish structure, M15 BOS only 9min old; NO_SETUP hard block.", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-25T19:26:10+00:00"}
