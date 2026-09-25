@@ -53,3 +53,4 @@
 {"detail": "45/45 selfcheck pass, no run gaps, 0 stale claims after pull-data (DAT-04/SMC-03 transient pre-pull reads as documented); still 9/20 closed trades toward LRN-03, no change since last audit; dashboard republished", "outcome": "no_trade", "routine": "audit", "ts": "2026-09-25T06:44:54+00:00"}
 {"detail": "SELL limit 4286.50, stop 4296.60, target 4265.80, fvg_fill setup, conviction clamped to 0.42, run b86f06a70ff543a1", "outcome": "signal", "routine": "signal", "ts": "2026-09-25T07:28:07+00:00"}
 {"detail": "Resolved 2 open positions (both -1.00R stop_hit); risk manager rejected short setup, stop 1.51pts above H4 protected swing vs 7.6-7.8pt typical sweep depth", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-25T09:27:26+00:00"}
+{"detail": "Risk manager rejected: stop-target geometry fails on bullish bias, stop above invalidation, target inside structure", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-25T11:26:51+00:00"}
