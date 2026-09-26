@@ -59,3 +59,4 @@
 {"detail": "Analyst flat: conflicting BOS (bearish H4, bullish H1), all stops fail 1.5 R:R floor or sit in noise.", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-25T17:25:49+00:00"}
 {"detail": "11 closed trades (2 new since last audit, both losses); selfcheck 45/45, no gaps in runs, 0 stale claims post-pull-data, dashboard republished", "outcome": "no_trade", "routine": "audit", "ts": "2026-09-25T18:46:04+00:00"}
 {"detail": "Analyst flat: conflicted H4 bearish/H1 bullish structure, M15 BOS only 9min old; NO_SETUP hard block.", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-25T19:26:10+00:00"}
+{"detail": "45/45 selfcheck pass, 0 stale claims after pull-data hydrated data/, 0 run gaps in 26h, 11/20 closed trades (Phase 2 cold start), dashboard republished", "outcome": "no_trade", "routine": "audit", "ts": "2026-09-26T06:46:12+00:00"}
