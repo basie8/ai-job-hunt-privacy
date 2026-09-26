@@ -102,6 +102,59 @@ class ProblemAggregation(unittest.TestCase):
         self.assertIn("generated_at", dashboard_payload())
 
 
+class CandleStalenessRespectsMarketHours(unittest.TestCase):
+    """Gold closes for an hour each weekday evening and all weekend, and a
+    perfectly healthy bridge delivers nothing in those windows because there
+    is nothing to deliver. `pull-data` and the roadmap's `data:` predicate
+    both already carry this exception; this panel's "Newest candle is N
+    minutes old" critical did not, so the dashboard read critical every
+    single evening and all weekend regardless of whether the bridge was
+    actually healthy -- the exact false-alarm-on-a-schedule failure this
+    project has removed everywhere else it appears.
+    """
+
+    def _build(self, now):
+        import tempfile
+        from unittest import mock
+
+        import gold_trader.dashboard as dashboard
+
+        class Frozen:
+            def now(self, tz=None):
+                return now
+
+        with tempfile.TemporaryDirectory() as repo:
+            data_dir = os.path.join(repo, "data")
+            os.makedirs(data_dir)
+            # Deliberately ancient: stale under any real-world "now", so the
+            # only thing distinguishing the two cases below is market hours.
+            with open(os.path.join(data_dir, "XAUUSD_h1.csv"), "w") as fh:
+                fh.write("time,open,high,low,close,volume\n")
+                fh.write("2020-01-01T00:00:00+00:00,1,2,0.5,1.5,10\n")
+            with mock.patch.object(dashboard, "datetime", Frozen()):
+                return dashboard.build(repo)
+
+    def _has_staleness_critical(self, payload):
+        return any(
+            p["source"] == "bridge" and "Newest candle" in p["message"]
+            for p in payload["problems"]
+        )
+
+    def test_stale_candles_are_critical_while_the_market_is_open(self):
+        from datetime import datetime, timezone
+
+        thursday_afternoon = datetime(2026, 9, 24, 14, 0, tzinfo=timezone.utc)
+        payload = self._build(thursday_afternoon)
+        self.assertTrue(self._has_staleness_critical(payload))
+
+    def test_stale_candles_are_not_a_finding_over_the_weekend(self):
+        from datetime import datetime, timezone
+
+        saturday = datetime(2026, 9, 26, 18, 0, tzinfo=timezone.utc)
+        payload = self._build(saturday)
+        self.assertFalse(self._has_staleness_critical(payload))
+
+
 class Rendering(unittest.TestCase):
     def test_the_page_renders_from_the_real_repo(self):
         html = render(dashboard_payload())

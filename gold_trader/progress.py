@@ -187,7 +187,24 @@ def verify(task: Task, repo: str = ".", run_tests: bool = True) -> Task:
     if predicate.startswith("data:"):
         max_age = float(predicate.split(":", 1)[1])
         try:
-            from .sync import describe_data_dir
+            from .sync import describe_data_dir, pull_data_branch
+
+            # data/ is gitignored on this branch by design (see sync.py) --
+            # candles live on origin/market-data and only land in the
+            # working tree once something pulls them. A fresh checkout of
+            # this branch (a new cloud container, a clone for CI) starts
+            # with data/ empty, which used to read identically to "the
+            # bridge has stopped delivering": both show zero rows. Syncing
+            # here, best-effort, means this predicate reports the bridge's
+            # actual state rather than an artifact of which command in the
+            # run happened to execute first. A sync failure (offline, no
+            # such remote, not a git checkout at all) is not this
+            # predicate's concern -- it just falls through to whatever is
+            # already on disk, same as before.
+            try:
+                pull_data_branch(repo)
+            except Exception:  # noqa: BLE001
+                pass
 
             rows = describe_data_dir(os.path.join(repo, "data"))
         except Exception as exc:  # noqa: BLE001

@@ -509,13 +509,26 @@ def build(repo: str = ".") -> Dict[str, Any]:
     if health.status == EMPTY:
         problems.append({"severity": "warning", "source": "bridge", "message": health.reason})
     elif health.status == OK and health.data["freshest_min"] > 90:
-        problems.append({
-            "severity": "critical", "source": "bridge",
-            "message": (
-                f"Newest candle is {health.data['freshest_min']:.0f} minutes old; "
-                "the pipeline will refuse to signal."
-            ),
-        })
+        # Candle age cannot be judged while the market is shut -- gold closes
+        # for an hour each weekday evening and all weekend, and a perfectly
+        # healthy bridge delivers nothing in those windows because there is
+        # nothing to deliver. `pull-data` and the roadmap's `data:` predicate
+        # both carry this exception already; this panel used to be the one
+        # place that didn't, so the dashboard read "critical" every single
+        # evening and all weekend regardless of whether anything was actually
+        # wrong -- the exact false-alarm-on-a-schedule failure this project
+        # has removed everywhere else it appeared.
+        from .sessions import market_closed
+
+        closure = market_closed(datetime.now(timezone.utc))
+        if not closure:
+            problems.append({
+                "severity": "critical", "source": "bridge",
+                "message": (
+                    f"Newest candle is {health.data['freshest_min']:.0f} minutes old; "
+                    "the pipeline will refuse to signal."
+                ),
+            })
 
     calendar = sections["calendar"]
     if calendar.status == OK:

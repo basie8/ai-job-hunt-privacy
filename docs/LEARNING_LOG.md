@@ -715,6 +715,80 @@ closed trades) is now 11/20.
 
 ---
 
+## 2026-09-26 — Two audit-artifact drifts, both the same shape as before
+
+**Evidence:** 11 closed trades total, unchanged since 2026-09-25 (weekend,
+market closed — no new signals were possible). No trading evidence in this
+entry; this is a code audit.
+
+**Defect 1 — `progress` couldn't tell "the bridge is dead" from "nobody has
+synced yet".** `data/` is gitignored on this branch by design: candles live
+on `origin/market-data` and only reach the working tree once something pulls
+them (`gold_trader/sync.py`). The 12-hourly audit runs `progress` before
+`pull-data`, and every fresh container starts with `data/` empty — so
+`progress` read DAT-04 and SMC-03 as a **STALE CLAIM** ("no candles in data/
+— the bridge has not delivered") on every single run, even on runs where the
+bridge was delivering candles fine and 11 trades had already closed from
+them. The previous two audits (2026-09-25T18:46Z, 2026-09-26T06:46Z) both
+hit this and just noted it as "expected, clears after `pull-data`" rather
+than fixing it — the false alarm had already started being tuned out, which
+is exactly the failure mode this project's own standing lesson warns about.
+
+**Fix:** the `data:` predicate in `gold_trader/progress.py` now attempts a
+best-effort `pull_data_branch()` sync before reading `data/`, the same pull
+`pull-data` performs, wrapped so a sync failure (offline, no such remote, not
+a git checkout) falls through to whatever is already on disk unchanged.
+Regression test added (`test_the_bridge_predicate_syncs_before_declaring_the_bridge_dead`
+in `tests_gold/test_progress.py`) that clones a real bare repo carrying a
+`market-data` branch, checks out a fresh working copy with no `data/` at
+all, and asserts the predicate now reads OK rather than STALE. Verified live:
+removing `data/` entirely and re-running `progress` now reports 0 stale
+claims instead of 2.
+
+**Defect 2 — the dashboard's candle-freshness check didn't know about
+market hours.** `pull-data` and `progress`'s `data:` predicate both already
+skip judging candle age while gold is closed (weekday evenings, all
+weekend) — that exception was added 2026-09-17 specifically because a
+healthy bridge delivers nothing when there is nothing to deliver, and
+alarming on it trains the reader to ignore the channel. `dashboard.py`'s own
+"Newest candle is N minutes old" critical never got that exception, so the
+live dashboard read **health: critical** for a reason that would recur every
+evening and all weekend regardless of whether the bridge was actually
+healthy — found live today (Saturday), where it was firing on stale weekend
+candles the market simply hadn't produced.
+
+**Fix:** the same `market_closed()` check used by `pull-data` now gates this
+one critical in `gold_trader/dashboard.py`. The bridge-process-liveness
+critical (`bridge.json` older than 45 minutes) is deliberately **not**
+gated by market hours — that one is documented in `RUNTIME.md` as checking
+whether the always-on Task Scheduler task itself is running, independent of
+whether the market is open — and stays as is; it is in fact the thing that
+fired live today (see below). Two regression tests added in
+`tests_gold/test_dashboard.py` (`CandleStalenessRespectsMarketHours`) proving
+the critical still fires on stale candles during market hours and is
+suppressed over a weekend.
+
+**Live finding while fixing this:** `data/bridge.json` was 51 minutes old at
+audit time (2026-09-26 ~18:50 UTC, a Saturday) — the Task Scheduler task on
+Pieter's PC has not run recently. No practical effect right now (the market
+is shut, so no candle would arrive either way), but worth a PC check before
+Monday's reopen. This is the bridge-liveness check working as designed, not
+a code defect, and not reported as a stale claim or a code finding.
+
+**The recurring lesson, restated for the third context it's shown up in:**
+the same computation — "is this candle fresh enough, given the market can be
+legitimately closed" — is implemented three times (`pull-data`, `progress`,
+`dashboard`), and it only takes one of the three skipping the exception to
+reintroduce the exact false-alarm-on-a-schedule failure the other two exist
+to prevent. Cross-artifact drift doesn't require two docs disagreeing; three
+copies of the same rule are three chances for one to fall behind the other
+two.
+
+**Hypotheses affected:** none. No trading evidence; two robustness findings,
+both fixed with regression tests, neither weakening a check.
+
+---
+
 ## Template for future entries
 
 ```markdown

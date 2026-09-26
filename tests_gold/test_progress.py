@@ -156,6 +156,62 @@ class RealRoadmap(unittest.TestCase):
             self.assertEqual(task.verdict, VERDICT_STALE)
             self.assertIn("has not delivered", task.detail)
 
+    def test_the_bridge_predicate_syncs_before_declaring_the_bridge_dead(self):
+        """A fresh checkout of this branch starts with data/ empty -- it is
+        gitignored here on purpose, and candles only land once something
+        pulls origin/market-data (see sync.py). The 12-hourly audit runs
+        `progress` before `pull-data`, so every single run used to read
+        DAT-04 and SMC-03 as a STALE CLAIM on a brand new container, even
+        with the bridge delivering candles just fine -- the check was
+        reporting "nobody has pulled yet in this process", not "the bridge
+        stopped". The predicate must sync for itself so the two states are
+        told apart.
+        """
+        import subprocess
+        from gold_trader.progress import Task, verify
+        from gold_trader.sync import DATA_BRANCH
+
+        def run(*args, cwd):
+            result = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True)
+            if result.returncode != 0:
+                raise AssertionError(result.stderr or result.stdout)
+
+        with tempfile.TemporaryDirectory() as root:
+            origin = os.path.join(root, "origin.git")
+            run("init", "--bare", "-b", "main", origin, cwd=root)
+
+            # Seed main with something, or a clone of it has no branch at all.
+            seed = os.path.join(root, "seed")
+            run("clone", origin, seed, cwd=root)
+            run("config", "user.email", "test@example.com", cwd=seed)
+            run("config", "user.name", "Test", cwd=seed)
+            with open(os.path.join(seed, "README.md"), "w") as fh:
+                fh.write("project\n")
+            run("add", "-A", cwd=seed)
+            run("commit", "-m", "seed", cwd=seed)
+            run("push", "origin", "main", cwd=seed)
+
+            # A market-data branch carrying one fresh XAUUSD series.
+            run("checkout", "--orphan", DATA_BRANCH, cwd=seed)
+            run("rm", "-rf", "--quiet", ".", cwd=seed)
+            os.makedirs(os.path.join(seed, "data"))
+            with open(os.path.join(seed, "data", "XAUUSD_h1.csv"), "w") as fh:
+                from datetime import datetime, timezone
+                fh.write("time,open,high,low,close,volume\n")
+                fh.write(f"{datetime.now(timezone.utc).isoformat()},1,2,0.5,1.5,10\n")
+            run("add", "-A", cwd=seed)
+            run("commit", "-m", "candles", cwd=seed)
+            run("push", "origin", DATA_BRANCH, cwd=seed)
+
+            # A checkout of the working branch: no data/ pulled yet, exactly
+            # like a fresh scheduled-run container before `pull-data` runs.
+            work = os.path.join(root, "work")
+            run("clone", origin, work, cwd=root)
+            self.assertFalse(os.path.isdir(os.path.join(work, "data")))
+
+            task = verify(Task("DAT-04", "bridge", "done", "data:180"), work)
+            self.assertEqual(task.verdict, VERDICT_OK, task.detail)
+
 
 if __name__ == "__main__":
     unittest.main()
