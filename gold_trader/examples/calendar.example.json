@@ -1,0 +1,43 @@
+{
+  "_README": [
+    "Copy to gold_trader/state/calendar.json and keep it current.",
+    "Only the FOMC decision dates below were verified against federalreserve.gov",
+    "(https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm).",
+    "CPI / PPI / PCE entries are PLACEHOLDERS with null dates - fill them from the",
+    "BLS and BEA release schedules before relying on the blackout windows.",
+    "Set covers_through to the last date you have actually verified. When it lapses,",
+    "MacroCalendar reports confidence='stale' and the pipeline widens its margin",
+    "of safety instead of assuming the diary is clear."
+  ],
+  "covers_through": "2026-12-09T19:00:00Z",
+  "events": [
+    {
+      "kind": "FOMC",
+      "name": "FOMC decision + press conference",
+      "when": "2026-10-28T18:00:00Z",
+      "impact": "high",
+      "source": "federalreserve.gov (2:00pm ET, EDT)"
+    },
+    {
+      "kind": "FOMC",
+      "name": "FOMC decision + press conference",
+      "when": "2026-12-09T19:00:00Z",
+      "impact": "high",
+      "source": "federalreserve.gov (2:00pm ET, EST)"
+    }
+  ],
+  "readings": [
+    {
+      "name": "DXY",
+      "value": "FILL ME - dollar index level and direction",
+      "as_of": "YYYY-MM-DD",
+      "source": "your terminal"
+    },
+    {
+      "name": "US 10y real yield",
+      "value": "FILL ME - gold's primary macro driver",
+      "as_of": "YYYY-MM-DD",
+      "source": "your terminal"
+    }
+  ]
+}
