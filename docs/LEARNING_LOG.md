@@ -789,6 +789,58 @@ both fixed with regression tests, neither weakening a check.
 
 ---
 
+## 2026-09-27 — A fourth instance: selfcheck's own "cli" check leaked the same false alarm
+
+**Evidence:** 11 closed trades total, unchanged since 2026-09-26 (still
+weekend, market closed). No trading evidence in this entry; this is a code
+audit.
+
+Running `selfcheck` on a fresh checkout, before `pull-data` had synced
+`data/` from `origin/market-data`, printed to stderr:
+
+    FX WARNING: no GBPUSD rate from the bridge in data/fx.json; using the
+    static 1.3377 ...
+
+45/45 checks still passed — the warning is not counted as a failure — but it
+names the real bridge path and reads exactly like a live bridge problem, on
+every fresh container, before the very next step (`pull-data`) would have
+made it disappear.
+
+**Cause:** the `cli` check's `_cli_config()` (added to prove `_config()`
+doesn't drop its defaults) called `_config(argparse.Namespace())`, which
+falls back to a relative `"data"` directory — the real repo's data dir, not
+the `repo` argument `run_all()` was given, and not the isolated `tempfile`
+directory the neighbouring `_fx_fallback` check already uses for the same
+kind of FX resolution three lines above it. This is the same shape fixed
+twice already in this project (`progress.py`'s `data:` predicate and
+`dashboard.py`'s freshness critical, both 2026-09-26): an unsynced `data/`
+read as a dead bridge. It hadn't been noticed before because it doesn't fail
+the check, so it never showed up as a stale claim or a selfcheck FAIL — only
+as noise on stderr, on a path this audit hadn't run selfcheck-before-pull-data
+enough times to notice.
+
+**Change:** `_cli_config()` now builds its config against an empty
+`tempfile.TemporaryDirectory()` with stderr redirected, instead of the real
+`data/` directory. The check's actual purpose — defaults survive
+`_config()` and `fx_note` gets populated — doesn't depend on what's really
+in `data/`, and FX resolution itself is already covered by `_fx_fallback`
+immediately above it. Regression test added
+(`test_the_cli_config_check_does_not_read_the_real_data_dir` in
+`tests_gold/test_degradation.py`) that runs the check from an empty tempdir
+cwd and asserts nothing containing "FX WARNING" reaches stderr. 500 tests
+pass (was 499).
+
+**The recurring lesson, fourth instance:** three fixes so far all lived in
+code that runs on the live schedule. This one lived in the self-check meant
+to catch exactly that class of bug, and it had the same blind spot: a check
+whose own setup silently depends on unsynced repo state can produce the
+identical false alarm it exists to prevent elsewhere.
+
+**Hypotheses affected:** none. No trading evidence; one robustness finding,
+fixed with a regression test, nothing weakened.
+
+---
+
 ## Template for future entries
 
 ```markdown

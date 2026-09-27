@@ -22,7 +22,7 @@ import io
 import os
 import re
 import tempfile
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Callable, List, Optional
@@ -389,8 +389,17 @@ def check_money(report: Report) -> None:
 
     run = _guard(report, "cli", "the CLI can build its config")
     def _cli_config():
+        # Uses an empty tempdir, not the real data dir: on a fresh checkout
+        # data/ is gitignored and unsynced, so pointing this at "data" (the
+        # default _config() falls back to) reads as a live FX WARNING about
+        # the bridge -- the same "unsynced looks like dead" shape fixed in
+        # progress.py and dashboard.py -- when it is really just this check
+        # not having called pull-data. FX resolution itself is already
+        # covered by _fx_fallback above; this check only needs _config() to
+        # build without dropping defaults, so it stays hermetic and silent.
         from .cli import _config
-        config = _config(argparse.Namespace())
+        with tempfile.TemporaryDirectory() as tmp, redirect_stderr(io.StringIO()):
+            config = _config(argparse.Namespace(data_dir=tmp))
         assert config.limits.min_equity_pct_of_start > 0, "defaults were dropped"
         assert config.fx_note, "the run recorded no FX provenance"
         return f"{config.limits.account_currency} {config.limits.account_value:,.0f} loaded"

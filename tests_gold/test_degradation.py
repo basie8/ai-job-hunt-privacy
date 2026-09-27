@@ -4,6 +4,7 @@ Common theme: when an input degrades, the system must apply *more* scrutiny, not
 less, and must never die because a hand-edited file was malformed.
 """
 
+import io
 import json
 import os
 import tempfile
@@ -207,6 +208,32 @@ class SelfCheckPasses(unittest.TestCase):
             report = Report()
             check_money(report)
         self.assertEqual(report.failures, [], "money check depends on wall-clock day again")
+
+    def test_the_cli_config_check_does_not_read_the_real_data_dir(self):
+        # Regression: the "cli" check built its config with _config(Namespace()),
+        # which falls back to the real "data" directory. On a fresh checkout
+        # data/ is gitignored and unsynced (pull-data runs after selfcheck in
+        # the audit order), so with_live_rate() found no fx.json and printed a
+        # live-looking "FX WARNING: no GBPUSD rate from the bridge in
+        # data/fx.json" to stderr -- naming the real bridge path, on every
+        # fresh container, for a check that only exists to prove _config()
+        # doesn't drop its defaults. Same shape as the progress.py and
+        # dashboard.py drifts fixed 2026-09-26: unsynced read as dead.
+        from gold_trader.selfcheck import Report, check_money
+
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                buf = io.StringIO()
+                with mock.patch("sys.stderr", buf):
+                    report = Report()
+                    check_money(report)
+            finally:
+                os.chdir(cwd)
+        self.assertEqual(report.failures, [])
+        self.assertNotIn("FX WARNING", buf.getvalue(),
+                          "the cli check leaked a warning about the cwd's data dir")
 
 
 class ConfigCoherence(unittest.TestCase):
