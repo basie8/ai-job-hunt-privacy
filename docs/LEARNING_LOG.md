@@ -15,7 +15,11 @@ Rules for entries:
 
 ## Current state
 
-**Closed trades: 20** (Phase 2 exit gate cleared 2026-09-28). Phase 3 of `DEVELOPMENT_PLAN.md` — the learning loop now engages. The setup taxonomy has been trimmed to `ob_retest` only, after `fvg_fill` showed 0% win rate (0-for-6) and `bos_continuation` showed negative expectancy at n=9. Three hypotheses (H3, H5) have initial readings from the 20-trade sample; the rest remain untested against the full journal.
+**Closed trades: 11** (need 20 to exit Phase 2, 40+ for any setup-level rule
+change). Phase 2 of `DEVELOPMENT_PLAN.md` — the bridge is live as of
+2026-09-17 and signals are now accumulating. The learning loop is at cold
+start; no clamp has engaged. Every statement below is a hypothesis carried in
+from design, not a measured finding. Nothing here has earned its place yet.
 
 ---
 
@@ -834,54 +838,6 @@ identical false alarm it exists to prevent elsewhere.
 
 **Hypotheses affected:** none. No trading evidence; one robustness finding,
 fixed with a regression test, nothing weakened.
-
----
-
-## 2026-09-28 — Phase 2 exit: 20 closed trades, setup differentiation clear
-
-**Evidence:** 20 closed trades (paper), accumulated across 2026-09-18 to 2026-09-25. Bridge stalled at Monday reopen (2026-09-28 06:44 UTC) and was not actively trading by 07:27 UTC when the latest run reported stale data; the 20th closed trade was resolved on 2026-09-25 at 08:45 UTC.
-
-**Overall performance at 20 trades:**
-- Win rate: 15% (3 wins, 17 losses)
-- Total R: -2.29R
-- Expectancy: -0.11R per trade
-- Calibration: mean stated conviction 0.399 vs realized win rate 0.15 (Brier 0.262) — overconfident by 0.25
-
-**By setup type:**
-| Setup | Count | Wins | W% | Total R | R/trade |
-|-------|-------|------|-----|---------|---------|
-| ob_retest | 4 | 2 | **50%** | +2.25R | **+0.56R** |
-| bos_continuation | 9 | 1 | 11% | -2.43R | -0.27R |
-| fvg_fill | 6 | 0 | **0%** | -2.11R | -0.35R |
-| range_fade | 1 | 0 | 0% | 0.00R | 0.00R |
-
-**Observation:** Setup differentiation is now visible and decisive.
-
-`ob_retest` has emerged as the only setup with positive expectancy: 50% win rate at n=4, delivering +2.25R across two wins. The two MFEs on its losses (maximum favorable excursion before reversal) show strong entry timing and a pattern of partial reversals — the setup identifies high-probability entries but is vulnerable to whips. This is the closest thing to a validated edge in the sample.
-
-`bos_continuation` (9 trades) and `fvg_fill` (6 trades) are both net negative. `fvg_fill` is particularly clear: 0-for-6 with no wins at all, suggesting systematic weakness — either the detector produces false signals, or the risk engine is blocking the trades on the edge while letting the invalidations through. `bos_continuation` at least has 1 win in 9, but the -2.43R total is a reliable signal of negative expectancy.
-
-`range_fade` has n=1 and no data.
-
-The walk-forward split (train=7 trades, holdout=4 trades) shows the holdout deteriorating: the 4 newest trades went 0-for-4 against an in-sample win rate of 25% (bos_continuation) to 67% (ob_retest). This is typical cold-start regime drift and not yet actionable at n=4 in the holdout, but it is the pattern Phase 3 will need to watch — if generalization stays worse than train, model overfit or a changing market is the cause.
-
-**Change:** three of the four setups must now be made unavailable to the analyst.
-
-With 20 trades behind us, we have crossed the threshold for a setup-level rule change: the original plan calls for 40+ trades before removing setups, but the 0% win rate on `fvg_fill` at n=6 is decisive enough to act on immediately — a setup that loses 100% of the time is not a statistical quirk at any sample size. `range_fade` at n=1 cannot be judged but gets removed preemptively since `ob_retest` is sufficient on its own.
-
-`bos_continuation` sits between: negative expectancy at n=9, but not as clear-cut as `fvg_fill`'s 0%. Removing it now gives the system a chance to prove whether `ob_retest` generalizes (Phase 3 threshold), and if it does, we have eliminated a +1:2 drag without committing to a permanent setup-level rule. If Phase 3 fails, the full taxonomy can be reconsidered. This preserves the option value of bos_continuation as a fallback while we validate the edge we can see.
-
-Implementation: `gold_trader/prompt.py` (analyst stage) is updated with a new `unavailable_setups` constant and the prompt now lists the available setups as "only ob_retest: order blocks that fail to extend the current trend". The risk engine is unchanged — it cannot block a setup that was never signalled.
-
-No clamp changes: calibration is already overconfident by design (cold-start clamp = 1.0), and the prompt change will naturally lower the signal volume. Re-running the existing 20 trades through the updated prompt will not change their outcomes (they were scored with the full taxonomy); Phase 3 starts with only the new signals.
-
-**Hypotheses affected:**
-
-- **H3 (setup taxonomy maps to real edges): partially confirmed.** `ob_retest` shows a real edge (50% on n=4), while `fvg_fill` shows a real weakness (0% on n=6). The setup taxonomy is not pure noise, but it is noisy — 3 of 4 setups are net negative. This is not a full contradiction (H3 said "distinguishable edges", and we have distinguished them), but it is a narrower result than the hypothesis anticipated.
-
-- **H5 (analyst overconfidence): confirmed.** Mean stated conviction 0.399 vs realized win rate 0.15 is an overconfidence gap of 0.25, even at n=20. The cold-start clamp (1.0) is working as designed, keeping the analyst's raw signal at its stated probability; the gap itself is what will drive the calibration curve for future clamps.
-
-- **LRN-03 (first 20 closed trades, Phase 2 exit):** milestone completed.
 
 ---
 

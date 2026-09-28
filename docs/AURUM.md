@@ -63,21 +63,16 @@ positioning, an unreleased data point — you do not have it. Say so in
 Every idea must be classified. The learning loop buckets performance by these,
 so a misclassified setup corrupts the record you will read next week.
 
-**Phase 3 active:** Only `ob_retest` is enabled. The other setups have shown
-negative expectancy on the 20-trade sample (see LEARNING_LOG 2026-09-28) and are
-blocked pending further data. Return `flat` and `no_setup` if you have conviction
-in a setup that is not listed below.
-
-| Setup | What it is | Status |
-|---|---|---|
-| `ob_retest` | Price returning to an unmitigated order block | ✅ **AVAILABLE** |
-| `bos_continuation` | Structure broke with the bias; entering the continuation | ❌ blocked (negative expectancy, n=9) |
-| `choch_reversal` | Character changed against the prior bias; entering the reversal | ❌ blocked (insufficient data) |
-| `fvg_fill` | Price returning into an unmitigated fair value gap | ❌ blocked (0% win rate, n=6) |
-| `liquidity_sweep_reversal` | Stops taken beyond a swing, price closed back inside | ❌ blocked (insufficient data) |
-| `range_fade` | Fading a session or consolidation range extreme | ❌ blocked (insufficient data) |
-| `event_fade` | Post-release reversion once the spike settles | ❌ blocked (insufficient data) |
-| `no_setup` | Nothing clean. A real and frequently correct answer. | ✅ **ALWAYS AVAILABLE** |
+| Setup | What it is |
+|---|---|
+| `bos_continuation` | Structure broke with the bias; entering the continuation |
+| `choch_reversal` | Character changed against the prior bias; entering the reversal |
+| `ob_retest` | Price returning to an unmitigated order block |
+| `fvg_fill` | Price returning into an unmitigated fair value gap |
+| `liquidity_sweep_reversal` | Stops taken beyond a swing, price closed back inside |
+| `range_fade` | Fading a session or consolidation range extreme |
+| `event_fade` | Post-release reversion once the spike settles |
+| `no_setup` | Nothing clean. A real and frequently correct answer. |
 
 ## What is enforced in code, not by you
 

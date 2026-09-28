@@ -58,9 +58,9 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 |----|------|--------|--------|-------|
 | LRN-01 | Journal with feature snapshots | done | `file:gold_trader/journal.py` | Pessimistic same-bar resolution |
 | LRN-02 | Calibration and per-setup clamps | done | `file:gold_trader/learning.py` | Can only reduce risk, never increase |
-| LRN-03 | First 20 closed trades | done | `journal:20` | Cleared 2026-09-28; Phase 2 exit gate. Setup taxonomy pruned to ob_retest only. |
-| LRN-04 | Learning state leaves warm-up | in_progress | `learning:active` | Clamps now engaged; expect calibration and per-setup multipliers to change |
-| LRN-05 | Setup taxonomy validated against real outcomes | in_progress | `journal:40` | Some setups proved undetectable (fvg_fill 0%, bos_continuation negative); ob_retest is sole remaining setup pending 40-trade validation |
+| LRN-03 | First 20 closed trades | blocked | `journal:20` | Unblocked by DAT-04; now accumulating |
+| LRN-04 | Learning state leaves warm-up | blocked | `learning:active` | Clamps stay inert until LRN-03 |
+| LRN-05 | Setup taxonomy validated against real outcomes | outstanding | `journal:40` | Some setups may prove undetectable or useless |
 
 ## Operations
 
@@ -94,17 +94,12 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 ## The critical path
 
 **DAT-04 cleared 2026-09-17** — the bridge is delivering live candles and SMC-03
-is validated.
-
-**LRN-03 cleared 2026-09-28** — the journal has 20 closed trades and Phase 2 exit
-gate is verified. The learning clamps are now engaged (LRN-04); calibration and
-per-setup size multipliers will begin to change on the next few signals as conviction
-and empirical win rates diverge. Setup taxonomy has been pruned to `ob_retest` only
-(fvg_fill removed for 0% win rate, bos_continuation and range_fade removed for
-negative expectancy). The remaining blocker is DAT-04's live freshness — the bridge
-stalled at Monday reopen on 2026-09-28 and has not recovered; once the bridge
-resumes, signals will accumulate toward the 40-trade floor for LRN-05 (full setup
-validation).
+is validated. Everything now blocked traces to **LRN-03**: the journal has 11
+closed trades (as of 2026-09-27; unchanged since 2026-09-25 — the weekend
+closure) and needs 9 more before the 20-trade floor
+unblocks LRN-04 and the learning clamps engage. That is accumulation, not a
+setup task — nothing to configure, just signals running and resolving over the
+next several weeks.
 
 DAT-04 still re-verifies live bridge freshness on every audit (`data:180`), so
 it can read STALE CLAIM again if the bridge itself goes down or to sleep — see
