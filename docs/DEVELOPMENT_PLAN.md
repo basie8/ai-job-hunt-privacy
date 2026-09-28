@@ -5,14 +5,14 @@ organised into phases, each with an **entry gate**, a **defined scope**, and an
 **exit gate that is machine-checkable**. A phase does not end because it feels
 finished; it ends when its gate verifies.
 
-Current position: **Phase 2, cold start.** Phase 1 cleared 2026-09-17.
+Current position: **Phase 3, learning active.** Phase 2 cleared 2026-09-28.
 
 | Phase | Name | Gate to exit | State |
 |---|---|---|---|
 | 0 | Foundation | `selfcheck` green, suites pass | ✅ complete |
 | 1 | First data | ≥1 candle from the live bridge | ✅ complete |
-| 2 | Cold start | 20 closed trades journalled | 🔴 active |
-| 3 | Learning active | Clamps engaged, calibration measured | ⏸ waiting |
+| 2 | Cold start | 20 closed trades journalled | ✅ complete |
+| 3 | Learning active | Clamps engaged, calibration measured | 🔴 active |
 | 4 | Validation | 60 trades, H1–H6 tested | ⏸ waiting |
 | 5 | Refinement | Backtest + hillclimb against a real sample | ⏸ waiting |
 
