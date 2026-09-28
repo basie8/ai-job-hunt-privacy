@@ -71,3 +71,4 @@
 {"detail": "Analyst bearish across TFs; risk manager rejected entry geometry (stop buried in unmitigated M15 FVG, stop-first P>target-first at 1.67R).", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-28T15:29:11+00:00"}
 {"detail": "SELL XAUUSD 4172.0 stop 4195.5 target 4124.0, fvg_fill setup, conviction clamped 0.58->0.42", "outcome": "signal", "routine": "signal", "ts": "2026-09-28T17:27:27+00:00"}
 {"detail": "selfcheck 45/45, 0 stale claims, no run gaps, bridge live (m15 13min), 13 closed trades (below 20 floor), no clamps", "outcome": "no_trade", "routine": "audit", "ts": "2026-09-28T18:43:11+00:00"}
+{"detail": "Analyst short approved by risk mgr but SIGNAL_BUDGET hard block (4/4 issued today); nothing resolved; 2 orders resting", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-28T19:28:29+00:00"}
