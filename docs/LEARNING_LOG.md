@@ -841,6 +841,31 @@ fixed with a regression test, nothing weakened.
 
 ---
 
+## 2026-09-29 — The audit never went to once a day
+
+**Evidence:** the live audit Routine's cron is `41 6,18 * * *`, and
+`heartbeat.jsonl` holds an 18:4x audit beat on every day from 2026-09-25 to
+2026-09-29. No trading evidence; this is doc and detector drift.
+
+Since 2026-09-22 the repo has said the audit was halved to 06:41 only:
+`AUDIT_SCHEDULE`, the selfcheck's pinned cron, `RUNTIME.md`, the roadmap and
+the heartbeat tests all agreed on it, and so the selfcheck passed. The live
+Routine kept both firings. The coherence check compares code against
+`RUNTIME.md`, not against the Routine itself, which the repo cannot read, so
+two copies of the same wrong fact verified each other.
+
+The cost was a blind spot, not a false alarm: extra beats are simply
+absorbed, so the run detector would never have reported a missed 18:41 audit.
+
+**Change:** `AUDIT_SCHEDULE` now expects 06:41 and 18:41; the selfcheck pin,
+`RUNTIME.md`, `ROADMAP.md` (OPS-02), `DEVELOPMENT_PLAN.md` and the heartbeat
+tests updated to match. `gold_trader runs --hours 48` reads 4 of 4 audits.
+The dashboard's 48h staleness threshold is unchanged.
+
+**Hypotheses affected:** none.
+
+---
+
 ## Template for future entries
 
 ```markdown

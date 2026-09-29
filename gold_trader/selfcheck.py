@@ -489,7 +489,7 @@ def check_run_health(report: Report, repo: str) -> None:
         # RUNTIME.md is the reference both sides are checked against.
         with open(os.path.join(repo, "docs/RUNTIME.md"), encoding="utf-8") as fh:
             runtime = fh.read()
-        expected = {"signal": "23 7-19/2 * * 1-5", "audit": "41 6 * * *"}
+        expected = {"signal": "23 7-19/2 * * 1-5", "audit": "41 6,18 * * *"}
         for name, cron in expected.items():
             assert cron in runtime, f"{name} cron {cron!r} is not documented in RUNTIME.md"
             minute, hours, _, _, _ = cron.split()

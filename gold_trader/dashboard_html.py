@@ -724,11 +724,10 @@ def render(payload: Dict[str, Any]) -> str:
   var detail = counts.critical + " critical, " + counts.warning + " warning";
 
   // Staleness outranks the baked-in health: old data cannot vouch for now.
-  // 48h, widened from 26h on 2026-09-22 when the audit went from twice daily
-  // to daily. The audit is the only thing that republishes at the weekend, so
-  // 26h left about two hours of margin and one late run turned the page red.
-  // The cost is real and deliberate: a single missed daily audit no longer
-  // shows here. `gold_trader runs` is what catches that, and it is unchanged.
+  // 48h, widened from 26h on 2026-09-22. The audit (06:41 and 18:41 UTC) is
+  // the only thing that republishes at the weekend, so 48h tolerates a run of
+  // missed audits before the page turns red. A single missed audit does not
+  // show here; `gold_trader runs` is what catches that.
   var STALE_MIN = 48 * 60;
   if (!isFinite(ageMin) || ageMin > STALE_MIN) {{
     document.getElementById("ribbon").className = "ribbon critical";

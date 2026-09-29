@@ -87,11 +87,11 @@ class Schedule:
 #: alarm a day, which is how a real alert gets learned into background noise.
 SIGNAL_SCHEDULE = Schedule(minute=23, hours=tuple(range(7, 20, 2)))
 
-#: The audit Routine: 06:41 UTC, every day. It ran twice daily until
-#: 2026-09-22; the second firing was dropped because an audit reports on a
-#: record that moves at the speed of the signal runs, and twice a day produced
-#: two near-identical reports more often than it caught anything new.
-AUDIT_SCHEDULE = Schedule(minute=41, hours=(6,), weekdays=(0, 1, 2, 3, 4, 5, 6))
+#: The audit Routine: 06:41 and 18:41 UTC, every day. The repo recorded it as
+#: once daily from 2026-09-22, but the live Routine kept both firings; the
+#: detector silently absorbed the evening runs and would never have noticed
+#: one going missing. Corrected 2026-09-29 to match the Routine's cron.
+AUDIT_SCHEDULE = Schedule(minute=41, hours=(6, 18), weekdays=(0, 1, 2, 3, 4, 5, 6))
 
 SCHEDULES: Dict[str, Schedule] = {"signal": SIGNAL_SCHEDULE, "audit": AUDIT_SCHEDULE}
 
