@@ -866,6 +866,33 @@ The dashboard's 48h staleness threshold is unchanged.
 
 ---
 
+## 2026-09-29 — The clamps start at 29 closed trades, not 20
+
+**Evidence:** 16 closed trades. `learn()` fits calibration and setup statistics
+on the oldest 70% of closed trades (`walk_forward_split`), and every floor is
+checked against that portion. The training slice first reaches 20 at 29 closed.
+
+The plan said Phase 3 switches the clamps on at 20 closed trades. The code is
+stricter: at 20 closed, the learning state reads `active` and LRN-03/LRN-04
+verify, but calibration is measured on 14 trades and every multiplier stays at
+1.00. Conviction shrinkage starts at 29 closed. A per-setup size cut needs
+about 29 trades of that one setup, and a block about 58.
+
+Also traced while checking: the conviction cuts noted in recent signal runs
+(0.60 to 0.48, 0.58 to 0.42 and others) come from the Risk Manager stage, not
+the learning clamp, which was 1.00 every time. The run notes mislabel them.
+It does show the lessons block working: the Risk Manager is acting on the
+"overconfident by 0.13" line it is shown.
+
+**Change:** none to code. The walk-forward hold-out is the guard against
+fitting clamps to the trades that judge them, so it stays. `DEVELOPMENT_PLAN.md`
+Phase 3, `ROADMAP.md` (LRN-04 and the critical path) and the `learning.py`
+docstring now state the real thresholds.
+
+**Hypotheses affected:** none.
+
+---
+
 ## Template for future entries
 
 ```markdown

@@ -59,7 +59,7 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 | LRN-01 | Journal with feature snapshots | done | `file:gold_trader/journal.py` | Pessimistic same-bar resolution |
 | LRN-02 | Calibration and per-setup clamps | done | `file:gold_trader/learning.py` | Can only reduce risk, never increase |
 | LRN-03 | First 20 closed trades | blocked | `journal:20` | Unblocked by DAT-04; now accumulating |
-| LRN-04 | Learning state leaves warm-up | blocked | `learning:active` | Clamps stay inert until LRN-03 |
+| LRN-04 | Learning state leaves warm-up | blocked | `learning:active` | Flips with LRN-03 at 20 closed, but that does not engage a clamp: clamps are fitted on the oldest 70% of trades, so conviction shrinkage starts at 29 closed, per-setup size cuts at about 29 trades of one setup, blocks at about 58. See DEVELOPMENT_PLAN Phase 3 |
 | LRN-05 | Setup taxonomy validated against real outcomes | outstanding | `journal:40` | Some setups may prove undetectable or useless |
 
 ## Operations
@@ -94,12 +94,11 @@ Statuses: `done` · `in_progress` · `outstanding` · `blocked`
 ## The critical path
 
 **DAT-04 cleared 2026-09-17** — the bridge is delivering live candles and SMC-03
-is validated. Everything now blocked traces to **LRN-03**: the journal has 11
-closed trades (as of 2026-09-27; unchanged since 2026-09-25 — the weekend
-closure) and needs 9 more before the 20-trade floor
-unblocks LRN-04 and the learning clamps engage. That is accumulation, not a
-setup task — nothing to configure, just signals running and resolving over the
-next several weeks.
+is validated. Everything now blocked traces to **LRN-03**, the 20-trade floor
+(`gold_trader learn` gives the live count). Reaching it unblocks LRN-04 and
+Phase 3, but the first clamp only engages at 29 closed trades, because clamps
+are fitted on the oldest 70% of the journal. That is accumulation, not a setup
+task — nothing to configure, just signals running and resolving.
 
 DAT-04 still re-verifies live bridge freshness on every audit (`data:180`), so
 it can read STALE CLAIM again if the bridge itself goes down or to sleep — see

@@ -16,7 +16,9 @@ Three guards keep this from becoming curve-fitting:
 * **Learning can only reduce risk.** Every size multiplier is capped at 1.0.
   A good run never increases position size; only the base risk setting does.
 * **Minimum samples.** Nothing adjusts until a setup has ``min_samples`` closed
-  trades, and a setup is only blocked outright on twice that.
+  trades, and a setup is only blocked outright on twice that. The floors count
+  the walk-forward training portion only, so conviction shrinkage needs 29
+  closed trades overall, not 20.
 * **Walk-forward.** Statistics used for gating are fit on the older portion of
   the journal and reported against the newer one, so the numbers driving the
   clamps are not the same trades that produced them.

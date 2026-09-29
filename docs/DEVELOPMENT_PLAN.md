@@ -99,8 +99,22 @@ it. If I propose a change with n<20, push back.
 
 **Entry gate:** `learning:active` (20 closed trades).
 
-**Scope:** the clamps switch on. Conviction shrinkage from measured calibration,
-per-setup size multipliers, the first setup blocks if any setup has earned one.
+**Scope:** the clamps become eligible to switch on. They do not all engage at
+the entry gate, because they are fitted walk-forward: only the oldest 70% of
+closed trades count toward each sample floor, and the newest 30% are held out
+to check them. In practice:
+
+| Clamp | Floor (training trades) | Closed trades needed |
+|---|---|---|
+| Conviction shrinkage from calibration | 20 overall | **29 overall** |
+| Per-setup size multiplier | 20 of that setup | about **29 of that setup** |
+| Per-setup block (expectancy below -0.20R) | 40 of that setup | about **58 of that setup** |
+
+So at 20 closed trades the learning state reads `active` but every multiplier
+is still 1.00. The first real adjustment is conviction shrinkage at 29 closed.
+Per-setup cuts and blocks arrive much later, one setup at a time. This is
+deliberate: the held-out trades are what stops the clamps being fitted to the
+same trades that judge them.
 
 **Mine:**
 - First real calibration reading. H5 predicts overconfidence; this tests it.
@@ -108,8 +122,9 @@ per-setup size multipliers, the first setup blocks if any setup has earned one.
   expectancy, the taxonomy is not carving reality and needs rethinking.
 - First `LEARNING_LOG.md` entry backed by evidence rather than design intent.
 
-**Exit gate:** clamps demonstrably engaged, calibration curve recorded, at least
-one hypothesis confirmed or contradicted in the learning log.
+**Exit gate:** clamps demonstrably engaged (at the earliest, conviction shrinkage
+at 29 closed trades), calibration curve recorded, at least one hypothesis
+confirmed or contradicted in the learning log.
 
 ## Phase 4 — Validation ⏸
 
