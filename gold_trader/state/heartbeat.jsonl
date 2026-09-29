@@ -80,3 +80,4 @@
 {"detail": "Paper SELL XAUUSD 4185.0 stop 4200.5 target 4153.5, 8.35oz, $129.42 risk; also resolved 1 loss (-1R, liquidity_sweep_reversal) + 2 cancelled", "outcome": "signal", "routine": "signal", "ts": "2026-09-29T15:32:33+00:00"}
 {"detail": "paper SHORT XAUUSD 4147.0 stop 4157.8 target 4128.5, 11.98oz, risk $129.41, RR 1.71", "outcome": "signal", "routine": "signal", "ts": "2026-09-29T17:28:05+00:00"}
 {"detail": "selfcheck 45/45, roadmap clean, runs 10/10, bridge current (13min); 14 closed, -0.137R, below 20 floor", "outcome": "no_trade", "routine": "audit", "ts": "2026-09-29T18:42:49+00:00"}
+{"detail": "no new signal (SIGNAL_BUDGET 4/day); resolved a8121aff7438 fvg_fill expired +1.01R, 4b0941473093 ob_retest lost -1.00R", "outcome": "resolved", "routine": "signal", "ts": "2026-09-29T19:36:46+00:00"}
