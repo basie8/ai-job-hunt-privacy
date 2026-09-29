@@ -78,3 +78,4 @@
 {"detail": "Risk engine hard block MAX_WORKING_ORDERS (4/4); short 4178 not taken; nothing resolved", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-29T11:27:44+00:00"}
 {"detail": "risk engine hard block MAX_WORKING_ORDERS (4/4); analyst short 4180 not taken", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-29T13:29:08+00:00"}
 {"detail": "Paper SELL XAUUSD 4185.0 stop 4200.5 target 4153.5, 8.35oz, $129.42 risk; also resolved 1 loss (-1R, liquidity_sweep_reversal) + 2 cancelled", "outcome": "signal", "routine": "signal", "ts": "2026-09-29T15:32:33+00:00"}
+{"detail": "paper SHORT XAUUSD 4147.0 stop 4157.8 target 4128.5, 11.98oz, risk $129.41, RR 1.71", "outcome": "signal", "routine": "signal", "ts": "2026-09-29T17:28:05+00:00"}
