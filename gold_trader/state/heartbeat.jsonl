@@ -84,3 +84,4 @@
 {"detail": "selfcheck 45/45, 0 stale claims, no run gaps, bridge fresh (m15 13min), 16 closed trades unchanged, dashboard republished", "outcome": "no_trade", "routine": "audit", "ts": "2026-09-30T06:43:21+00:00"}
 {"detail": "Analyst flat; PCE blackout pre-print; risk engine NO_SETUP; 1 paper position still live", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-30T07:25:56+00:00"}
 {"detail": "Paper position 14b7b39d31fb (fvg_fill short) closed lost -1.00R stop_hit; new signal flat (pre-PCE, no setup). Journal 17 closed, 29% win, -0.171R expectancy", "outcome": "resolved", "routine": "signal", "ts": "2026-09-30T09:26:14+00:00"}
+{"detail": "Analyst flat (PCE event risk, unconfirmed structure); NO_SETUP hard block; no open positions to resolve", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-30T11:25:46+00:00"}
