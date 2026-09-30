@@ -88,3 +88,4 @@
 {"detail": "Paper BUY XAUUSD limit 4193.50 stop 4180.40 target 4215.00, 9.84oz, $128.96 risk, RR 1.64", "outcome": "signal", "routine": "signal", "ts": "2026-09-30T13:27:42+00:00"}
 {"detail": "ob_retest 990b67c6a135 lost -1.00R (stop_hit); new signal blocked by DAILY_LOSS_LIMIT (-2.00R)", "outcome": "resolved", "routine": "signal", "ts": "2026-09-30T15:26:50+00:00"}
 {"detail": "risk manager rejected bos_continuation short: R:R below 1.50 floor", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-30T17:27:09+00:00"}
+{"detail": "selfcheck 45/45, 0 stale claims, no run gaps, bridge fresh (13min), 18 closed trades (2 short of 20), dashboard republished", "outcome": "no_trade", "routine": "audit", "ts": "2026-09-30T18:43:30+00:00"}
