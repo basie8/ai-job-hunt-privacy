@@ -86,3 +86,4 @@
 {"detail": "Paper position 14b7b39d31fb (fvg_fill short) closed lost -1.00R stop_hit; new signal flat (pre-PCE, no setup). Journal 17 closed, 29% win, -0.171R expectancy", "outcome": "resolved", "routine": "signal", "ts": "2026-09-30T09:26:14+00:00"}
 {"detail": "Analyst flat (PCE event risk, unconfirmed structure); NO_SETUP hard block; no open positions to resolve", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-30T11:25:46+00:00"}
 {"detail": "Paper BUY XAUUSD limit 4193.50 stop 4180.40 target 4215.00, 9.84oz, $128.96 risk, RR 1.64", "outcome": "signal", "routine": "signal", "ts": "2026-09-30T13:27:42+00:00"}
+{"detail": "ob_retest 990b67c6a135 lost -1.00R (stop_hit); new signal blocked by DAILY_LOSS_LIMIT (-2.00R)", "outcome": "resolved", "routine": "signal", "ts": "2026-09-30T15:26:50+00:00"}
