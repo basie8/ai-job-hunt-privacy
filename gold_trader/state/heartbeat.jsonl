@@ -94,3 +94,4 @@
 {"detail": "paper BUY XAUUSD limit 4167.50 stop 4154.50 target 4188.00 ob_retest, 9.8oz, $127 risk, RR 1.58 (an earlier run in same session was risk-rejected)", "outcome": "signal", "routine": "signal", "ts": "2026-10-01T07:30:49+00:00"}
 {"detail": "analyst flat (NO_SETUP); resolve closed 1 paper position: ob_retest lost -1.00R (stop_hit)", "outcome": "no_trade", "routine": "signal", "ts": "2026-10-01T09:26:17+00:00"}
 {"detail": "Analyst flat (NO_SETUP): mid Asian range, conflicted structure; nothing resolved", "outcome": "no_trade", "routine": "signal", "ts": "2026-10-01T11:25:51+00:00"}
+{"detail": "Analyst flat (NFP T+23h, TF conflict); engine NO_SETUP; nothing resolved", "outcome": "no_trade", "routine": "signal", "ts": "2026-10-01T13:27:10+00:00"}
