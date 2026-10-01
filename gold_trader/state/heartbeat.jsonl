@@ -92,3 +92,4 @@
 {"detail": "hard block DAILY_LOSS_LIMIT (-2.0R realised today); short bos_continuation not actioned; nothing resolved", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-30T19:36:42+00:00"}
 {"detail": "selfcheck 45/45, 0 stale claims, no run gaps (2/2 audit, 7/7 signal), bridge fresh (12min), 18 closed trades (2 short of 20), unchanged since last audit; dashboard republished", "outcome": "no_trade", "routine": "audit", "ts": "2026-10-01T06:42:35+00:00"}
 {"detail": "paper BUY XAUUSD limit 4167.50 stop 4154.50 target 4188.00 ob_retest, 9.8oz, $127 risk, RR 1.58 (an earlier run in same session was risk-rejected)", "outcome": "signal", "routine": "signal", "ts": "2026-10-01T07:30:49+00:00"}
+{"detail": "analyst flat (NO_SETUP); resolve closed 1 paper position: ob_retest lost -1.00R (stop_hit)", "outcome": "no_trade", "routine": "signal", "ts": "2026-10-01T09:26:17+00:00"}
