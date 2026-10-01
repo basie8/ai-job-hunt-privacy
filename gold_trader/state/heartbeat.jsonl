@@ -90,3 +90,4 @@
 {"detail": "risk manager rejected bos_continuation short: R:R below 1.50 floor", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-30T17:27:09+00:00"}
 {"detail": "selfcheck 45/45, 0 stale claims, no run gaps, bridge fresh (13min), 18 closed trades (2 short of 20), dashboard republished", "outcome": "no_trade", "routine": "audit", "ts": "2026-09-30T18:43:30+00:00"}
 {"detail": "hard block DAILY_LOSS_LIMIT (-2.0R realised today); short bos_continuation not actioned; nothing resolved", "outcome": "no_trade", "routine": "signal", "ts": "2026-09-30T19:36:42+00:00"}
+{"detail": "selfcheck 45/45, 0 stale claims, no run gaps (2/2 audit, 7/7 signal), bridge fresh (12min), 18 closed trades (2 short of 20), unchanged since last audit; dashboard republished", "outcome": "no_trade", "routine": "audit", "ts": "2026-10-01T06:42:35+00:00"}
