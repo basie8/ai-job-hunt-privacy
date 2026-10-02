@@ -104,3 +104,4 @@
 {"detail": "analyst stage failed: Anthropic API 400 credit balance too low (claude-opus-5); signal exit 6", "outcome": "error", "routine": "signal", "ts": "2026-10-02T09:24:16+00:00"}
 {"detail": "analyst stage failed: Anthropic API 400 credit balance too low (claude-opus-5); signal exit 6", "outcome": "error", "routine": "signal", "ts": "2026-10-02T11:24:16+00:00"}
 {"detail": "analyst stage failed: Anthropic API 400 - credit balance too low (claude-opus-5); no signal produced", "outcome": "error", "routine": "signal", "ts": "2026-10-02T13:25:51+00:00"}
+{"detail": "analyst stage failed: 400 invalid_request_error - Anthropic credit balance too low (claude-opus-5), req_011CfdeDFKsHp1e8zKnT3ANV", "outcome": "error", "routine": "signal", "ts": "2026-10-02T15:25:06+00:00"}
