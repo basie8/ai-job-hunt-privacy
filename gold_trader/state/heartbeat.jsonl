@@ -108,3 +108,4 @@
 {"detail": "signal exit 6: analyst stage failed, Anthropic API 400 credit balance too low (claude-opus-5), req_011CfdoPUrnTStPrcFrpWZPs", "outcome": "error", "routine": "signal", "ts": "2026-10-02T17:25:13+00:00"}
 {"detail": "All 8 signal runs since 2026-10-01 17:25Z failed: Anthropic API 400 credit balance too low (exit 6); selfcheck 45/45, progress 0 stale, 19 closed, bridge fresh (12min)", "outcome": "error", "routine": "audit", "ts": "2026-10-02T18:42:43+00:00"}
 {"detail": "signal stage failed: analyst bad request to claude-opus-5: 400 credit balance too low (Anthropic API billing); exit 6", "outcome": "error", "routine": "signal", "ts": "2026-10-02T19:24:30+00:00"}
+{"detail": "9 signal runs (2026-10-02 07:23Z-19:23Z, 7 runs plus 2 prior) all failed: Anthropic API 400 credit balance too low (exit 6); selfcheck 45/45, progress 0 stale, 19 closed, bridge market closed (weekend)", "outcome": "error", "routine": "audit", "ts": "2026-10-03T06:43:45+00:00"}
