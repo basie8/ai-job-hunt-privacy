@@ -1,0 +1,67 @@
+[
+  {
+    "symbol": "TSM",
+    "asset_class": "equity",
+    "sector": "technology",
+    "side": "buy",
+    "conviction": 0.82,
+    "target_weight_pct": 3.5,
+    "horizon_days": 120,
+    "thesis": "Advanced packaging demand is running ahead of consensus and the guide confirms utilisation is not the constraint.",
+    "catalysts": ["Q4 guide", "capex update"],
+    "key_risks": ["China escalation", "customer inventory digestion"],
+    "invalidation": "N3 utilisation drops below 80% or capex guidance is cut."
+  },
+  {
+    "symbol": "MSFT",
+    "asset_class": "equity",
+    "sector": "technology",
+    "side": "buy",
+    "conviction": 0.68,
+    "target_weight_pct": 2.5,
+    "horizon_days": 180,
+    "thesis": "Same semis capex cycle read-through via Azure capacity additions.",
+    "catalysts": ["Q2 earnings"],
+    "key_risks": ["Correlated with the TSM position"],
+    "invalidation": "Azure growth decelerates two quarters running."
+  },
+  {
+    "symbol": "UNH",
+    "asset_class": "equity",
+    "sector": "healthcare",
+    "side": "sell",
+    "conviction": 0.71,
+    "target_weight_pct": 2.2,
+    "horizon_days": 60,
+    "thesis": "Regulatory review removes the near-term catalyst and flows are persistently negative.",
+    "catalysts": ["State review outcome"],
+    "key_risks": ["Review closes without action"],
+    "invalidation": "Both states close their reviews with no remedy."
+  },
+  {
+    "symbol": "IWM",
+    "asset_class": "etf",
+    "sector": "broad_equity",
+    "side": "cover",
+    "conviction": 0.6,
+    "target_weight_pct": 1.5,
+    "horizon_days": 30,
+    "thesis": "CTA positioning in the 12th percentile makes the short crowded into a disinflation print.",
+    "catalysts": ["Next CPI"],
+    "key_risks": ["Momentum persists"],
+    "invalidation": "Positioning normalises above the 40th percentile without a rally."
+  },
+  {
+    "symbol": "XLE",
+    "asset_class": "etf",
+    "sector": "energy",
+    "side": "short",
+    "conviction": 0.41,
+    "target_weight_pct": 2.0,
+    "horizon_days": 90,
+    "thesis": "HY energy spread widening usually leads equity weakness, but the signal is one week old.",
+    "catalysts": ["OPEC meeting"],
+    "key_risks": ["Supply shock"],
+    "invalidation": "HY energy spreads retrace to the prior range."
+  }
+]
